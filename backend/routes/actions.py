@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from backend.db.mongo import get_db
 from backend.services.audit_service import log_audit
+from backend.services.change_applier import create_version_for_action, get_content_versions
 from bson.objectid import ObjectId
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
@@ -41,7 +42,25 @@ async def approve_action(action_id: str, req: ApproveRequest):
         item.get("job_id"),
         {"action_id": action_id, "content_type": item.get("content_type"), "impact": item.get("impact_on_ranking")},
     )
-    return {"status": "ok", "action_id": action_id, "new_status": req.status}
+
+    version = None
+    try:
+        version = await create_version_for_action(item, req.status)
+    except Exception as e:
+        from backend.logging_setup import get_logger
+        get_logger("actions").warning("Change application failed action=%s: %s", action_id, e)
+
+    return {
+        "status": "ok",
+        "action_id": action_id,
+        "new_status": req.status,
+        "version": version,
+    }
+
+
+@router.get("/{job_id}/versions")
+async def list_content_versions(job_id: str):
+    return await get_content_versions(job_id)
 
 
 @router.get("/{job_id}/report")

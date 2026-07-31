@@ -61,6 +61,12 @@ async def generate_report(job_id: str):
     except Exception:
         backlink_sources = {"backlinks": [], "total": 0, "referring_domains": 0}
 
+    try:
+        from backend.services.change_applier import get_content_versions
+        content_versions = await get_content_versions(job_id, limit=200)
+    except Exception:
+        content_versions = {"versions": [], "total": 0, "applied": 0}
+
     summary = job.get("summary", {})
     report = {
         "report_title": f"SEO Analysis Report - {job.get('url', '')}",
@@ -75,6 +81,7 @@ async def generate_report(job_id: str):
         "page_type_breakdown": page_type_breakdown,
         "user_flows": top_flows,
         "backlink_sources": backlink_sources,
+        "content_versions": content_versions,
         "seo_action_items": action_items_list,
         "seo_insights": insights,
     }
@@ -196,6 +203,34 @@ th {{ background: #f9fafb; font-weight: 600; }}
 <p><strong>Improvements:</strong> {', '.join(a.get('improvement_suggestions', []))}</p>
 <p><strong>Status:</strong> {a.get('status', 'pending')}</p>
 </div>"""
+
+    try:
+        from backend.services.change_applier import get_content_versions
+        versions_data = await get_content_versions(job_id, limit=200)
+        versions = versions_data["versions"]
+    except Exception:
+        versions = []
+
+    html += f"""</div>
+<div class="section">
+<h2>Before / After Content Changes ({len(versions)})</h2>"""
+
+    if not versions:
+        html += '<p class="section-desc">No content changes applied yet. Approve SEO action items to generate improved content.</p>'
+    else:
+        for v in versions[:20]:
+            status_label = "Applied" if v.get("status") == "approved" else "Rejected"
+            color = "#16a34a" if v.get("status") == "approved" else "#dc2626"
+            html += f"""
+<div class="card">
+<p><strong>{v.get('content_type', '')}</strong> - <span style="color:{color};font-weight:600">{status_label}</span>
+<span style="color:#6b7280;font-size:12px">({v.get('field', '')})</span></p>
+<p><small style="color:#6b7280">{v.get('page_url', '')}</small></p>
+<p><strong>Before:</strong> <span style="color:#dc2626">{v.get('before', '-')}</span></p>
+<p><strong>After:</strong> <span style="color:#16a34a">{v.get('after', 'Not generated (rejected)')}</span></p>
+</div>"""
+
+    html += "</div>"
 
     cached_insights = await db.seo_insights_cache.find_one({"job_id": job_id})
     insights = cached_insights.get("data", {}) if cached_insights else {}

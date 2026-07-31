@@ -575,25 +575,51 @@ async function loadActions(jobId) {
   const list = document.getElementById("actions-list");
   if (data.actions.length === 0) {
     list.innerHTML = '<p class="section-desc">No action items.</p>';
-    return;
-  }
-
-  list.innerHTML = data.actions.map(a => `
-    <div class="action-card" data-id="${a.id}">
-      <div class="action-header">
-        <span class="action-type">${a.content_type}</span>
-        <span class="action-impact impact-${a.impact_on_ranking}">${a.impact_on_ranking} impact</span>
-      </div>
-      <div class="action-issues"><strong>Issues:</strong> ${(a.identified_issues || []).join("; ")}</div>
-      <div class="action-improvements"><strong>Improve:</strong> ${(a.improvement_suggestions || []).join("; ")}</div>
-      ${a.status === "pending" ? `
-        <div class="action-approve">
-          <button class="btn-approve" onclick="approveAction('${a.id}', 'approved')">Approve</button>
-          <button class="btn-reject" onclick="approveAction('${a.id}', 'rejected')">Reject</button>
+  } else {
+    list.innerHTML = data.actions.map(a => `
+      <div class="action-card" data-id="${a.id}">
+        <div class="action-header">
+          <span class="action-type">${a.content_type}</span>
+          <span class="action-impact impact-${a.impact_on_ranking}">${a.impact_on_ranking} impact</span>
         </div>
-      ` : `<span style="font-size:13px;color:${a.status === 'approved' ? 'var(--success)' : 'var(--danger)'}">${a.status}</span>`}
-    </div>
-  `).join("");
+        <div class="action-issues"><strong>Issues:</strong> ${(a.identified_issues || []).join("; ")}</div>
+        <div class="action-improvements"><strong>Improve:</strong> ${(a.improvement_suggestions || []).join("; ")}</div>
+        ${a.status === "pending" ? `
+          <div class="action-approve">
+            <button class="btn-approve" onclick="approveAction('${a.id}', 'approved')">Approve</button>
+            <button class="btn-reject" onclick="approveAction('${a.id}', 'rejected')">Reject</button>
+          </div>
+        ` : `<span style="font-size:13px;color:${a.status === 'approved' ? 'var(--success)' : 'var(--danger)'}">${a.status}</span>`}
+      </div>
+    `).join("");
+  }
+  loadVersions(jobId);
+}
+
+async function loadVersions(jobId) {
+  const el = document.getElementById("versions-list");
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${jobId}/versions`);
+    const data = await resp.json();
+    if (!data.versions || data.versions.length === 0) {
+      el.innerHTML = '<p class="section-desc">No changes applied yet. Approve action items to generate improved content.</p>';
+      return;
+    }
+    el.innerHTML = data.versions.map(v => `
+      <div class="action-card" style="border-left:3px solid ${v.status === 'approved' ? 'var(--success)' : 'var(--danger)'}">
+        <div class="action-header">
+          <span class="action-type">${v.content_type}</span>
+          <span style="font-size:12px;color:${v.status === 'approved' ? 'var(--success)' : 'var(--danger)'};font-weight:600;text-transform:capitalize">${v.status === 'approved' ? 'Applied' : 'Rejected'}</span>
+          <span style="font-size:12px;color:var(--text-secondary)">${v.field}</span>
+        </div>
+        <div class="action-issues"><strong>Before:</strong> <span style="color:var(--danger)">${escapeHtml((v.before || "-").substring(0, 200))}</span></div>
+        <div class="action-improvements"><strong>After:</strong> <span style="color:var(--success)">${escapeHtml((v.after || "Not generated (rejected)").substring(0, 200))}</span></div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:6px">${escapeHtml(v.page_url || "")} · ${v.generated_by || ""}</div>
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<p class="section-desc">Error loading versions: ${escapeHtml(err.message)}</p>`;
+  }
 }
 
 document.getElementById("action-status-filter")?.addEventListener("change", () => {
@@ -601,16 +627,24 @@ document.getElementById("action-status-filter")?.addEventListener("change", () =
 });
 
 async function approveAction(actionId, status) {
+  const btn = document.querySelector(`.action-card[data-id="${actionId}"] .action-approve`);
+  if (btn) btn.innerHTML = '<span style="font-size:13px;color:var(--text-secondary)">Processing...</span>';
   try {
-    await fetch(`${API_BASE}/actions/${actionId}/approve`, {
+    const resp = await fetch(`${API_BASE}/actions/${actionId}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    showToast(`Action ${status}`);
+    const data = await resp.json();
+    if (status === "approved" && data.version?.after) {
+      showToast(`Approved - change generated: ${data.version.after.substring(0, 60)}...`);
+    } else {
+      showToast(`Action ${status}`);
+    }
     if (currentJobId) loadActions(currentJobId);
   } catch (err) {
     showToast("Error: " + err.message);
+    if (currentJobId) loadActions(currentJobId);
   }
 }
 
