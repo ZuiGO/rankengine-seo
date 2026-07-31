@@ -371,7 +371,106 @@ async function loadLinks(jobId) {
     : `<p class="section-desc">${blData.total} source page(s) from ${blData.referring_domains} referring domain(s)</p>
        <table class="data-table"><thead><tr><th>Source URL</th><th>Domain</th><th>Anchor</th></tr></thead>
        <tbody>${blData.backlinks.map(b => `<tr><td class="page-url-cell" title="${b.source_url}">${b.source_url || "-"}</td><td>${b.source_domain || "-"}</td><td>${(b.anchor || "-").substring(0, 60)}</td></tr>`).join("")}</tbody></table>`;
+  loadLinkHealth(jobId);
+  loadDummySite(jobId);
 }
+
+async function loadLinkHealth(jobId) {
+  const summaryEl = document.getElementById("link-health-summary");
+  const issuesEl = document.getElementById("link-health-issues");
+  try {
+    const resp = await fetch(`${API_BASE}/links/${jobId}/health`);
+    const data = await resp.json();
+    const s = data.summary || {};
+    const ls = data.length_stats || {};
+    summaryEl.innerHTML = `
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+        <div class="insights-card"><div class="insights-label">Checked</div><div class="insights-value">${s.checked ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">OK</div><div class="insights-value" style="color:var(--success)">${s.ok ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Broken</div><div class="insights-value" style="color:var(--danger)">${s.broken ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Redirects</div><div class="insights-value" style="color:#d97706">${s.redirect ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Blocked/Timeout</div><div class="insights-value">${((s.blocked ?? 0) + (s.timeout ?? 0) + (s.error ?? 0))}</div></div>
+        <div class="insights-card"><div class="insights-label">Avg Link Length</div><div class="insights-value">${ls.avg ?? "-"} chars</div></div>
+      </div>
+      ${s.status === "not_checked" ? '<p class="section-desc" style="margin-top:10px">Links not checked yet for this job. Run Check or re-run analysis.</p>' : ""}
+      ${(ls.longest || []).length ? `
+      <div style="margin-top:12px">
+        <p class="section-desc"><strong>Longest links:</strong></p>
+        <ul style="margin:6px 0 0;padding-left:20px;font-size:13px;color:var(--text-secondary)">
+          ${ls.longest.map(l => `<li>${l.length} chars - <code>${escapeHtml(l.url.substring(0, 100))}</code></li>`).join("")}
+        </ul>
+      </div>` : ""}
+    `;
+    const issues = data.issues || [];
+    issuesEl.innerHTML = issues.length === 0
+      ? '<p class="section-desc">No link issues found.</p>'
+      : `<p class="section-desc">${issues.length} problematic link(s):</p>
+         <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>Length</th><th>URL</th></tr></thead>
+         <tbody>${issues.map(i => `<tr>
+           <td><span class="page-type-badge" style="background:#fee2e2;color:#b91c1c">${i.status}</span></td>
+           <td>${i.status_code ?? "-"}</td>
+           <td>${i.length_chars ?? "-"}</td>
+           <td class="page-url-cell" title="${i.url}">${escapeHtml(i.url)}</td>
+         </tr>`).join("")}</tbody></table>`;
+  } catch (err) {
+    summaryEl.innerHTML = `<p class="section-desc">Error loading link health: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function loadDummySite(jobId) {
+  const el = document.getElementById("dummy-site-card");
+  try {
+    const resp = await fetch(`${API_BASE}/dummy/${jobId}`);
+    const data = await resp.json();
+    if (data.status === "not_generated" || !data.file_count) {
+      el.innerHTML = `<p class="section-desc">No dummy site generated yet. Generate a static mirror with approved changes applied.</p>
+        <button id="generate-dummy-btn" class="btn-secondary" style="margin-top:8px">Generate Dummy Site</button>`;
+      document.getElementById("generate-dummy-btn").onclick = async () => {
+        el.innerHTML = '<p class="section-desc">Generating mirror (fetches each page)...</p>';
+        try {
+          const g = await fetch(`${API_BASE}/dummy/${jobId}/generate`, { method: "POST" });
+          const gd = await g.json();
+          showToast(`Dummy site generated: ${gd.file_count} files, ${gd.changes_applied} changes applied`);
+        } catch (e2) {
+          showToast("Generation failed: " + e2.message);
+        }
+        loadDummySite(jobId);
+      };
+      return;
+    }
+    el.innerHTML = `
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+        <div class="insights-card"><div class="insights-label">Files</div><div class="insights-value">${data.file_count}</div></div>
+        <div class="insights-card"><div class="insights-label">Pages Mirrored</div><div class="insights-value">${data.pages}</div></div>
+        <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${data.changes_applied}</div></div>
+        <div class="insights-card"><div class="insights-label">Links Rewritten</div><div class="insights-value">${data.links_rewritten}</div></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px">
+        <a class="btn-primary" href="${data.url}" target="_blank" rel="noopener">Open Dummy Site</a>
+        <a class="btn-secondary" href="${API_BASE}/dummy/${jobId}/download">Download ZIP</a>
+        <button id="regenerate-dummy-btn" class="btn-secondary">Regenerate</button>
+      </div>`;
+    document.getElementById("regenerate-dummy-btn").onclick = async () => {
+      await fetch(`${API_BASE}/dummy/${jobId}/generate`, { method: "POST" });
+      showToast("Dummy site regenerated");
+      loadDummySite(jobId);
+    };
+  } catch (err) {
+    el.innerHTML = `<p class="section-desc">Error: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+document.getElementById("check-links-btn").addEventListener("click", async () => {
+  document.getElementById("link-health-summary").innerHTML = '<p class="section-desc">Checking links...</p>';
+  try {
+    const resp = await fetch(`${API_BASE}/links/${currentJobId}/check`, { method: "POST" });
+    const data = await resp.json();
+    showToast(`Link check done: ${data.checked} checked, ${data.broken} broken`);
+  } catch (err) {
+    showToast("Link check failed: " + err.message);
+  }
+  loadLinkHealth(currentJobId);
+});
 
 async function loadGraph(jobId) {
   const resp = await fetch(`${API_BASE}/graph/${jobId}`);

@@ -14,6 +14,7 @@ build/
 # Crawled content & logs
 downloads/
 logs/
+dummy_site/
 
 # OS
 .DS_Store

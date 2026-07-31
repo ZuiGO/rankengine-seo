@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,12 +12,14 @@ from backend.config import settings
 from backend.db.mongo import connect_db, close_db
 from backend.db.neo4j_db import connect_neo4j, close_neo4j
 from backend.logging_setup import setup_logging, get_logger
-from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler, logs
+from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler, logs, dummy
 from backend.services.scheduler import scheduler_loop
+from backend.services.dummy_site import DUMMY_ROOT
 
 logger = get_logger("rankengine")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+DUMMY_DIR = Path(__file__).parent.parent / DUMMY_ROOT
 
 scheduler_task = None
 
@@ -78,8 +81,12 @@ app.include_router(seo_insights.router)
 app.include_router(sites.router)
 app.include_router(scheduler.router)
 app.include_router(logs.router)
+app.include_router(dummy.router)
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+
+os.makedirs(DUMMY_DIR, exist_ok=True)
+app.mount("/dummy", StaticFiles(directory=str(DUMMY_DIR)), name="dummy")
 
 
 @app.get("/api/health")

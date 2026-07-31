@@ -1,0 +1,234 @@
+import asyncio
+import io
+import os
+import zipfile
+from datetime import datetime
+from urllib.parse import urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+
+from backend.db.mongo import get_db
+from backend.logging_setup import get_logger
+
+logger = get_logger("dummy_site")
+
+DUMMY_ROOT = "dummy_site"
+FETCH_CONCURRENCY = 5
+USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+
+MIRROR_SYMBOLIC = {
+    "ok": "#16a34a",
+    "redirect": "#d97706",
+    "blocked": "#dc2626",
+    "broken": "#dc2626",
+    "timeout": "#dc2626",
+    "error": "#dc2626",
+    "unknown": "#6b7280",
+}
+
+
+def url_to_mirror_path(url: str) -> str:
+    parsed = urlparse(url)
+    path = parsed.path.strip("/")
+    if not path:
+        return "index.html"
+    last = path.split("/")[-1]
+    if "." in last:
+        return path
+    return path + "/index.html"
+
+
+def _sanitize_path(path: str) -> str:
+    return path.replace("..", "").lstrip("/")
+
+
+async def _fetch_html(url: str) -> tuple[str | None, int | None]:
+    try:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+            timeout=20,
+        ) as client:
+            resp = await client.get(url)
+            if resp.status_code >= 400:
+                return None, resp.status_code
+            return resp.text, resp.status_code
+    except Exception:
+        return None, None
+
+
+async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> int:
+    db = get_db()
+    applied = 0
+    cursor = db.content_versions.find({
+        "job_id": job_id,
+        "page_url": page_url,
+        "status": "approved",
+        "after": {"$ne": None},
+    })
+    async for v in cursor:
+        field = v.get("field")
+        after = v.get("after", "")
+        if not after:
+            continue
+        if field == "meta_description":
+            meta = soup.find("meta", attrs={"name": "description"})
+            if meta:
+                meta["content"] = after
+                applied += 1
+        elif field == "title":
+            title_tag = soup.find("title")
+            if title_tag:
+                title_tag.string = after
+                applied += 1
+        elif field == "alt_text":
+            src = v.get("source_url", "")
+            filename = src.split("/")[-1]
+            img = (
+                soup.find("img", src=src)
+                or soup.find("img", src=lambda s: s and s.split("/")[-1] == filename)
+            )
+            if img:
+                img["alt"] = after
+                applied += 1
+        elif field == "link_text":
+            href = v.get("source_url", "")
+            filename = href.split("/")[-1]
+            a_tag = (
+                soup.find("a", href=href)
+                or soup.find("a", href=lambda s: s and s.split("/")[-1] == filename)
+            )
+            if a_tag:
+                a_tag.string = after
+                applied += 1
+    return applied
+
+
+async def _link_health_banner(soup: BeautifulSoup, job_id: str, page_url: str) -> str:
+    db = get_db()
+    issues = await db.link_health.find({
+        "job_id": job_id,
+        "status": {"$in": ["broken", "timeout", "error", "blocked"]},
+        "pages": page_url,
+    }).to_list(length=20)
+    if not issues:
+        return ""
+    rows = "".join(
+        f"<li><code>{i.get('url', '')}</code> - {i.get('status', '')}"
+        f"{(' (' + str(i.get('status_code')) + ')') if i.get('status_code') else ''}</li>"
+        for i in issues
+    )
+    return (
+        '<div style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:12px 16px;'
+        'font-family:-apple-system,sans-serif;font-size:13px;margin-bottom:16px">'
+        f'<strong>Link Health ({len(issues)} issue(s)):</strong><ul style="margin:8px 0 0;padding-left:20px">{rows}</ul></div>'
+    )
+
+
+def _rewrite_internal_links(soup: BeautifulSoup, job_id: str, base_url: str, mirror_urls: set) -> int:
+    base_host = urlparse(base_url).netloc
+    rewritten = 0
+    for tag in soup.find_all(["a", "img", "link", "script", "source"]):
+        attr = "href" if tag.name in ("a", "link") else ("src" if tag.name in ("img", "script", "source") else None)
+        if not attr or not tag.get(attr):
+            continue
+        raw = tag[attr].strip()
+        if raw.startswith(("#", "mailto:", "tel:", "javascript:", "data:", "//")):
+            continue
+        from urllib.parse import urljoin
+        full = urljoin(base_url, raw)
+        parsed = urlparse(full)
+        if parsed.netloc != base_host:
+            continue
+        if full not in mirror_urls:
+            continue
+        tag[attr] = f"/dummy/{job_id}/" + url_to_mirror_path(full)
+        rewritten += 1
+    return rewritten
+
+
+async def generate_dummy_site(job_id: str) -> dict:
+    db = get_db()
+    pages = await db.pages.find({"job_id": job_id}).to_list(length=None)
+    if not pages:
+        return {"status": "error", "message": "No pages for this job"}
+
+    base_url = (await db.analysis_jobs.find_one({"_id": job_id}) or {}).get("url", "")
+    mirror_urls = {p["url"] for p in pages}
+    target_dir = os.path.join(DUMMY_ROOT, job_id)
+    os.makedirs(target_dir, exist_ok=True)
+
+    semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
+
+    async def fetch_and_build(page: dict):
+        async with semaphore:
+            url = page["url"]
+            rel_path = _sanitize_path(url_to_mirror_path(url))
+            html, status_code = await _fetch_html(url)
+            if html is None:
+                html = (
+                    f"<!DOCTYPE html><html><head><title>{page.get('title', '')}</title></head>"
+                    f"<body><h1>Mirror unavailable</h1><p>Original page returned HTTP {status_code}.</p></body></html>"
+                )
+            soup = BeautifulSoup(html, "lxml")
+            applied = await _apply_changes(soup, job_id, url)
+            rewritten = _rewrite_internal_links(soup, job_id, url, mirror_urls)
+            banner = await _link_health_banner(soup, job_id, url)
+            if banner:
+                body = soup.find("body")
+                if body:
+                    body.insert(0, BeautifulSoup(banner, "lxml"))
+            file_path = os.path.join(target_dir, rel_path)
+            os.makedirs(os.path.dirname(file_path) or target_dir, exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(str(soup))
+            return {"page": url, "file": rel_path, "status_code": status_code, "changes_applied": applied, "links_rewritten": rewritten}
+
+    results = []
+    for chunk in [pages[i:i + FETCH_CONCURRENCY] for i in range(0, len(pages), FETCH_CONCURRENCY)]:
+        chunk_results = await asyncio.gather(*[fetch_and_build(p) for p in chunk])
+        results.extend(chunk_results)
+
+    file_count = sum(1 for r in os.walk(target_dir) for _ in r[2])
+    summary = {
+        "job_id": job_id,
+        "base_url": base_url,
+        "generated_at": datetime.utcnow(),
+        "file_count": file_count,
+        "pages": len(pages),
+        "changes_applied": sum(r["changes_applied"] for r in results),
+        "links_rewritten": sum(r["links_rewritten"] for r in results),
+    }
+    await db.dummy_sites.update_one(
+        {"job_id": job_id},
+        {"$set": summary},
+        upsert=True,
+    )
+    logger.info("Dummy site generated job=%s files=%s changes=%s", job_id, file_count, summary["changes_applied"])
+    return summary
+
+
+async def get_dummy_site(job_id: str) -> dict:
+    db = get_db()
+    doc = await db.dummy_sites.find_one({"job_id": job_id})
+    if not doc:
+        return {"status": "not_generated", "job_id": job_id}
+    doc["id"] = str(doc.pop("_id"))
+    doc["url"] = f"/dummy/{job_id}/index.html"
+    return doc
+
+
+async def dummy_site_zip(job_id: str) -> bytes | None:
+    target_dir = os.path.join(DUMMY_ROOT, job_id)
+    if not os.path.isdir(target_dir):
+        return None
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(target_dir):
+            for name in files:
+                full = os.path.join(root, name)
+                arc = os.path.relpath(full, DUMMY_ROOT)
+                zf.write(full, arc)
+    buffer.seek(0)
+    return buffer.read()

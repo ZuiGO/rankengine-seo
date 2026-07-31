@@ -147,6 +147,18 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},
+            {"$set": {"progress_message": "Checking link health..."}}
+        )
+
+        try:
+            from backend.services.link_checker import check_links
+            link_health = await check_links(job_id)
+        except Exception as lh_err:
+            logger.error("Link health check warning job=%s: %s", job_id, lh_err)
+            link_health = {}
+
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
             {"$set": {
                 "status": "completed",
                 "progress": 100,
@@ -161,6 +173,8 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_vectors": vector_count,
                     "total_user_flows": flow_count,
                     "total_backlinks": backlink_count,
+                    "links_checked": link_health.get("checked", 0),
+                    "broken_links": link_health.get("broken", 0),
                 },
             }}
         )
