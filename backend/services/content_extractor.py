@@ -1,6 +1,8 @@
 from backend.db.mongo import get_db
 from backend.db.neo4j_db import get_driver
 from backend.services.pdf_extractor import extract_pdf_data
+from backend.services.docs_extractor import extract_doc_file
+from backend.services.image_metadata import parse_image_metadata
 from backend.services.content_classifier import classify_with_magic
 
 BATCH_SIZE = 50
@@ -50,23 +52,49 @@ async def extract_all_content(job_id: str):
                 )
 
         elif content_type in ("doc", "xlsx", "presentation") and file_path:
-            mime_type = classify_with_magic(file_path)
-            detected_type = mime_type or content_type
-            await db.content_extractions.insert_one({
-                "job_id": job_id,
-                "content_item_id": str(item["_id"]),
-                "content_type": detected_type,
-                "source_url": item["source_url"],
-                "file_path": file_path,
-                "file_size": item.get("file_size"),
-                "mime_type": item.get("mime_type"),
-                "extracted_at": __import__("datetime").datetime.utcnow(),
-                "note": f"Binary document type: {detected_type}. Full text extraction requires additional parser.",
-            })
+            data = extract_doc_file(file_path, content_type)
+            if "error" in data:
+                await db.content_extractions.insert_one({
+                    "job_id": job_id,
+                    "content_item_id": str(item["_id"]),
+                    "content_type": content_type,
+                    "source_url": item["source_url"],
+                    "file_path": file_path,
+                    "file_size": item.get("file_size"),
+                    "mime_type": classify_with_magic(file_path) or item.get("mime_type"),
+                    "extracted_at": __import__("datetime").datetime.utcnow(),
+                    "error": data["error"],
+                })
+            else:
+                await db.content_extractions.insert_one({
+                    "job_id": job_id,
+                    "content_item_id": str(item["_id"]),
+                    "content_type": content_type,
+                    "source_url": item["source_url"],
+                    "file_path": file_path,
+                    "file_size": item.get("file_size"),
+                    "mime_type": classify_with_magic(file_path) or item.get("mime_type"),
+                    "extracted_at": __import__("datetime").datetime.utcnow(),
+                    "text": data.get("text", ""),
+                    "word_count": data.get("word_count", 0),
+                    "text_chunks": data.get("text_chunks", []),
+                    "tables": data.get("tables", data.get("slides", [])),
+                    "metadata": data.get("metadata", {}),
+                })
+
+                extracted_texts.extend(
+                    {"source_url": item["source_url"], "text": c["text"], "word_count": c["word_count"]}
+                    for c in data.get("text_chunks", [])
+                )
+                extracted_tables.extend(
+                    {**t, "source_url": item["source_url"]}
+                    for t in data.get("tables", [])
+                )
 
         elif content_type == "image" and file_path:
             import os
             stats = os.stat(file_path) if os.path.exists(file_path) else None
+            meta = parse_image_metadata(file_path)
             await db.content_extractions.insert_one({
                 "job_id": job_id,
                 "content_item_id": str(item["_id"]),
@@ -77,9 +105,9 @@ async def extract_all_content(job_id: str):
                 "mime_type": item.get("mime_type") or classify_with_magic(file_path),
                 "extracted_at": __import__("datetime").datetime.utcnow(),
                 "metadata": {
-                    "width": None,
-                    "height": None,
-                    "format": os.path.splitext(file_path)[1].lstrip("."),
+                    "width": meta.get("width"),
+                    "height": meta.get("height"),
+                    "format": meta.get("format"),
                 },
             })
 
