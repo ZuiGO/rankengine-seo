@@ -9,7 +9,7 @@ from backend.logging_setup import get_logger
 from backend.services.crawler import crawl_site
 from backend.services.graph_service import populate_graph
 from backend.services.content_extractor import extract_all_content
-from backend.services.vector_service import index_job_content
+from backend.services.vector_service import index_job_vectors
 from backend.services.user_flow import detect_user_flows
 from backend.services.audit_service import log_audit
 
@@ -106,17 +106,6 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},
-            {"$set": {"progress_message": "Indexing content vectors..."}}
-        )
-
-        try:
-            vector_count = await index_job_content(job_id)
-        except Exception as vec_err:
-            logger.error("Vector indexing warning job=%s: %s", job_id, vec_err)
-            vector_count = 0
-
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
             {"$set": {"progress_message": "Fetching external SEO insights..."}}
         )
 
@@ -144,6 +133,17 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         except Exception as bl_err:
             logger.error("Backlink listing warning job=%s: %s", job_id, bl_err)
             backlink_count = 0
+
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"progress_message": "Indexing content vectors..."}}
+        )
+
+        try:
+            vector_count = await index_job_vectors(job_id)
+        except Exception as vec_err:
+            logger.error("Vector indexing warning job=%s: %s", job_id, vec_err)
+            vector_count = 0
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},

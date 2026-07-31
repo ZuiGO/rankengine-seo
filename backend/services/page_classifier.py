@@ -33,6 +33,7 @@ _PATTERN_RULES = [
     (re.compile(r"/page-\d+(\.html?)?($|\?|#)", re.I), "category"),
     (re.compile(r"/page/\d+/?($|\?|#)", re.I), "category"),
     (re.compile(r"/category/[^/?#]*_\d+(/index\.html?)?($|\?|#)", re.I), "category"),
+    (re.compile(r"/category/[^/?#]+/[^/?#]*_\d+(/index\.html?)?($|\?|#)", re.I), "category"),
     (re.compile(r"(?:^|/)[^/?#]*_\d+(/index\.html?)?($|\?|#)", re.I), "product"),
     (re.compile(r"/(category|catalogue|catalog|collection|shop|store|browse|search|listing|all)(/|$|\?|#)", re.I), "category"),
     (re.compile(r"/(blog|news|article|articles|post|posts|stories?|journal|insights?|resources)(/|$|\?|#)", re.I), "blog"),
