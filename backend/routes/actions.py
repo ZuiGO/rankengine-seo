@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -7,6 +9,61 @@ from backend.services.change_applier import create_version_for_action, get_conte
 from bson.objectid import ObjectId
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
+
+_active_batches: set[str] = set()
+
+
+async def _approve_all_batch(job_id: str) -> None:
+    db = get_db()
+    sem = asyncio.Semaphore(6)
+    errors = []
+
+    async def process(item):
+        async with sem:
+            try:
+                await asyncio.wait_for(create_version_for_action(item, "approved"), timeout=20)
+                await db.action_items.update_one(
+                    {"_id": item["_id"]},
+                    {"$set": {"status": "approved"}},
+                )
+                await log_audit(
+                    "action_approved",
+                    job_id,
+                    {"action_id": str(item["_id"]), "content_type": item.get("content_type"), "impact": item.get("impact_on_ranking")},
+                )
+            except Exception as e:
+                errors.append(f"{item.get('content_type', '')} {item.get('page_url', '')}: {e}")
+
+    try:
+        cursor = db.action_items.find({"job_id": job_id, "status": "pending"}).sort("content_type", 1)
+        items = await cursor.to_list(length=1000)
+        await asyncio.gather(*[process(i) for i in items])
+        try:
+            from backend.services.dummy_site import regenerate_after_change
+            asyncio.create_task(regenerate_after_change(job_id))
+        except Exception as e:
+            from backend.logging_setup import get_logger
+            get_logger("actions").warning("Dummy site auto-regeneration hook failed: %s", e)
+        if errors:
+            from backend.logging_setup import get_logger
+            get_logger("actions").warning("Approve-all completed with %s error(s) for job=%s: %s", len(errors), job_id, errors[:5])
+    finally:
+        _active_batches.discard(job_id)
+
+
+@router.post("/{job_id}/approve-all")
+async def approve_all_actions(job_id: str):
+    if job_id in _active_batches:
+        return {"status": "running", "job_id": job_id}
+
+    db = get_db()
+    pending = await db.action_items.count_documents({"job_id": job_id, "status": "pending"})
+    if not pending:
+        return {"status": "ok", "job_id": job_id, "approved": 0, "failed": 0, "errors": []}
+
+    _active_batches.add(job_id)
+    asyncio.create_task(_approve_all_batch(job_id))
+    return {"status": "started", "job_id": job_id, "pending": pending}
 
 
 class ApproveRequest(BaseModel):

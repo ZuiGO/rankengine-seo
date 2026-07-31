@@ -632,6 +632,47 @@ document.getElementById("action-status-filter")?.addEventListener("change", () =
   if (currentJobId) loadActions(currentJobId);
 });
 
+document.getElementById("approve-all-btn")?.addEventListener("click", async () => {
+  if (!currentJobId) return;
+  if (!confirm("Approve ALL pending SEO changes? This generates improved content for every pending action and rebuilds the dummy site. This cannot be undone per-item.")) return;
+  const btn = document.getElementById("approve-all-btn");
+  btn.disabled = true;
+  btn.textContent = "Working...";
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${currentJobId}/approve-all`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    showToast(`Approving ${data.pending ?? data.approved ?? 0} change(s) in the background...`);
+    const started = Date.now();
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/actions/${currentJobId}?status_filter=pending`);
+        const d = await r.json();
+        const timedOut = Date.now() - started > 20 * 60 * 1000;
+        if ((d.total || 0) === 0 || timedOut) {
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.textContent = "Approve All";
+          if (currentJobId) loadActions(currentJobId);
+          showToast(timedOut ? "Approve all is still running - check the Actions tab shortly" : "All changes approved. Dummy site rebuilding...");
+        }
+      } catch (err) {
+        clearInterval(poll);
+        btn.disabled = false;
+        btn.textContent = "Approve All";
+      }
+    }, 4000);
+  } catch (err) {
+    showToast("Approve all failed: " + err.message);
+    btn.disabled = false;
+    btn.textContent = "Approve All";
+  }
+});
+
 async function approveAction(actionId, status) {
   const btn = document.querySelector(`.action-card[data-id="${actionId}"] .action-approve`);
   if (btn) btn.innerHTML = '<span style="font-size:13px;color:var(--text-secondary)">Processing...</span>';

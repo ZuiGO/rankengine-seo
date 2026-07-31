@@ -91,6 +91,8 @@ async def main(host: str, url: str):
         report("action approve + version", bool(approv.get("version")), f"field={ (approv.get('version') or {}).get('field') }")
         versions = (await client.get(f"/api/actions/{job_id}/versions")).json()
         report("versions endpoint", versions.get("applied", 0) >= 1, f"applied={versions.get('applied')}")
+        bulk = (await client.post(f"/api/actions/{job_id}/approve-all")).json()
+        report("approve all starts", bulk.get("status") in ("started", "ok", "running"), f"status={bulk.get('status')} pending={bulk.get('pending')}")
 
         # 8. Dummy site
         gen = (await client.post(f"/api/dummy/{job_id}/generate")).json()

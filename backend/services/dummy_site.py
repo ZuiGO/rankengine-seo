@@ -227,9 +227,10 @@ async def _pending_suggestions_banner(soup: BeautifulSoup, job_id: str, page_url
 
 def _rewrite_internal_links(soup: BeautifulSoup, job_id: str, base_url: str, mirror_urls: set) -> int:
     base_host = urlparse(base_url).netloc
+    asset_tags = ("img", "script", "source", "video", "audio", "link")
     rewritten = 0
-    for tag in soup.find_all(["a", "img", "link", "script", "source"]):
-        attr = "href" if tag.name in ("a", "link") else ("src" if tag.name in ("img", "script", "source") else None)
+    for tag in soup.find_all(["a", *asset_tags]):
+        attr = "href" if tag.name in ("a", "link") else ("src" if tag.name in ("img", "script", "source", "video", "audio") else None)
         if not attr or not tag.get(attr):
             continue
         raw = tag[attr].strip()
@@ -240,18 +241,29 @@ def _rewrite_internal_links(soup: BeautifulSoup, job_id: str, base_url: str, mir
         parsed = urlparse(full)
         if parsed.netloc != base_host:
             continue
-        if _normalize_page_url(full) not in mirror_urls:
-            continue
-        tag[attr] = f"/dummy/{job_id}/" + url_to_mirror_path(full)
-        rewritten += 1
+        if _normalize_page_url(full) in mirror_urls:
+            tag[attr] = f"/dummy/{job_id}/" + url_to_mirror_path(full)
+            rewritten += 1
+        elif tag.name in asset_tags and (raw.startswith("/") or parsed.netloc):
+            tag[attr] = full
+            rewritten += 1
     return rewritten
 
 
 async def generate_dummy_site(job_id: str) -> dict:
     db = get_db()
-    pages = await db.pages.find({"job_id": job_id}).to_list(length=None)
-    if not pages:
+    all_pages = await db.pages.find({"job_id": job_id}).to_list(length=None)
+    if not all_pages:
         return {"status": "error", "message": "No pages for this job"}
+
+    seen_norm = set()
+    pages = []
+    for p in all_pages:
+        norm = _normalize_page_url(p["url"])
+        if norm in seen_norm:
+            continue
+        seen_norm.add(norm)
+        pages.append(p)
 
     base_url = (await db.analysis_jobs.find_one({"_id": job_id}) or {}).get("url", "")
     mirror_urls = {_normalize_page_url(p["url"]) for p in pages}
