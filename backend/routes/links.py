@@ -14,7 +14,7 @@ async def get_link_summary(job_id: str):
     if not job:
         return {"error": "Job not found"}
 
-    summary = job.get("summary", {})
+    summary = job.get("summary") or {}
     return {
         "total_links": summary.get("total_links", 0),
         "total_internal": summary.get("total_internal_links", 0),

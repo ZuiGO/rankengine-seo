@@ -1,9 +1,24 @@
+import os
 from bson.objectid import ObjectId
 from fastapi import APIRouter, Query
 
 from backend.db.mongo import get_db
 
 router = APIRouter(prefix="/api/content", tags=["content"])
+
+
+def _file_url(file_path: str | None) -> str | None:
+    if not file_path:
+        return None
+    norm = file_path.replace("\\", "/")
+    if norm.startswith("./"):
+        norm = norm[2:]
+    norm = norm.lstrip("/")
+    if not norm:
+        return None
+    if not os.path.exists(norm):
+        return None
+    return "/" + norm
 
 
 @router.get("/{job_id}")
@@ -22,6 +37,7 @@ async def list_content(
     items = await cursor.to_list(length=limit)
     for item in items:
         item["id"] = str(item.pop("_id"))
+        item["file_url"] = _file_url(item.get("file_path"))
     total = await db.content_items.count_documents(query)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -33,12 +49,15 @@ async def get_content_detail(job_id: str, content_id: str):
     if not item:
         return {"error": "Content not found"}
     item["id"] = str(item.pop("_id"))
+    item["file_url"] = _file_url(item.get("file_path"))
 
     # Find extraction data
     extraction = await db.content_extractions.find_one({
         "content_item_id": content_id,
         "job_id": job_id,
     })
+    if extraction:
+        extraction = {k: v for k, v in extraction.items() if k != "_id"}
 
     # Count action items for this content
     action_count = await db.action_items.count_documents({

@@ -157,6 +157,14 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             logger.error("Link health check warning job=%s: %s", job_id, lh_err)
             link_health = {}
 
+        try:
+            from backend.services.site_health import compute_site_health
+            health = await compute_site_health(job_id)
+            health_grade = health.get("grade")
+        except Exception as h_err:
+            logger.error("Site health warning job=%s: %s", job_id, h_err)
+            health_grade = None
+
         await db.analysis_jobs.update_one(
             {"_id": job_id},
             {"$set": {
@@ -175,6 +183,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_backlinks": backlink_count,
                     "links_checked": link_health.get("checked", 0),
                     "broken_links": link_health.get("broken", 0),
+                    "health_grade": health_grade,
                 },
             }}
         )

@@ -20,6 +20,7 @@ logger = get_logger("rankengine")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 DUMMY_DIR = Path(__file__).parent.parent / DUMMY_ROOT
+DOWNLOADS_DIR = Path(__file__).parent.parent / "downloads"
 
 scheduler_task = None
 
@@ -87,6 +88,9 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 os.makedirs(DUMMY_DIR, exist_ok=True)
 app.mount("/dummy", StaticFiles(directory=str(DUMMY_DIR)), name="dummy")
+
+os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_DIR)), name="downloads")
 
 
 @app.get("/api/health")

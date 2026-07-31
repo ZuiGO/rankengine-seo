@@ -288,13 +288,22 @@ async def chat_with_context(job_id: str, message: str, section: str = "content")
         return f"[Simulated] Found {len(results)} relevant items. Context:\n{context[:500]}..."
 
     client = AsyncGroq(api_key=settings.groq_api_key)
-    completion = await client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {message}"},
-        ],
-        temperature=0.3,
-        max_tokens=1024,
-    )
-    return completion.choices[0].message.content
+    try:
+        completion = await client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {message}"},
+            ],
+            temperature=0.3,
+            max_tokens=1024,
+        )
+    except Exception as e:
+        from backend.logging_setup import get_logger
+        get_logger("chat").warning("Groq chat request failed: %s", e)
+        return (
+            "Error: The AI service (Groq) is currently unavailable. "
+            f"Details: {e}. "
+            f"\n\nMeanwhile, here is the raw analysis context that would have been used:\n{context[:1200]}"
+        )
+    return completion.choices[0].message.content or "No reply generated."

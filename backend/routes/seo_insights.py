@@ -10,6 +10,7 @@ from backend.db.mongo import get_db
 router = APIRouter(prefix="/api/seo-insights", tags=["seo-insights"])
 
 CACHE_TTL_MINUTES = 60
+CACHE_VERSION = 2
 
 
 class KeywordSearchRequest(BaseModel):
@@ -28,6 +29,26 @@ def _domain_from_url(url: str) -> str:
     return url
 
 
+async def _cached_insights(db, job_id: str, domain: str):
+    cached = await db.seo_insights_cache.find_one({"job_id": job_id})
+    fresh = (
+        cached
+        and cached.get("v") == CACHE_VERSION
+        and cached.get("fetched_at", datetime.min) > datetime.utcnow() - timedelta(minutes=CACHE_TTL_MINUTES)
+    )
+    if fresh:
+        return {"job_id": job_id, "domain": domain, "cached": True, **cached["data"]}
+    return None
+
+
+async def _store_insights(db, job_id: str, insights: dict):
+    await db.seo_insights_cache.update_one(
+        {"job_id": job_id},
+        {"$set": {"job_id": job_id, "data": insights, "fetched_at": datetime.utcnow(), "v": CACHE_VERSION}},
+        upsert=True,
+    )
+
+
 @router.get("/{job_id}")
 async def get_insights(job_id: str):
     db = get_db()
@@ -36,16 +57,12 @@ async def get_insights(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     domain = _domain_from_url(job.get("url", ""))
 
-    cached = await db.seo_insights_cache.find_one({"job_id": job_id})
-    if cached and cached.get("fetched_at", datetime.min) > datetime.utcnow() - timedelta(minutes=CACHE_TTL_MINUTES):
-        return {"job_id": job_id, "domain": domain, "cached": True, **cached["data"]}
+    cached = await _cached_insights(db, job_id, domain)
+    if cached:
+        return cached
 
-    insights = await fetch_all_insights(domain)
-    await db.seo_insights_cache.update_one(
-        {"job_id": job_id},
-        {"$set": {"job_id": job_id, "data": insights, "fetched_at": datetime.utcnow()}},
-        upsert=True,
-    )
+    insights = await fetch_all_insights(domain, job_id)
+    await _store_insights(db, job_id, insights)
     return {"job_id": job_id, "domain": domain, "cached": False, **insights}
 
 
@@ -56,12 +73,8 @@ async def refresh_insights(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     domain = _domain_from_url(job.get("url", ""))
-    insights = await fetch_all_insights(domain)
-    await db.seo_insights_cache.update_one(
-        {"job_id": job_id},
-        {"$set": {"job_id": job_id, "data": insights, "fetched_at": datetime.utcnow()}},
-        upsert=True,
-    )
+    insights = await fetch_all_insights(domain, job_id)
+    await _store_insights(db, job_id, insights)
     return {"job_id": job_id, "domain": domain, "cached": False, **insights}
 
 
@@ -72,8 +85,10 @@ async def keyword_search(req: KeywordSearchRequest):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     domain = _domain_from_url(job.get("url", ""))
-    result = await search_keyword(req.keyword, domain)
-    return result
+    try:
+        return await search_keyword(req.keyword, domain)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/bulk-keyword-search")
@@ -83,7 +98,10 @@ async def bulk_search(req: BulkKeywordRequest):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     domain = _domain_from_url(job.get("url", ""))
-    results = await bulk_keyword_search(req.keywords, domain)
+    try:
+        results = await bulk_keyword_search(req.keywords, domain)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return {"results": results}
 
 

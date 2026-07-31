@@ -18,6 +18,7 @@ async def fetch_backlinks(job_id: str, domain: str) -> dict:
     db = get_db()
     sources = []
     source_api = None
+    last_error = None
 
     try:
         from backend.services.dataforseo import backlink_referring_pages
@@ -38,6 +39,7 @@ async def fetch_backlinks(job_id: str, domain: str) -> dict:
                 })
             logger.info("Backlinks via DataForSEO job=%s sources=%s", job_id, len(sources))
     except Exception as e:
+        last_error = f"DataForSEO: {e}"
         logger.warning("DataForSEO backlink list unavailable job=%s: %s", job_id, e)
 
     if not sources:
@@ -47,6 +49,7 @@ async def fetch_backlinks(job_id: str, domain: str) -> dict:
             source_api = "serp"
             logger.info("Backlinks via SERP fallback job=%s sources=%s", job_id, len(sources))
         except Exception as e:
+            last_error = (last_error + " | " if last_error else "") + f"SERP: {e}"
             logger.warning("SERP backlink fallback unavailable job=%s: %s", job_id, e)
 
     now = datetime.utcnow()
@@ -75,6 +78,12 @@ async def fetch_backlinks(job_id: str, domain: str) -> dict:
         await db.backlinks.delete_many({"job_id": job_id})
         await db.backlinks.insert_many(docs)
 
+    await db.backlink_meta.update_one(
+        {"job_id": job_id},
+        {"$set": {"job_id": job_id, "error": last_error, "source_api": source_api, "updated_at": now}},
+        upsert=True,
+    )
+
     preview = []
     for d in docs[:5]:
         preview.append({k: v for k, v in d.items() if k != "_id"})
@@ -83,6 +92,7 @@ async def fetch_backlinks(job_id: str, domain: str) -> dict:
         "total": len(docs),
         "referring_domains": len({d["source_domain"] for d in docs}),
         "source_api": source_api,
+        "error": last_error,
         "sources": preview,
     }
 
@@ -100,10 +110,13 @@ async def get_backlinks(job_id: str, limit: int = 100, offset: int = 0) -> dict:
         b["id"] = str(b.pop("_id"))
     total = await db.backlinks.count_documents({"job_id": job_id})
     domains = await db.backlinks.distinct("source_domain", {"job_id": job_id})
+    meta = await db.backlink_meta.find_one({"job_id": job_id})
     return {
         "backlinks": items,
         "total": total,
         "referring_domains": len(domains),
         "limit": limit,
         "offset": offset,
+        "error": (meta or {}).get("error"),
+        "source_api": (meta or {}).get("source_api"),
     }

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.db.mongo import get_db
@@ -40,6 +41,14 @@ async def _site_metrics(job: dict) -> dict:
             "organic_traffic": ov.get("estimated_organic_traffic"),
         }
 
+    health_doc = await db.site_health.find_one({"job_id": job_id})
+    health = {}
+    if health_doc:
+        health = {
+            "health_grade": health_doc.get("grade"),
+            "health_score": health_doc.get("score"),
+        }
+
     return {
         "job_id": job_id,
         "url": job.get("url", ""),
@@ -52,18 +61,74 @@ async def _site_metrics(job: dict) -> dict:
         "total_action_items": actions,
         "content_breakdown": breakdown,
         **insights,
+        **health,
     }
 
 
-@router.get("")
-async def list_sites():
+@router.get("/{job_id}/health")
+async def site_health(job_id: str):
+    from backend.services.site_health import get_site_health
+
     db = get_db()
-    cursor = db.analysis_jobs.find({}).sort("created_at", -1)
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    health = await get_site_health(job_id)
+    health.pop("_id", None)
+    return health
+
+
+@router.post("/{job_id}/compare-changes")
+async def compare_changes(job_id: str):
+    from backend.services.compare_service import compare_site_with_changes
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return await compare_site_with_changes(job_id)
+
+
+@router.get("")
+async def list_sites(include_archived: bool = Query(False)):
+    db = get_db()
+    query = {} if include_archived else {"deleted": {"$ne": True}}
+    cursor = db.analysis_jobs.find(query).sort("created_at", -1)
     jobs = await cursor.to_list(length=200)
     sites = []
     for job in jobs:
-        sites.append(await _site_metrics(job))
+        site = await _site_metrics(job)
+        site["archived"] = bool(job.get("deleted"))
+        site["deleted_at"] = job.get("deleted_at")
+        sites.append(site)
     return {"sites": sites, "total": len(sites)}
+
+
+@router.delete("/{job_id}")
+async def delete_site(job_id: str):
+    """Soft-delete (archive) a site: it disappears from the default list but data is kept."""
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    await db.analysis_jobs.update_one(
+        {"_id": job_id},
+        {"$set": {"deleted": True, "deleted_at": datetime.utcnow()}},
+    )
+    return {"status": "ok", "job_id": job_id, "archived": True}
+
+
+@router.post("/{job_id}/restore")
+async def restore_site(job_id: str):
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(404, "Job not found")
+    await db.analysis_jobs.update_one(
+        {"_id": job_id},
+        {"$unset": {"deleted": "", "deleted_at": ""}},
+    )
+    return {"status": "ok", "job_id": job_id, "archived": False}
 
 
 class CompareRequest(BaseModel):

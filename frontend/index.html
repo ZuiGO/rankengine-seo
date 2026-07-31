@@ -54,10 +54,8 @@
         <button class="tab" data-tab="pages">Pages</button>
         <button class="tab" data-tab="content">Content</button>
         <button class="tab" data-tab="links">Links</button>
-        <button class="tab" data-tab="graph">Graph</button>
         <button class="tab" data-tab="actions">SEO Actions</button>
         <button class="tab" data-tab="report">Report</button>
-        <button class="tab" data-tab="chat">Chat</button>
         <button class="tab" data-tab="seo-insights">SEO Insights</button>
         <button class="tab" data-tab="schedules">Schedules</button>
         <button class="tab" data-tab="logs">Logs & Alerts</button>
@@ -67,6 +65,7 @@
         <div class="stats-grid" id="overview-stats"></div>
         <div class="content-breakdown" id="content-breakdown"></div>
         <div class="stats-grid" id="overview-flows" style="margin-top:16px;grid-template-columns:repeat(1,1fr)"></div>
+        <div id="overview-health" style="margin-top:16px"></div>
       </div>
 
       <div class="tab-content hidden" id="tab-sites">
@@ -74,6 +73,9 @@
         <div class="sites-controls">
           <button id="compare-sites-btn" class="btn-primary" disabled>Compare Selected</button>
           <button id="refresh-sites-btn" class="btn-secondary">Refresh</button>
+          <label style="font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="show-archived-toggle"> Show archived
+          </label>
           <span id="sites-count" class="count-label"></span>
         </div>
         <div id="sites-grid" class="sites-grid"></div>
@@ -122,14 +124,6 @@
         <div id="backlinks-list"></div>
       </div>
 
-      <div class="tab-content hidden" id="tab-graph">
-        <div id="graph-stats" class="stats-grid"></div>
-        <div class="graph-container">
-          <canvas id="graph-canvas" width="900" height="500"></canvas>
-        </div>
-        <div class="graph-legend" id="graph-legend"></div>
-      </div>
-
       <div class="tab-content hidden" id="tab-actions">
         <p class="section-desc">SEO impact analysis for each content item. Approve or reject suggested improvements.</p>
         <div class="table-controls">
@@ -149,33 +143,10 @@
       <div class="tab-content hidden" id="tab-report">
         <div class="report-actions">
           <a id="report-download-link" class="btn-primary" target="_blank">Download HTML Report</a>
+          <a id="report-pdf-link" class="btn-secondary" target="_blank">Download PDF</a>
           <button id="refresh-report-btn" class="btn-secondary">Refresh</button>
         </div>
         <div id="report-preview" class="report-preview"></div>
-      </div>
-
-      <div class="tab-content hidden" id="tab-chat">
-        <div class="chat-section-selector">
-          <label>Discuss:</label>
-          <select id="chat-section">
-            <option value="overview">Overview</option>
-            <option value="pages">Pages</option>
-            <option value="content">Content Items</option>
-            <option value="links">Links & Backlinks</option>
-            <option value="actions">SEO Actions</option>
-            <option value="graph">Graph & Flows</option>
-            <option value="insights">SEO Insights</option>
-          </select>
-        </div>
-        <div class="chat-box" id="chat-box">
-          <div class="chat-messages" id="chat-messages">
-            <div class="chat-message bot">Select a section and ask me anything about the analysis.</div>
-          </div>
-          <form id="chat-form" class="chat-input-group">
-            <input type="text" id="chat-input" placeholder="Ask about this section..." disabled>
-            <button type="submit" id="chat-send" disabled>Send</button>
-          </form>
-        </div>
       </div>
 
       <div class="tab-content hidden" id="tab-seo-insights">
@@ -219,7 +190,13 @@
         <p class="section-desc">Schedule recurring crawls. Each run creates a new analysis job you can open from the Sites tab.</p>
         <form id="schedule-form" class="schedule-form">
           <input type="url" id="schedule-url" placeholder="https://example.com" required>
-          <input type="number" id="schedule-interval" placeholder="Interval (hours)" min="0.1" step="0.1" value="24" required>
+          <label class="schedule-interval-label" for="schedule-interval">Every</label>
+          <input type="number" id="schedule-interval" min="1" step="1" value="24" style="width:90px" required>
+          <select id="schedule-unit" class="filter-select" style="width:auto">
+            <option value="hours" selected>hours</option>
+            <option value="minutes">minutes</option>
+            <option value="days">days</option>
+          </select>
           <input type="number" id="schedule-max-pages" placeholder="Max pages" min="1" max="200" value="50">
           <button type="submit" class="btn-primary">Add Schedule</button>
         </form>
@@ -257,6 +234,34 @@
       </div>
     </div>
   </main>
+</div>
+
+<div id="chat-widget" class="chat-widget">
+  <div id="chat-panel" class="chat-panel hidden">
+    <div class="chat-panel-header">
+      <span class="chat-panel-title">💬 AI Assistant</span>
+      <select id="chat-section" class="chat-section-select" title="Section context">
+        <option value="overview">Overview</option>
+        <option value="pages">Pages</option>
+        <option value="content">Content Items</option>
+        <option value="links">Links & Backlinks</option>
+        <option value="actions">SEO Actions</option>
+        <option value="graph">Graph & Flows</option>
+        <option value="insights">SEO Insights</option>
+      </select>
+      <button id="chat-close" class="chat-close" title="Close">✕</button>
+    </div>
+    <div class="chat-box" id="chat-box">
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-message bot">Select a section and ask me anything about the analysis.</div>
+      </div>
+      <form id="chat-form" class="chat-input-group">
+        <input type="text" id="chat-input" placeholder="Ask about this section..." disabled>
+        <button type="submit" id="chat-send" disabled>Send</button>
+      </form>
+    </div>
+  </div>
+  <button id="chat-toggle" class="chat-toggle">💬 Chat</button>
 </div>
 
 <div id="modal-overlay" class="modal-overlay hidden">

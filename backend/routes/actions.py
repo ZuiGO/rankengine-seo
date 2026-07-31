@@ -50,6 +50,16 @@ async def approve_action(action_id: str, req: ApproveRequest):
         from backend.logging_setup import get_logger
         get_logger("actions").warning("Change application failed action=%s: %s", action_id, e)
 
+    try:
+        import asyncio
+        from backend.services.dummy_site import regenerate_after_change
+        job_id = item.get("job_id")
+        if job_id:
+            asyncio.create_task(regenerate_after_change(job_id))
+    except Exception as e:
+        from backend.logging_setup import get_logger
+        get_logger("actions").warning("Dummy site auto-regeneration hook failed: %s", e)
+
     return {
         "status": "ok",
         "action_id": action_id,

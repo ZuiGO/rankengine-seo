@@ -2,13 +2,25 @@ from typing import Optional
 import httpx
 
 from backend.config import settings
+from backend.services.service_errors import ServiceError
 
 SERP_BASE_URL = "https://serpapi.com/search"
+
+SERVICE = "serp"
+
+HINT = "Add a valid SERP API key to .env (serp_api_key) or top up your SERP API credits."
+
+
+def _raise_api_error(data: dict, query: str) -> None:
+    err = data.get("error")
+    if not err:
+        return
+    raise ServiceError(SERVICE, f"SERP API ({query}): {err}", hint=HINT)
 
 
 async def search_keyword(keyword: str, domain: Optional[str] = None) -> dict:
     if not settings.serp_api_key:
-        raise ValueError("SERP API key not configured")
+        raise ServiceError(SERVICE, "SERP API key not configured", hint=HINT)
     params = {
         "api_key": settings.serp_api_key,
         "q": keyword,
@@ -17,27 +29,29 @@ async def search_keyword(keyword: str, domain: Optional[str] = None) -> dict:
         "gl": "us",
         "hl": "en",
     }
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
-        data = resp.json()
-        organic = data.get("organic_results", [])
-        if domain:
-            rank = next(
-                (i + 1 for i, r in enumerate(organic) if domain in r.get("link", "")),
-                None,
-            )
-            return {
-                "keyword": keyword,
-                "rank": rank,
-                "total_results": data.get("search_information", {}).get("total_results"),
-                "organic_count": len(organic),
-                "top_results": [
-                    {"position": r.get("position"), "title": r.get("title"), "url": r.get("link")}
-                    for r in organic[:5]
-                ],
-            }
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+    except Exception as e:
+        raise ServiceError(SERVICE, f"SERP API request failed: {e}", hint=HINT) from e
+    if resp.status_code >= 400:
+        raise ServiceError(
+            SERVICE,
+            f"SERP API ({keyword}) failed (HTTP {resp.status_code})",
+            status_code=resp.status_code,
+            hint=HINT,
+        )
+    data = resp.json()
+    _raise_api_error(data, keyword)
+    organic = data.get("organic_results", [])
+    if domain:
+        rank = next(
+            (i + 1 for i, r in enumerate(organic) if domain in r.get("link", "")),
+            None,
+        )
         return {
             "keyword": keyword,
+            "rank": rank,
             "total_results": data.get("search_information", {}).get("total_results"),
             "organic_count": len(organic),
             "top_results": [
@@ -45,6 +59,15 @@ async def search_keyword(keyword: str, domain: Optional[str] = None) -> dict:
                 for r in organic[:5]
             ],
         }
+    return {
+        "keyword": keyword,
+        "total_results": data.get("search_information", {}).get("total_results"),
+        "organic_count": len(organic),
+        "top_results": [
+            {"position": r.get("position"), "title": r.get("title"), "url": r.get("link")}
+            for r in organic[:5]
+        ],
+    }
 
 
 async def bulk_keyword_search(keywords: list[str], domain: str) -> list[dict]:
@@ -61,7 +84,7 @@ async def bulk_keyword_search(keywords: list[str], domain: str) -> list[dict]:
 async def serp_link_search(domain: str, max_pages: int = 3) -> list[dict]:
     """Harvest backlink source pages via Google `link:` / `inanchor:` operators."""
     if not settings.serp_api_key:
-        raise ValueError("SERP API key not configured")
+        raise ServiceError(SERVICE, "SERP API key not configured", hint=HINT)
 
     sources = []
     seen = set()
@@ -79,8 +102,19 @@ async def serp_link_search(domain: str, max_pages: int = 3) -> list[dict]:
                     "hl": "en",
                     "start": page * 10,
                 }
-                resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+                try:
+                    resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+                except Exception as e:
+                    raise ServiceError(SERVICE, f"SERP API request failed: {e}", hint=HINT) from e
+                if resp.status_code >= 400:
+                    raise ServiceError(
+                        SERVICE,
+                        f"SERP API ({query}) failed (HTTP {resp.status_code})",
+                        status_code=resp.status_code,
+                        hint=HINT,
+                    )
                 data = resp.json()
+                _raise_api_error(data, query)
                 organic = data.get("organic_results", [])
                 if not organic:
                     break
@@ -99,6 +133,22 @@ async def serp_link_search(domain: str, max_pages: int = 3) -> list[dict]:
                     })
 
     return sources
+
+
+async def run_serp_rankings(domain: str, job_id: str | None, max_keywords: int = 5) -> tuple[list[dict], list[str]]:
+    """Check SERP ranking for a handful of job keywords. Returns (results, per-keyword errors)."""
+    keywords = []
+    if job_id:
+        keywords = await extract_keywords_from_content(job_id)
+    keywords = keywords[:max_keywords]
+    results = []
+    errors = []
+    for kw in keywords:
+        try:
+            results.append(await search_keyword(kw, domain))
+        except Exception as e:
+            errors.append(f"{kw}: {e}")
+    return results, errors
 
 
 async def extract_keywords_from_content(job_id: str) -> list[str]:

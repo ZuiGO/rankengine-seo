@@ -82,7 +82,6 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "pages") loadPages(currentJobId);
       if (currentTab === "content") loadContent(currentJobId);
       if (currentTab === "links") loadLinks(currentJobId);
-      if (currentTab === "graph") loadGraph(currentJobId);
       if (currentTab === "actions") loadActions(currentJobId);
       if (currentTab === "report") loadReport(currentJobId);
       if (currentTab === "chat") initChat();
@@ -149,10 +148,9 @@ async function showResults(jobId) {
   loadPages(jobId);
   loadContent(jobId);
   loadLinks(jobId);
-  loadGraph(jobId);
-  loadActions(jobId);
   loadReport(jobId);
   initChat();
+  loadSiteHealth(jobId);
 
   // Switch to overview
   document.querySelector('.tab[data-tab="overview"]').click();
@@ -183,6 +181,46 @@ function loadOverview(summary) {
     flows.innerHTML = `
       <div class="stat-card"><div class="stat-value">${summary.total_user_flows || 0}</div><div class="stat-label">User Flows Identified</div></div>
     `;
+  }
+}
+
+async function loadSiteHealth(jobId) {
+  const el = document.getElementById("overview-health");
+  if (!el) return;
+  el.innerHTML = '<div class="insights-card">Loading site health...</div>';
+  try {
+    const resp = await fetch(`${API_BASE}/sites/${jobId}/health`);
+    if (!resp.ok) {
+      el.innerHTML = serviceErrorHtml("Site health", `Failed to load: ${resp.status}`);
+      return;
+    }
+    const h = await resp.json();
+    const m = h.metrics || {};
+    const issues = h.issues || [];
+    const gradeColor = { A: "#16a34a", B: "#84cc16", C: "#d97706", D: "#dc2626", F: "#b91c1c" }[h.grade] || "#6b7280";
+    el.innerHTML = `
+      <h3>Site Health <span class="count-label">(grade ${h.grade}, ${h.score}/100)</span></h3>
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+        <div class="insights-card"><div class="insights-label">Grade</div><div class="insights-value" style="color:${gradeColor};font-size:28px;font-weight:700">${h.grade || "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Health Score</div><div class="insights-value">${h.score ?? "N/A"}/100</div></div>
+        <div class="insights-card"><div class="insights-label">Broken Links</div><div class="insights-value">${m.broken_links ?? "N/A"}${m.broken_link_rate != null ? ` (${m.broken_link_rate}%)` : ""}</div></div>
+        <div class="insights-card"><div class="insights-label">Meta Description</div><div class="insights-value">${m.meta_description_coverage ?? "N/A"}%</div></div>
+        <div class="insights-card"><div class="insights-label">Alt Text Coverage</div><div class="insights-value">${m.alt_text_coverage ?? "N/A"}%</div></div>
+        <div class="insights-card"><div class="insights-label">Thin Pages</div><div class="insights-value">${m.thin_pages ?? 0}</div></div>
+        <div class="insights-card"><div class="insights-label">Pending Actions</div><div class="insights-value">${m.pending_action_items ?? 0}</div></div>
+      </div>
+      ${issues.length ? `
+        <h3 style="margin-top:16px">Health Issues (${issues.length})</h3>
+        <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+          ${issues.map(i => `
+            <div class="insights-card" style="border-left:3px solid ${i.severity === "high" ? "#dc2626" : i.severity === "medium" ? "#d97706" : "#6b7280"}">
+              <div class="insights-label" style="text-transform:capitalize">${i.severity}</div>
+              <div style="font-size:13px;color:var(--text-secondary)">${escapeHtml(i.message)}</div>
+            </div>`).join("")}
+        </div>` : ""}
+    `;
+  } catch (err) {
+    el.innerHTML = serviceErrorHtml("Site health", err.message);
   }
 }
 
@@ -249,11 +287,12 @@ async function loadContent(jobId) {
   table.innerHTML = `
     <table class="data-table">
       <thead><tr>
-        <th>Type</th><th>Source URL</th><th>Page URL</th><th>Size</th><th>MIME</th>
+        <th>Type</th><th>Preview</th><th>Source URL</th><th>Page URL</th><th>Size</th><th>MIME</th>
       </tr></thead>
       <tbody>${data.items.map(c => `
         <tr style="cursor:pointer" onclick="showContentDetail('${c.id}')">
           <td>${typeIcons[c.content_type] || "📄"} ${c.content_type}</td>
+          <td>${contentPreview(c)}</td>
           <td class="page-url-cell" title="${c.source_url}">${c.source_url}</td>
           <td class="page-url-cell" title="${c.page_url}">${c.page_url}</td>
           <td>${c.file_size ? formatSize(c.file_size) : "-"}</td>
@@ -262,6 +301,14 @@ async function loadContent(jobId) {
       `).join("")}</tbody>
     </table>
   `;
+}
+
+function contentPreview(c) {
+  if (!c.file_url) return '<span class="count-label">not cached</span>';
+  if (c.content_type === "image") {
+    return `<img src="${c.file_url}" loading="lazy" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border)" title="${escapeHtml(c.source_url)}">`;
+  }
+  return `<a href="${c.file_url}" target="_blank" rel="noopener" class="btn-secondary" style="font-size:11px;padding:3px 8px">View</a>`;
 }
 
 async function showContentDetail(contentId) {
@@ -275,6 +322,9 @@ async function showContentDetail(contentId) {
     let html = `
       <div class="content-detail-section">
         <h4>Content Info</h4>
+        ${c.file_url ? (c.content_type === "image"
+          ? `<div style="margin-bottom:12px"><img src="${c.file_url}" style="max-width:320px;max-height:240px;border-radius:8px;border:1px solid var(--border)" alt="Content preview"></div>`
+          : `<div style="margin-bottom:12px"><a href="${c.file_url}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block">Open file</a></div>`) : ""}
         <div class="data-row"><span class="label">Type</span><span class="value">${c.content_type}</span></div>
         <div class="data-row"><span class="label">Source URL</span><span class="value" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.source_url}</span></div>
         <div class="data-row"><span class="label">Page URL</span><span class="value" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.page_url}</span></div>
@@ -295,6 +345,15 @@ async function showContentDetail(contentId) {
           <div class="data-row"><span class="label">Images Found</span><span class="value">${s.total_images_extracted || 0}</span></div>
           <div class="data-row"><span class="label">Text Chunks</span><span class="value">${s.total_text_chunks || 0}</span></div>
         `;
+      }
+
+      if (ext.text_chunks && ext.text_chunks.length > 0) {
+        html += `<h4 style="margin-top:12px">Extracted Text (${ext.text_chunks.length} chunks)</h4>`;
+        for (const chunk of ext.text_chunks.slice(0, 3)) {
+          const text = (chunk.text || "").trim().substring(0, 500);
+          if (!text) continue;
+          html += `<div style="background:var(--bg-secondary);border-radius:6px;padding:10px;margin-top:6px;font-size:12px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(text)}${text.length >= 500 ? "…" : ""}</div>`;
+        }
       }
 
       if (ext.tables && ext.tables.length > 0) {
@@ -439,21 +498,60 @@ async function loadDummySite(jobId) {
       return;
     }
     el.innerHTML = `
+      ${data.stale ? `<div class="service-error" style="background:#fffbeb;border-color:#fde68a"><div class="service-error-title" style="color:#92400e">Mirror is out of date</div><div class="service-error-msg" style="color:#78350f">SEO actions were reviewed after this mirror was generated. Regenerate to apply the latest approved changes.</div></div>` : ""}
       <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
         <div class="insights-card"><div class="insights-label">Files</div><div class="insights-value">${data.file_count}</div></div>
         <div class="insights-card"><div class="insights-label">Pages Mirrored</div><div class="insights-value">${data.pages}</div></div>
         <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${data.changes_applied}</div></div>
+        <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value" style="color:#d97706">${data.pending_changes ?? 0}</div></div>
         <div class="insights-card"><div class="insights-label">Links Rewritten</div><div class="insights-value">${data.links_rewritten}</div></div>
       </div>
-      <div style="margin-top:12px;display:flex;gap:10px">
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
         <a class="btn-primary" href="${data.url}" target="_blank" rel="noopener">Open Dummy Site</a>
         <a class="btn-secondary" href="${API_BASE}/dummy/${jobId}/download">Download ZIP</a>
         <button id="regenerate-dummy-btn" class="btn-secondary">Regenerate</button>
+        <button id="compare-dummy-btn" class="btn-secondary">Compare & Report</button>
+        <a class="btn-secondary" href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Download Comparison</a>
       </div>`;
     document.getElementById("regenerate-dummy-btn").onclick = async () => {
       await fetch(`${API_BASE}/dummy/${jobId}/generate`, { method: "POST" });
       showToast("Dummy site regenerated");
       loadDummySite(jobId);
+    };
+    document.getElementById("compare-dummy-btn").onclick = async () => {
+      const btn = document.getElementById("compare-dummy-btn");
+      btn.disabled = true;
+      btn.textContent = "Comparing...";
+      try {
+        const resp = await fetch(`${API_BASE}/sites/${jobId}/compare-changes`, { method: "POST" });
+        const c = await resp.json();
+        if (!resp.ok) {
+          showToast("Comparison failed: " + (c.detail || resp.status));
+          return;
+        }
+        const alt = c.alt_text || {};
+        const lb = c.link_health_before || {};
+        const la = c.link_health_after || {};
+        const dummy = c.dummy || {};
+        showModal("Original vs Suggested-Changes", `
+          <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+            <div class="insights-card"><div class="insights-label">Pages Compared</div><div class="insights-value">${c.pages_compared}</div></div>
+            <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${dummy.changes_applied ?? 0}</div></div>
+            <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value" style="color:#d97706">${c.pending_suggestions ?? 0}</div></div>
+          </div>
+          <h4 style="margin-top:16px">Alt text coverage: ${alt.coverage_before ?? "N/A"}% → <b style="color:var(--success)">${alt.coverage_after ?? "N/A"}%</b></h4>
+          <div class="data-row"><span class="label">Images without alt (before)</span><span class="value">${alt.missing_before ?? "N/A"}</span></div>
+          <div class="data-row"><span class="label">Images without alt (after)</span><span class="value" style="color:${(alt.missing_after ?? 999) < (alt.missing_before ?? 0) ? "var(--success)" : ""}">${alt.missing_after ?? "N/A"}</span></div>
+          <div class="data-row"><span class="label">Broken links (original)</span><span class="value">${lb.broken ?? 0} / ${lb.checked ?? 0}</span></div>
+          <div class="data-row"><span class="label">Broken links (dummy mirror)</span><span class="value">${la.broken ?? 0} / ${la.checked ?? 0}</span></div>
+          <p class="section-desc" style="margin-top:12px"><a href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Download full comparison report (HTML)</a></p>
+        `);
+      } catch (err) {
+        showToast("Comparison failed: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Compare & Report";
+      }
     };
   } catch (err) {
     el.innerHTML = `<p class="section-desc">Error: ${escapeHtml(err.message)}</p>`;
@@ -472,197 +570,6 @@ document.getElementById("check-links-btn").addEventListener("click", async () =>
   loadLinkHealth(currentJobId);
 });
 
-async function loadGraph(jobId) {
-  const resp = await fetch(`${API_BASE}/graph/${jobId}`);
-  const data = await resp.json();
-
-  const stats = document.getElementById("graph-stats");
-  stats.innerHTML = `
-    <div class="stat-card"><div class="stat-value">${data.nodes.length}</div><div class="stat-label">Graph Nodes</div></div>
-    <div class="stat-card"><div class="stat-value">${data.edges.length}</div><div class="stat-label">Relationships</div></div>
-    <div class="stat-card"><div class="stat-value">${data.nodes.filter(n => n.type === 'page').length}</div><div class="stat-label">Page Nodes</div></div>
-    <div class="stat-card"><div class="stat-value">${data.nodes.filter(n => n.type === 'content').length}</div><div class="stat-label">Content Nodes</div></div>
-  `;
-
-  const legend = document.getElementById("graph-legend");
-  legend.innerHTML = `
-    <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#6366f1"></div> Pages</div>
-    <div class="graph-legend-item"><div class="graph-legend-dot" style="background:#22c55e"></div> Content</div>
-    <div class="graph-legend-item"><span style="color:#94a3b8">────</span> HAS_CONTENT</div>
-    <div class="graph-legend-item"><span style="color:#f59e0b">────</span> LINKS_TO</div>
-  `;
-
-  renderForceGraph(data.nodes, data.edges);
-}
-
-function renderForceGraph(nodes, edges) {
-  const canvas = document.getElementById("graph-canvas");
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = Math.min(rect.width - 16, 900);
-  canvas.height = 500;
-  const ctx = canvas.getContext("2d");
-
-  if (nodes.length === 0) {
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "16px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("No graph data available. Run an analysis first.", canvas.width / 2, canvas.height / 2);
-    return;
-  }
-
-  const centerX = canvas.width / 2;
-  const centerY = canvas.height / 2;
-  const radius = Math.min(canvas.width, canvas.height) * 0.35;
-
-  const sim = nodes.map((n, i) => {
-    const angle = (i / nodes.length) * Math.PI * 2;
-    return {
-      ...n,
-      x: centerX + radius * Math.cos(angle) + (Math.random() - 0.5) * 40,
-      y: centerY + radius * Math.sin(angle) + (Math.random() - 0.5) * 40,
-      vx: 0, vy: 0,
-    };
-  });
-
-  const nodeMap = {};
-  sim.forEach(n => { nodeMap[n.id] = n; });
-
-  let hoveredNode = null;
-  let tooltipEl = null;
-
-  function createTooltip() {
-    tooltipEl = document.createElement("div");
-    tooltipEl.className = "graph-tooltip";
-    tooltipEl.style.display = "none";
-    canvas.parentElement.appendChild(tooltipEl);
-  }
-  createTooltip();
-
-  function tick() {
-    const k = 0.05;
-    const repulsion = 6000;
-    const attraction = 0.005;
-
-    for (let i = 0; i < sim.length; i++) {
-      for (let j = i + 1; j < sim.length; j++) {
-        let dx = sim[j].x - sim[i].x;
-        let dy = sim[j].y - sim[i].y;
-        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        let force = repulsion / (dist * dist);
-        let fx = (dx / dist) * force;
-        let fy = (dy / dist) * force;
-        sim[i].vx -= fx;
-        sim[i].vy -= fy;
-        sim[j].vx += fx;
-        sim[j].vy += fy;
-      }
-    }
-
-    for (const edge of edges) {
-      const a = nodeMap[edge.source];
-      const b = nodeMap[edge.target];
-      if (!a || !b) continue;
-      let dx = b.x - a.x;
-      let dy = b.y - a.y;
-      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      let force = (dist - 120) * attraction;
-      let fx = (dx / dist) * force;
-      let fy = (dy / dist) * force;
-      a.vx += fx;
-      a.vy += fy;
-      b.vx -= fx;
-      b.vy -= fy;
-    }
-
-    const damping = 0.85;
-    for (const n of sim) {
-      n.vx *= damping;
-      n.vy *= damping;
-      n.x += n.vx;
-      n.y += n.vy;
-
-      const margin = 30;
-      if (n.x < margin) { n.x = margin; n.vx *= -0.5; }
-      if (n.x > canvas.width - margin) { n.x = canvas.width - margin; n.vx *= -0.5; }
-      if (n.y < margin) { n.y = margin; n.vy *= -0.5; }
-      if (n.y > canvas.height - margin) { n.y = canvas.height - margin; n.vy *= -0.5; }
-    }
-
-    draw();
-    requestAnimationFrame(tick);
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    for (const edge of edges) {
-      const a = nodeMap[edge.source];
-      const b = nodeMap[edge.target];
-      if (!a || !b) continue;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = edge.type === "HAS_CONTENT" ? "#94a3b8" : "#f59e0b";
-      ctx.lineWidth = edge.type === "HAS_CONTENT" ? 0.8 : 1.2;
-      ctx.globalAlpha = 0.4;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-
-    for (const n of sim) {
-      ctx.beginPath();
-      const isHover = hoveredNode && hoveredNode.id === n.id;
-      const r = isHover ? 9 : (n.type === "page" ? 7 : 5);
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = n.type === "page" ? "#6366f1" : "#22c55e";
-      ctx.fill();
-      if (isHover) {
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-    }
-  }
-
-  canvas.addEventListener("mousemove", e => {
-    const rect2 = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect2.left;
-    const my = e.clientY - rect2.top;
-    const scaleX = canvas.width / rect2.width;
-    const scaleY = canvas.height / rect2.height;
-    const cmx = mx * scaleX;
-    const cmy = my * scaleY;
-
-    hoveredNode = null;
-    for (const n of sim) {
-      const dx = cmx - n.x;
-      const dy = cmy - n.y;
-      if (dx * dx + dy * dy < 400) {
-        hoveredNode = n;
-        break;
-      }
-    }
-
-    if (hoveredNode) {
-      const label = hoveredNode.title || hoveredNode.id;
-      tooltipEl.textContent = `${hoveredNode.type}: ${label.substring(0, 80)}`;
-      tooltipEl.style.display = "block";
-      tooltipEl.style.left = (e.clientX - rect2.left + 12) + "px";
-      tooltipEl.style.top = (e.clientY - rect2.top - 30) + "px";
-      canvas.style.cursor = "pointer";
-    } else {
-      tooltipEl.style.display = "none";
-      canvas.style.cursor = "grab";
-    }
-  });
-
-  canvas.addEventListener("mouseleave", () => {
-    hoveredNode = null;
-    if (tooltipEl) tooltipEl.style.display = "none";
-  });
-
-  tick();
-}
 
 async function loadActions(jobId) {
   const statusFilter = document.getElementById("action-status-filter").value;
@@ -750,6 +657,7 @@ async function approveAction(actionId, status) {
 async function loadReport(jobId) {
   const link = document.getElementById("report-download-link");
   link.href = `${API_BASE}/reports/${jobId}/download`;
+  document.getElementById("report-pdf-link").href = `${API_BASE}/reports/${jobId}/pdf`;
 
   const resp = await fetch(`${API_BASE}/reports/${jobId}`);
   const report = await resp.json();
@@ -814,6 +722,20 @@ function initChat() {
   document.getElementById("chat-send").disabled = false;
 }
 
+document.getElementById("chat-toggle").addEventListener("click", () => {
+  const panel = document.getElementById("chat-panel");
+  panel.classList.toggle("hidden");
+  if (!panel.classList.contains("hidden")) {
+    const messages = document.getElementById("chat-messages");
+    messages.scrollTop = messages.scrollHeight;
+    document.getElementById("chat-input").focus();
+  }
+});
+
+document.getElementById("chat-close").addEventListener("click", () => {
+  document.getElementById("chat-panel").classList.add("hidden");
+});
+
 document.getElementById("chat-form").addEventListener("submit", async e => {
   e.preventDefault();
   const input = document.getElementById("chat-input");
@@ -833,8 +755,12 @@ document.getElementById("chat-form").addEventListener("submit", async e => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_id: currentJobId, section, message: msg }),
     });
-    const data = await resp.json();
-    messages.innerHTML += `<div class="chat-message bot">${escapeHtml(data.reply)}</div>`;
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      messages.innerHTML += `<div class="chat-message bot">Error: ${escapeHtml(data.detail || ("Service error (" + resp.status + ")"))}</div>`;
+    } else {
+      messages.innerHTML += `<div class="chat-message bot">${escapeHtml(data.reply)}</div>`;
+    }
     messages.scrollTop = messages.scrollHeight;
   } catch (err) {
     messages.innerHTML += `<div class="chat-message bot">Error: ${err.message}</div>`;
@@ -863,6 +789,30 @@ function showToast(msg) {
 }
 
 // SEO Insights
+function serviceErrorHtml(service, message, hint) {
+  return `<div class="service-error">
+    <div class="service-error-title">${escapeHtml(service || "Service")} unavailable</div>
+    <div class="service-error-msg">${escapeHtml(message || "Unknown error")}</div>
+    ${hint ? `<div class="service-error-hint">${escapeHtml(hint)}</div>` : ""}
+  </div>`;
+}
+
+function sourceLabel(source) {
+  const map = { dataforseo: "DataForSEO", serp: "SERP API", local: "local crawl data", none: "not available" };
+  return map[source] || source || "not available";
+}
+
+function renderInsightSection(el, { data, error, source, emptyText, render }) {
+  let html = "";
+  if (error) html += serviceErrorHtml(source === "dataforseo" ? "DataForSEO" : source === "serp" ? "SERP API" : "External service", error);
+  if (data && render) {
+    html += `<p class="source-note">Source: ${sourceLabel(source)}</p>`;
+    html += render(data);
+  }
+  if (!data && !error) html += `<div class="insights-card">${emptyText}</div>`;
+  el.innerHTML = html;
+}
+
 async function loadSeoInsights(jobId) {
   const errDiv = document.getElementById("insights-error");
   errDiv.classList.add("hidden");
@@ -875,10 +825,11 @@ async function loadSeoInsights(jobId) {
     }
     const data = await resp.json();
     if (data.cached) showToast("Insights loaded from cache");
-    renderKeywords(data.keywords || []);
-    renderBacklinks(data.backlinks);
-    renderDomainOverview(data.overview);
-    renderOnpage(data.onpage);
+    renderKeywords(data.keywords || [], data.keywords_error, data.keywords_source);
+    renderBacklinks(data.backlinks, data.backlinks_error, data.backlinks_source);
+    renderDomainOverview(data.overview, data.overview_error, data.overview_source);
+    renderOnpage(data.onpage, data.onpage_error, data.onpage_source);
+    renderSerp(data.serp_rankings || [], data.serp_error, data.serp_source);
   } catch (err) {
     errDiv.textContent = "Error loading insights: " + err.message;
     errDiv.classList.remove("hidden");
@@ -897,11 +848,13 @@ async function loadBacklinkSources(jobId) {
     }
     const data = await resp.json();
     if (!data.backlinks || data.backlinks.length === 0) {
-      el.innerHTML = '<p class="section-desc">No backlink sources discovered yet. Click Refresh to run discovery.</p>';
+      el.innerHTML = (data.error ? serviceErrorHtml("Backlink discovery", data.error, "Click Refresh to retry discovery.") : "") +
+        '<p class="section-desc">No backlink sources discovered yet. Click Refresh to run discovery.</p>';
       return;
     }
     el.innerHTML = `
-      <p class="section-desc">${data.total} source page(s) from ${data.referring_domains} referring domain(s)</p>
+      ${data.error ? serviceErrorHtml("Backlink discovery", data.error, "Showing previously discovered sources.") : ""}
+      <p class="section-desc">${data.total} source page(s) from ${data.referring_domains} referring domain(s)${data.source_api ? ` via ${sourceLabel(data.source_api)}` : ""}</p>
       <div style="overflow-x:auto">
         <table class="data-table">
           <thead><tr><th>Source URL</th><th>Domain</th><th>Anchor</th><th>Links</th><th>Rank</th></tr></thead>
@@ -934,73 +887,98 @@ document.getElementById("refresh-backlinks-btn").addEventListener("click", async
   loadBacklinkSources(currentJobId);
 });
 
-function renderKeywords(keywords) {
-  const el = document.getElementById("keywords-list");
-  if (!keywords || keywords.length === 0) {
-    el.innerHTML = '<div class="insights-card">No keyword data available.</div>';
-    return;
-  }
-  el.innerHTML = keywords.slice(0, 15).map(k => `
-    <div class="insights-card">
-      <div class="insights-label">${escapeHtml(k.keyword || "")}</div>
-      <div class="insights-value">
-        Vol: ${k.keyword_data?.keyword_info?.search_volume ?? "N/A"}
+function renderKeywords(keywords, error, source) {
+  renderInsightSection(document.getElementById("keywords-list"), {
+    data: keywords.length ? keywords : null,
+    error,
+    source,
+    emptyText: "No keyword data available.",
+    render: kws => kws.slice(0, 15).map(k => `
+      <div class="insights-card">
+        <div class="insights-label">${escapeHtml(k.keyword || "")}</div>
+        <div class="insights-value">
+          Vol: ${k.keyword_data?.keyword_info?.search_volume ?? "N/A"}
+        </div>
+        <div class="insights-value">
+          CPC: $${(k.keyword_data?.keyword_info?.cpc ?? 0).toFixed(2)}
+        </div>
+        <div class="insights-value">
+          Difficulty: ${k.keyword_data?.keyword_properties?.keyword_difficulty ?? "N/A"}
+        </div>
       </div>
-      <div class="insights-value">
-        CPC: $${(k.keyword_data?.keyword_info?.cpc ?? 0).toFixed(2)}
-      </div>
-      <div class="insights-value">
-        Difficulty: ${k.keyword_data?.keyword_properties?.keyword_difficulty ?? "N/A"}
-      </div>
-    </div>
-  `).join("");
+    `).join(""),
+  });
 }
 
-function renderBacklinks(bl) {
-  const el = document.getElementById("backlinks-summary");
-  if (!bl) {
-    el.innerHTML = '<div class="insights-card">No backlink data available.</div>';
-    return;
-  }
-  el.innerHTML = `
-    <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-      <div class="insights-card"><div class="insights-label">Total Backlinks</div><div class="insights-value">${bl.total_backlinks ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Referring Domains</div><div class="insights-value">${bl.referring_domains ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Referring IPs</div><div class="insights-value">${bl.referring_ips ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Domain Rank</div><div class="insights-value">${bl.rank ?? "N/A"}</div></div>
-    </div>
-  `;
+function renderBacklinks(bl, error, source) {
+  renderInsightSection(document.getElementById("backlinks-summary"), {
+    data: bl,
+    error,
+    source,
+    emptyText: "No backlink data available.",
+    render: b => `
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+        <div class="insights-card"><div class="insights-label">Total Backlinks</div><div class="insights-value">${b.backlinks ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Referring Domains</div><div class="insights-value">${b.referring_domains ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Referring IPs</div><div class="insights-value">${b.referring_ips ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Domain Rank</div><div class="insights-value">${b.rank ?? "N/A"}</div></div>
+      </div>
+    `,
+  });
 }
 
-function renderDomainOverview(ov) {
-  const el = document.getElementById("domain-overview");
-  if (!ov) {
-    el.innerHTML = '<div class="insights-card">No domain overview data available.</div>';
-    return;
-  }
-  el.innerHTML = `
-    <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-      <div class="insights-card"><div class="insights-label">Organic Traffic</div><div class="insights-value">${ov.estimated_organic_traffic ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Organic Keywords</div><div class="insights-value">${ov.organic_keywords_count ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Paid Keywords</div><div class="insights-value">${ov.paid_keywords_count ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Domain Rank</div><div class="insights-value">${ov.domain_rank ?? "N/A"}</div></div>
-    </div>
-  `;
+function renderDomainOverview(ov, error, source) {
+  renderInsightSection(document.getElementById("domain-overview"), {
+    data: ov,
+    error,
+    source,
+    emptyText: "No domain overview data available.",
+    render: o => `
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+        <div class="insights-card"><div class="insights-label">Organic Traffic</div><div class="insights-value">${o.estimated_organic_traffic ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Organic Keywords</div><div class="insights-value">${o.organic_keywords_count ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Paid Keywords</div><div class="insights-value">${o.paid_keywords_count ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Domain Rank</div><div class="insights-value">${o.domain_rank ?? "N/A"}</div></div>
+      </div>
+    `,
+  });
 }
 
-function renderOnpage(op) {
-  const el = document.getElementById("onpage-summary");
-  if (!op) {
-    el.innerHTML = '<div class="insights-card">No on-page data available.</div>';
-    return;
+function renderOnpage(op, error, source) {
+  const entries = op ? Object.entries(op).filter(([k]) => !["source"].includes(k)) : null;
+  renderInsightSection(document.getElementById("onpage-summary"), {
+    data: op,
+    error,
+    source,
+    emptyText: "No on-page data available.",
+    render: o => `
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+        ${entries.map(([k, v]) => `
+          <div class="insights-card">
+            <div class="insights-label">${escapeHtml(k.replace(/_/g, " "))}</div>
+            <div class="insights-value">${typeof v === "number" ? v : escapeHtml(String(v ?? "N/A").substring(0, 60))}</div>
+          </div>`).join("")}
+      </div>
+    `,
+  });
+}
+
+function renderSerp(rankings, error, source) {
+  const el = document.getElementById("serp-rankings");
+  let html = "";
+  if (error) html += serviceErrorHtml("SERP API", error);
+  if (rankings.length) {
+    html += `<p class="source-note">Source: ${sourceLabel(source)} — rankings for keywords extracted from your content</p>`;
+    html += rankings.map(r => `
+      <div class="insights-card" style="margin-top:8px">
+        <strong>${escapeHtml(r.keyword || "")}</strong> — Rank: ${r.rank ?? "Not in top 100"} | Total Results: ${r.total_results ?? "N/A"}
+        ${r.top_results && r.top_results.length ? r.top_results.slice(0, 3).map(t => `<div style="font-size:13px;margin-top:4px">#${t.position}: <a href="${escapeHtml(t.url)}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a></div>`).join("") : ""}
+      </div>`).join("");
   }
-  el.innerHTML = `
-    <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
-      <div class="insights-card"><div class="insights-label">Overall Score</div><div class="insights-value">${op.score ?? "N/A"}%</div></div>
-      <div class="insights-card"><div class="insights-label">Title</div><div class="insights-value">${op.title ?? "N/A"}</div></div>
-      <div class="insights-card"><div class="insights-label">Description</div><div class="insights-value">${op.description?.length > 60 ? escapeHtml(op.description.slice(0,60)) + "..." : escapeHtml(op.description || "N/A")}</div></div>
-    </div>
-  `;
+  if (!rankings.length && !error) {
+    html += '<div class="insights-card">No SERP ranking data available. Use "Suggest Keywords" to add keywords.</div>';
+  }
+  el.innerHTML = html;
 }
 
 document.getElementById("refresh-insights-btn")?.addEventListener("click", async () => {
@@ -1042,6 +1020,10 @@ document.getElementById("suggest-keywords-btn")?.addEventListener("click", async
           });
           const result = await resp.json();
           chip.style.opacity = "1";
+          if (!resp.ok) {
+            serpContainer.innerHTML += `<div class="service-error"><div class="service-error-title">SERP API unavailable</div><div class="service-error-msg">${escapeHtml(result.detail || resp.status)}</div></div>`;
+            return;
+          }
           serpContainer.innerHTML += `<div class="insights-card" style="margin-top:8px">
             <strong>${escapeHtml(kw)}</strong> — Rank: ${result.rank ?? "Not in top 100"} | Total Results: ${result.total_results ?? "N/A"}
             ${result.top_results ? result.top_results.slice(0, 3).map(r => `<div style="font-size:13px;margin-top:4px">#${r.position}: <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title)}</a></div>`).join("") : ""}
@@ -1070,6 +1052,10 @@ document.getElementById("serp-search-btn")?.addEventListener("click", async () =
     });
     const result = await resp.json();
     const el = document.getElementById("serp-rankings");
+    if (!resp.ok) {
+      el.innerHTML += `<div class="service-error"><div class="service-error-title">SERP API unavailable</div><div class="service-error-msg">${escapeHtml(result.detail || resp.status)}</div></div>`;
+      return;
+    }
     el.innerHTML += `<div class="insights-card" style="margin-top:8px">
       <strong>${escapeHtml(kw)}</strong> — Rank: ${result.rank ?? "Not in top 100"} | Total Results: ${result.total_results ?? "N/A"}
       ${result.top_results ? result.top_results.slice(0, 5).map(r => `<div style="font-size:13px;margin-top:4px">#${r.position}: <a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title)}</a></div>`).join("") : ""}
@@ -1091,7 +1077,8 @@ async function loadSites() {
   const grid = document.getElementById("sites-grid");
   grid.innerHTML = '<div class="insights-card">Loading sites...</div>';
   try {
-    const resp = await fetch(`${API_BASE}/sites`);
+    const includeArchived = document.getElementById("show-archived-toggle")?.checked || false;
+    const resp = await fetch(`${API_BASE}/sites?include_archived=${includeArchived}`);
     const data = await resp.json();
     const sites = data.sites || [];
     document.getElementById("sites-count").textContent = `${sites.length} site(s) analyzed`;
@@ -1101,13 +1088,13 @@ async function loadSites() {
       return;
     }
     grid.innerHTML = sites.map(s => `
-      <div class="site-card ${s.status !== "completed" ? "site-card-muted" : ""}">
+      <div class="site-card ${s.status !== "completed" ? "site-card-muted" : ""} ${s.archived ? "site-card-archived" : ""}">
         <label class="site-select">
-          <input type="checkbox" data-job="${s.job_id}" ${selectedSiteIds.has(s.job_id) ? "checked" : ""}>
+          <input type="checkbox" data-job="${s.job_id}" ${selectedSiteIds.has(s.job_id) ? "checked" : ""} ${s.archived ? "disabled" : ""}>
           <div>
             <div class="site-domain">${escapeHtml(s.domain)}</div>
             <div class="site-url">${escapeHtml(s.url)}</div>
-            <div class="site-status status-${s.status}">${s.status}</div>
+            <div class="site-status status-${s.status}">${s.status}${s.health_grade ? ` · Health ${s.health_grade}` : ""}${s.archived ? " · archived" : ""}</div>
           </div>
         </label>
         <div class="site-stats">
@@ -1116,7 +1103,12 @@ async function loadSites() {
           <div class="site-stat"><span>${s.backlinks ?? "N/A"}</span> backlinks</div>
           <div class="site-stat"><span>${s.domain_rank ?? "N/A"}</span> rank</div>
         </div>
-        <button class="btn-secondary site-open" data-job="${s.job_id}">Open</button>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${s.archived
+            ? `<button class="btn-secondary site-restore" data-job="${s.job_id}" style="padding:6px 10px;font-size:12px">Restore</button>`
+            : `<button class="btn-secondary site-open" data-job="${s.job_id}">Open</button>
+               <button class="btn-secondary site-delete" data-job="${s.job_id}" style="padding:6px 10px;font-size:12px;color:#dc2626">Archive</button>`}
+        </div>
       </div>
     `).join("");
 
@@ -1133,11 +1125,32 @@ async function loadSites() {
         openSite(btn.dataset.job);
       });
     });
+    grid.querySelectorAll(".site-delete").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const jid = btn.dataset.job;
+        if (!confirm("Archive this site? Its data is kept and can be restored from the archived view.")) return;
+        await fetch(`${API_BASE}/sites/${jid}`, { method: "DELETE" });
+        showToast("Site archived");
+        loadSites();
+      });
+    });
+    grid.querySelectorAll(".site-restore").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await fetch(`${API_BASE}/sites/${btn.dataset.job}/restore`, { method: "POST" });
+        showToast("Site restored");
+        loadSites();
+      });
+    });
     updateCompareBtn();
   } catch (err) {
     grid.innerHTML = `<div class="insights-card">Error loading sites: ${escapeHtml(err.message)}</div>`;
   }
 }
+
+document.getElementById("show-archived-toggle")?.addEventListener("change", () => {
+  selectedSiteIds.clear();
+  loadSites();
+});
 
 function updateCompareBtn() {
   const btn = document.getElementById("compare-sites-btn");
@@ -1226,7 +1239,7 @@ async function loadSchedules() {
           <div class="site-status status-completed" style="margin-top:6px">${s.enabled ? "Enabled" : "Disabled"}</div>
         </div>
         <div class="schedule-meta">
-          <div>Every <strong>${s.interval_hours}h</strong></div>
+          <div>Every <strong>${formatInterval(s.interval_hours)}</strong></div>
           <div>Max <strong>${s.max_pages}</strong> pages</div>
           <div>Runs: <strong>${s.history?.length || 0}</strong></div>
           <div class="schedule-next">Next: ${s.next_run_at ? new Date(s.next_run_at).toLocaleString() : "—"}</div>
@@ -1268,14 +1281,17 @@ async function loadSchedules() {
 document.getElementById("schedule-form")?.addEventListener("submit", async e => {
   e.preventDefault();
   const url = document.getElementById("schedule-url").value.trim();
-  const interval = parseFloat(document.getElementById("schedule-interval").value);
+  const value = parseFloat(document.getElementById("schedule-interval").value);
+  const unit = document.getElementById("schedule-unit").value;
+  let intervalHours = unit === "minutes" ? value / 60 : unit === "days" ? value * 24 : value;
+  if (!(intervalHours >= 0.1)) intervalHours = 0.1;
   const maxPages = parseInt(document.getElementById("schedule-max-pages").value) || 50;
   if (!url) return;
   try {
     const resp = await fetch(`${API_BASE}/scheduler`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, interval_hours: interval, max_pages: maxPages }),
+      body: JSON.stringify({ url, interval_hours: intervalHours, max_pages: maxPages }),
     });
     if (!resp.ok) {
       const err = await resp.json();
@@ -1283,12 +1299,19 @@ document.getElementById("schedule-form")?.addEventListener("submit", async e => 
       return;
     }
     document.getElementById("schedule-url").value = "";
-    showToast("Schedule added — first crawl starts in " + interval + "h");
+    showToast("Schedule added — first crawl starts in " + formatInterval(intervalHours));
     loadSchedules();
   } catch (err) {
     showToast("Error: " + err.message);
   }
 });
+
+function formatInterval(hours) {
+  if (!hours || hours <= 0) return "—";
+  if (hours < 1) return Math.round(hours * 60) + " min";
+  if (hours % 24 === 0) return Math.round(hours / 24) + " day(s)";
+  return (hours % 1 === 0 ? hours : Math.round(hours * 10) / 10) + " h";
+}
 
 // Logs & Alerts
 async function loadLogs() {

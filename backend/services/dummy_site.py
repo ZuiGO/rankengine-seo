@@ -39,6 +39,15 @@ def url_to_mirror_path(url: str) -> str:
     return path + "/index.html"
 
 
+def _normalize_page_url(url: str) -> str:
+    """Normalize page URLs so '/', '/index.html' and ''-variants match."""
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/index.html"):
+        path = path[:-len("/index.html")]
+    return f"{parsed.scheme}://{parsed.netloc}{path}".lower()
+
+
 def _sanitize_path(path: str) -> str:
     return path.replace("..", "").lstrip("/")
 
@@ -58,30 +67,38 @@ async def _fetch_html(url: str) -> tuple[str | None, int | None]:
         return None, None
 
 
-async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> int:
+async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> tuple[int, int]:
+    """Apply approved content versions to the mirror. Returns (applied, pending_action_count)."""
     db = get_db()
     applied = 0
-    cursor = db.content_versions.find({
+    versions = await db.content_versions.find({
         "job_id": job_id,
-        "page_url": page_url,
         "status": "approved",
         "after": {"$ne": None},
-    })
-    async for v in cursor:
+    }).to_list(length=1000)
+
+    normalized = _normalize_page_url(page_url)
+    for v in versions:
+        if _normalize_page_url(v.get("page_url", "")) != normalized:
+            continue
         field = v.get("field")
         after = v.get("after", "")
         if not after:
             continue
+        comment = BeautifulSoup(f"<!-- SEO_CHANGE_APPLIED: {field} -->", "lxml")
+        changed = False
         if field == "meta_description":
             meta = soup.find("meta", attrs={"name": "description"})
             if meta:
                 meta["content"] = after
-                applied += 1
+                meta.insert_before(comment)
+                changed = True
         elif field == "title":
             title_tag = soup.find("title")
             if title_tag:
                 title_tag.string = after
-                applied += 1
+                title_tag.insert_before(comment)
+                changed = True
         elif field == "alt_text":
             src = v.get("source_url", "")
             filename = src.split("/")[-1]
@@ -91,7 +108,8 @@ async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> int
             )
             if img:
                 img["alt"] = after
-                applied += 1
+                img.insert_before(comment)
+                changed = True
         elif field == "link_text":
             href = v.get("source_url", "")
             filename = href.split("/")[-1]
@@ -101,8 +119,21 @@ async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> int
             )
             if a_tag:
                 a_tag.string = after
-                applied += 1
-    return applied
+                a_tag.insert_before(comment)
+                changed = True
+        if changed:
+            applied += 1
+
+    pending_actions = await db.action_items.find({
+        "job_id": job_id,
+        "status": "pending",
+    }).to_list(length=1000)
+    pending = sum(
+        1
+        for a in pending_actions
+        if _normalize_page_url(a.get("page_url", "")) == normalized
+    )
+    return applied, pending
 
 
 async def _link_health_banner(soup: BeautifulSoup, job_id: str, page_url: str) -> str:
@@ -126,6 +157,38 @@ async def _link_health_banner(soup: BeautifulSoup, job_id: str, page_url: str) -
     )
 
 
+async def _pending_suggestions_banner(soup: BeautifulSoup, job_id: str, page_url: str) -> str:
+    db = get_db()
+    normalized = _normalize_page_url(page_url)
+    actions = await db.action_items.find({
+        "job_id": job_id,
+        "status": "pending",
+    }).to_list(length=100)
+    relevant = [
+        a for a in actions
+        if _normalize_page_url(a.get("page_url", "")) == normalized
+    ]
+    if not relevant:
+        return ""
+    rows = ""
+    for a in relevant[:10]:
+        first = (a.get("improvement_suggestions") or [""])[0]
+        rows += (
+            f"<li><strong>{a.get('content_type', '')}</strong>"
+            f"{(' — ' + first) if first else ''} "
+            f"<a style=\"color:#92400e\" href=\"#\" onclick=\"return false\">"
+            f"(suggested {a.get('impact_on_ranking', 'medium')} impact)</a></li>"
+        )
+    return (
+        '<div style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:12px 16px;'
+        'font-family:-apple-system,sans-serif;font-size:13px;margin-bottom:16px">'
+        f'<strong>Pending SEO Suggestions ({len(relevant)}):</strong>'
+        f'<ul style="margin:8px 0 0;padding-left:20px">{rows}</ul>'
+        '<div style="font-size:11px;margin-top:6px">Approve or reject these in the SEO Actions tab, '
+        'then regenerate this dummy site to apply them.</div></div>'
+    )
+
+
 def _rewrite_internal_links(soup: BeautifulSoup, job_id: str, base_url: str, mirror_urls: set) -> int:
     base_host = urlparse(base_url).netloc
     rewritten = 0
@@ -141,7 +204,7 @@ def _rewrite_internal_links(soup: BeautifulSoup, job_id: str, base_url: str, mir
         parsed = urlparse(full)
         if parsed.netloc != base_host:
             continue
-        if full not in mirror_urls:
+        if _normalize_page_url(full) not in mirror_urls:
             continue
         tag[attr] = f"/dummy/{job_id}/" + url_to_mirror_path(full)
         rewritten += 1
@@ -155,7 +218,7 @@ async def generate_dummy_site(job_id: str) -> dict:
         return {"status": "error", "message": "No pages for this job"}
 
     base_url = (await db.analysis_jobs.find_one({"_id": job_id}) or {}).get("url", "")
-    mirror_urls = {p["url"] for p in pages}
+    mirror_urls = {_normalize_page_url(p["url"]) for p in pages}
     target_dir = os.path.join(DUMMY_ROOT, job_id)
     os.makedirs(target_dir, exist_ok=True)
 
@@ -172,18 +235,23 @@ async def generate_dummy_site(job_id: str) -> dict:
                     f"<body><h1>Mirror unavailable</h1><p>Original page returned HTTP {status_code}.</p></body></html>"
                 )
             soup = BeautifulSoup(html, "lxml")
-            applied = await _apply_changes(soup, job_id, url)
+            applied, pending = await _apply_changes(soup, job_id, url)
             rewritten = _rewrite_internal_links(soup, job_id, url, mirror_urls)
             banner = await _link_health_banner(soup, job_id, url)
             if banner:
                 body = soup.find("body")
                 if body:
                     body.insert(0, BeautifulSoup(banner, "lxml"))
+            pending_banner = await _pending_suggestions_banner(soup, job_id, url)
+            if pending_banner:
+                body = soup.find("body")
+                if body:
+                    body.insert(0, BeautifulSoup(pending_banner, "lxml"))
             file_path = os.path.join(target_dir, rel_path)
             os.makedirs(os.path.dirname(file_path) or target_dir, exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(str(soup))
-            return {"page": url, "file": rel_path, "status_code": status_code, "changes_applied": applied, "links_rewritten": rewritten}
+            return {"page": url, "file": rel_path, "status_code": status_code, "changes_applied": applied, "pending_changes": pending, "links_rewritten": rewritten}
 
     results = []
     for chunk in [pages[i:i + FETCH_CONCURRENCY] for i in range(0, len(pages), FETCH_CONCURRENCY)]:
@@ -198,6 +266,7 @@ async def generate_dummy_site(job_id: str) -> dict:
         "file_count": file_count,
         "pages": len(pages),
         "changes_applied": sum(r["changes_applied"] for r in results),
+        "pending_changes": sum(r["pending_changes"] for r in results),
         "links_rewritten": sum(r["links_rewritten"] for r in results),
     }
     await db.dummy_sites.update_one(
@@ -205,7 +274,10 @@ async def generate_dummy_site(job_id: str) -> dict:
         {"$set": summary},
         upsert=True,
     )
-    logger.info("Dummy site generated job=%s files=%s changes=%s", job_id, file_count, summary["changes_applied"])
+    logger.info(
+        "Dummy site generated job=%s files=%s applied=%s pending=%s",
+        job_id, file_count, summary["changes_applied"], summary["pending_changes"],
+    )
     return summary
 
 
@@ -216,7 +288,29 @@ async def get_dummy_site(job_id: str) -> dict:
         return {"status": "not_generated", "job_id": job_id}
     doc["id"] = str(doc.pop("_id"))
     doc["url"] = f"/dummy/{job_id}/index.html"
+    generated_at = doc.get("generated_at")
+    doc["stale"] = False
+    if generated_at:
+        newer_versions = await db.content_versions.count_documents({
+            "job_id": job_id,
+            "status": "approved",
+            "reviewed_at": {"$gt": generated_at},
+        })
+        doc["stale"] = newer_versions > 0
     return doc
+
+
+async def regenerate_after_change(job_id: str) -> None:
+    """Rebuild the dummy site after an approve/reject if it already exists."""
+    db = get_db()
+    existing = await db.dummy_sites.find_one({"job_id": job_id})
+    if not existing or not existing.get("file_count"):
+        return
+    try:
+        await generate_dummy_site(job_id)
+        logger.info("Dummy site auto-regenerated after review job=%s", job_id)
+    except Exception as e:
+        logger.warning("Dummy site auto-regeneration failed job=%s: %s", job_id, e)
 
 
 async def dummy_site_zip(job_id: str) -> bytes | None:

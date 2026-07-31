@@ -89,9 +89,8 @@ async def generate_report(job_id: str):
     return report
 
 
-@router.get("/{job_id}/download")
-async def download_report(job_id: str):
-    from fastapi.responses import HTMLResponse
+async def _report_html(job_id: str) -> str:
+    from fastapi.responses import HTMLResponse  # noqa: F401 (kept for parity)
 
     db = get_db()
     job = await db.analysis_jobs.find_one({"_id": job_id})
@@ -261,4 +260,145 @@ th {{ background: #f9fafb; font-weight: 600; }}
         html += "</div>"
 
     html += """</div></body></html>"""
+    return html
+
+
+@router.get("/{job_id}/download")
+async def download_report(job_id: str):
+    from fastapi.responses import HTMLResponse
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return {"error": "Job not found"}
+    html = await _report_html(job_id)
+    return HTMLResponse(html)
+
+
+@router.get("/{job_id}/pdf")
+async def download_report_pdf(job_id: str):
+    from fastapi.responses import Response
+    from playwright.async_api import async_playwright
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return {"error": "Job not found"}
+
+    html = await _report_html(job_id)
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            try:
+                page = await browser.new_page()
+                await page.set_content(html, wait_until="load")
+                pdf_bytes = await page.pdf(format="A4", print_background=True)
+            finally:
+                await browser.close()
+    except Exception as e:
+        from backend.logging_setup import get_logger
+        get_logger("reports").error("PDF export failed job=%s: %s", job_id, e)
+        return {"error": f"PDF export failed: {e}"}
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="seo-report-{job_id}.pdf"'},
+    )
+
+
+@router.get("/{job_id}/compare")
+async def download_comparison_report(job_id: str):
+    from fastapi.responses import HTMLResponse
+    from backend.services.compare_service import get_site_comparison
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return {"error": "Job not found"}
+
+    comp = await get_site_comparison(job_id)
+    if not comp:
+        return {"error": "Comparison not generated yet. Use Compare & Report first."}
+
+    alt = comp.get("alt_text", {})
+    lb = comp.get("link_health_before", {})
+    la = comp.get("link_health_after", {})
+    dummy = comp.get("dummy", {})
+    per_page = comp.get("per_page", [])
+
+    rows = ""
+    for p in per_page:
+        rows += f"""
+<tr>
+<td style="max-width:220px;word-break:break-all">{p.get('url', '')}</td>
+<td>{'<b style="color:#16a34a">changed</b>' if p.get('title_changed') else '<span style="color:#6b7280">same</span>'}</td>
+<td>{'<b style="color:#16a34a">changed</b>' if p.get('meta_changed') else '<span style="color:#6b7280">same</span>'}</td>
+<td>{p.get('images_before', 0)}</td>
+<td>{p.get('images_after', 0)}</td>
+<td>{p.get('alt_missing_before', 0)}</td>
+<td>{p.get('alt_missing_after', 0)}</td>
+<td>{p.get('alt_texts_changed', 0)}</td>
+</tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Before/After Comparison - {job.get('url', '')}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 1000px; margin: 40px auto; padding: 20px; color: #333; }}
+h1 {{ color: #111; border-bottom: 3px solid #6366f1; padding-bottom: 10px; }}
+table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #e5e7eb; font-size: 13px; }}
+th {{ background: #f9fafb; }}
+.section {{ margin: 30px 0; }}
+.card {{ background: #f9fafb; border-radius: 8px; padding: 16px; margin: 8px 0; }}
+.good {{ color: #16a34a; font-weight: 600; }}
+.bad {{ color: #dc2626; font-weight: 600; }}
+</style>
+</head>
+<body>
+<h1>Original vs Suggested-Changes Comparison</h1>
+<p>URL: <strong>{job.get('url', '')}</strong> — Generated: {comp.get('generated_at', datetime.utcnow().isoformat())}</p>
+
+<div class="section">
+<h2>Overall</h2>
+<div class="card">
+Pages compared: <strong>{comp.get('pages_compared', 0)}</strong> |
+Approved changes applied to dummy site: <strong>{dummy.get('changes_applied', 0)}</strong> |
+Pending suggestions: <strong>{dummy.get('pending_changes', 0)}</strong>
+</div>
+</div>
+
+<div class="section">
+<h2>On-Page Signals (before → after)</h2>
+<table>
+<tr><th>Metric</th><th>Original site</th><th>With suggested changes</th></tr>
+<tr><td>Images</td><td>{alt.get('images_before', 0)}</td><td>{alt.get('images_after', 0)}</td></tr>
+<tr><td>Images missing alt text</td><td>{alt.get('missing_before', 0)}</td><td>{alt.get('missing_after', 0)}</td></tr>
+<tr><td>Alt text coverage</td>
+<td>{alt.get('coverage_before', 'N/A')}%</td>
+<td>{alt.get('coverage_after', 'N/A')}%</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>Link Health (before → after)</h2>
+<table>
+<tr><th>Metric</th><th>Original site</th><th>Dummy site mirror</th></tr>
+<tr><td>Links checked</td><td>{lb.get('checked', 0)}</td><td>{la.get('checked', 0)}</td></tr>
+<tr><td>OK</td><td>{lb.get('ok', 0)}</td><td>{la.get('ok', 0)}</td></tr>
+<tr><td>Broken</td>
+<td>{lb.get('broken', 0)}</td>
+<td>{la.get('broken', 0)}</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>Per-Page Breakdown ({len(per_page)})</h2>
+<table>
+<tr><th>URL</th><th>Title</th><th>Meta Description</th><th>Images</th><th>After Images</th><th>Alt Missing</th><th>Alt Missing After</th><th>Alt Changed</th></tr>
+{rows}
+</table>
+</div>
+</body></html>"""
     return HTMLResponse(html)
