@@ -1,14 +1,25 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.services.dataforseo import fetch_all_insights
 from backend.services.serp_api import search_keyword, bulk_keyword_search, extract_keywords_from_content
+from backend.services.backlinks import get_backlinks, fetch_backlinks
 from backend.db.mongo import get_db
 
 router = APIRouter(prefix="/api/seo-insights", tags=["seo-insights"])
 
 CACHE_TTL_MINUTES = 60
+
+
+class KeywordSearchRequest(BaseModel):
+    job_id: str
+    keyword: str
+
+
+class BulkKeywordRequest(BaseModel):
+    job_id: str
+    keywords: list[str]
 
 
 def _domain_from_url(url: str) -> str:
@@ -80,3 +91,23 @@ async def bulk_search(req: BulkKeywordRequest):
 async def suggested_keywords(job_id: str):
     keywords = await extract_keywords_from_content(job_id)
     return {"keywords": keywords}
+
+
+@router.get("/{job_id}/backlinks")
+async def list_backlinks(job_id: str, limit: int = Query(100, le=500), offset: int = Query(0)):
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return await get_backlinks(job_id, limit, offset)
+
+
+@router.post("/{job_id}/backlinks/refresh")
+async def refresh_backlinks(job_id: str):
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    domain = _domain_from_url(job.get("url", ""))
+    result = await fetch_backlinks(job_id, domain)
+    return {"job_id": job_id, "domain": domain, **result}

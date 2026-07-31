@@ -366,10 +366,11 @@ async function loadLinks(jobId) {
 
   const backlinksResp = await fetch(`${API_BASE}/links/${jobId}/backlinks`);
   const blData = await backlinksResp.json();
-  document.getElementById("backlinks-list").innerHTML = blData.backlinks.length === 0
-    ? '<p class="section-desc">No backlinks data yet. Backlink discovery coming in Phase 6.</p>'
-    : `<table class="data-table"><thead><tr><th>Source</th><th>Target</th></tr></thead>
-       <tbody>${blData.backlinks.map(b => `<tr><td>${b.source || "-"}</td><td>${b.target || "-"}</td></tr>`).join("")}</tbody></table>`;
+  document.getElementById("backlinks-list").innerHTML = !blData.backlinks || blData.backlinks.length === 0
+    ? '<p class="section-desc">No backlink sources discovered. See SEO Insights tab to run discovery.</p>'
+    : `<p class="section-desc">${blData.total} source page(s) from ${blData.referring_domains} referring domain(s)</p>
+       <table class="data-table"><thead><tr><th>Source URL</th><th>Domain</th><th>Anchor</th></tr></thead>
+       <tbody>${blData.backlinks.map(b => `<tr><td class="page-url-cell" title="${b.source_url}">${b.source_url || "-"}</td><td>${b.source_domain || "-"}</td><td>${(b.anchor || "-").substring(0, 60)}</td></tr>`).join("")}</tbody></table>`;
 }
 
 async function loadGraph(jobId) {
@@ -749,7 +750,56 @@ async function loadSeoInsights(jobId) {
     errDiv.textContent = "Error loading insights: " + err.message;
     errDiv.classList.remove("hidden");
   }
+  loadBacklinkSources(jobId);
 }
+
+async function loadBacklinkSources(jobId) {
+  const el = document.getElementById("backlink-sources-list");
+  el.innerHTML = '<p class="section-desc">Loading backlink sources...</p>';
+  try {
+    const resp = await fetch(`${API_BASE}/seo-insights/${jobId}/backlinks?limit=100`);
+    if (!resp.ok) {
+      el.innerHTML = `<p class="section-desc">Failed to load backlink sources: ${resp.status}</p>`;
+      return;
+    }
+    const data = await resp.json();
+    if (!data.backlinks || data.backlinks.length === 0) {
+      el.innerHTML = '<p class="section-desc">No backlink sources discovered yet. Click Refresh to run discovery.</p>';
+      return;
+    }
+    el.innerHTML = `
+      <p class="section-desc">${data.total} source page(s) from ${data.referring_domains} referring domain(s)</p>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr><th>Source URL</th><th>Domain</th><th>Anchor</th><th>Links</th><th>Rank</th></tr></thead>
+          <tbody>${data.backlinks.map(b => `
+            <tr>
+              <td class="page-url-cell" title="${b.source_url}"><a href="${escapeHtml(b.source_url)}" target="_blank" rel="noopener">${b.source_url}</a></td>
+              <td>${escapeHtml(b.source_domain || "")}</td>
+              <td>${escapeHtml((b.anchor || "-").substring(0, 60))}</td>
+              <td>${b.backlinks_count ?? "-"}</td>
+              <td>${b.page_from_rank ?? "-"}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    el.innerHTML = `<p class="section-desc">Error loading backlink sources: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+document.getElementById("refresh-backlinks-btn").addEventListener("click", async () => {
+  const el = document.getElementById("backlink-sources-list");
+  el.innerHTML = '<p class="section-desc">Discovering backlinks...</p>';
+  try {
+    const resp = await fetch(`${API_BASE}/seo-insights/${currentJobId}/backlinks/refresh`, { method: "POST" });
+    const data = await resp.json();
+    showToast(`Discovered ${data.total} backlink sources (${data.source_api || "none"})`);
+  } catch (err) {
+    showToast("Backlink discovery failed: " + err.message);
+  }
+  loadBacklinkSources(currentJobId);
+});
 
 function renderKeywords(keywords) {
   const el = document.getElementById("keywords-list");

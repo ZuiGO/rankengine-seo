@@ -134,6 +134,19 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},
+            {"$set": {"progress_message": "Listing backlink sources..."}}
+        )
+
+        try:
+            from backend.services.backlinks import fetch_backlinks
+            backlink_result = await fetch_backlinks(job_id, domain)
+            backlink_count = backlink_result["total"]
+        except Exception as bl_err:
+            logger.error("Backlink listing warning job=%s: %s", job_id, bl_err)
+            backlink_count = 0
+
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
             {"$set": {
                 "status": "completed",
                 "progress": 100,
@@ -147,6 +160,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_content_items": content_count,
                     "total_vectors": vector_count,
                     "total_user_flows": flow_count,
+                    "total_backlinks": backlink_count,
                 },
             }}
         )

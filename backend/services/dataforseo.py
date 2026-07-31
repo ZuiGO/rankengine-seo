@@ -51,6 +51,36 @@ async def backlink_summary(target: str) -> Optional[dict]:
         return None
 
 
+async def backlink_referring_pages(target: str, limit: int = 100) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BASE_URL}/v3/backlinks/referring_pages/live",
+            headers=_auth_header(),
+            json=[{"target": target, "limit": limit}],
+            timeout=30,
+        )
+        data = resp.json()
+        tasks = data.get("tasks", [])
+        if tasks and tasks[0].get("result"):
+            return tasks[0]["result"][0].get("items", [])
+        return []
+
+
+async def backlink_referring_domains(target: str, limit: int = 100) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BASE_URL}/v3/backlinks/referring_domains/live",
+            headers=_auth_header(),
+            json=[{"target": target, "limit": limit}],
+            timeout=30,
+        )
+        data = resp.json()
+        tasks = data.get("tasks", [])
+        if tasks and tasks[0].get("result"):
+            return tasks[0]["result"][0].get("items", [])
+        return []
+
+
 async def onpage_summary(url: str) -> Optional[dict]:
     async with httpx.AsyncClient() as client:
         resp = await client.post(

@@ -58,6 +58,49 @@ async def bulk_keyword_search(keywords: list[str], domain: str) -> list[dict]:
     return results
 
 
+async def serp_link_search(domain: str, max_pages: int = 3) -> list[dict]:
+    """Harvest backlink source pages via Google `link:` / `inanchor:` operators."""
+    if not settings.serp_api_key:
+        raise ValueError("SERP API key not configured")
+
+    sources = []
+    seen = set()
+    queries = [f"link:{domain}", f"inanchor:{domain}"]
+
+    async with httpx.AsyncClient() as client:
+        for query in queries:
+            for page in range(max_pages):
+                params = {
+                    "api_key": settings.serp_api_key,
+                    "q": query,
+                    "engine": "google",
+                    "google_domain": "google.com",
+                    "gl": "us",
+                    "hl": "en",
+                    "start": page * 10,
+                }
+                resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+                data = resp.json()
+                organic = data.get("organic_results", [])
+                if not organic:
+                    break
+                for r in organic:
+                    url = r.get("link")
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    sources.append({
+                        "source_url": url,
+                        "source_domain": url.split("//")[-1].split("/")[0],
+                        "anchor": r.get("title", ""),
+                        "backlinks_count": None,
+                        "page_from_rank": r.get("position"),
+                        "query": query,
+                    })
+
+    return sources
+
+
 async def extract_keywords_from_content(job_id: str) -> list[str]:
     from backend.db.mongo import get_db
     db = get_db()

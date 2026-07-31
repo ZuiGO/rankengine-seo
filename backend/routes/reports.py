@@ -55,6 +55,12 @@ async def generate_report(job_id: str):
     except Exception:
         top_flows = []
 
+    try:
+        from backend.services.backlinks import get_backlinks
+        backlink_sources = await get_backlinks(job_id, limit=20)
+    except Exception:
+        backlink_sources = {"backlinks": [], "total": 0, "referring_domains": 0}
+
     summary = job.get("summary", {})
     report = {
         "report_title": f"SEO Analysis Report - {job.get('url', '')}",
@@ -68,6 +74,7 @@ async def generate_report(job_id: str):
         "content_breakdown": content_breakdown,
         "page_type_breakdown": page_type_breakdown,
         "user_flows": top_flows,
+        "backlink_sources": backlink_sources,
         "seo_action_items": action_items_list,
         "seo_insights": insights,
     }
