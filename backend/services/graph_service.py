@@ -37,6 +37,8 @@ async def populate_graph(job_id: str):
                     page.external_links = p.external_links,
                     page.has_structured_data = p.has_structured_data,
                     page.is_indexable = p.is_indexable,
+                    page.page_type = p.page_type,
+                    page.page_role = p.page_role,
                     page.content_types = p.content_types
                 """,
                 pages=[
@@ -51,6 +53,8 @@ async def populate_graph(job_id: str):
                         "external_links": p.get("external_links", 0),
                         "has_structured_data": p.get("has_structured_data", False),
                         "is_indexable": p.get("is_indexable", True),
+                        "page_type": p.get("page_type", "other"),
+                        "page_role": p.get("page_role", "browse"),
                         "content_types": p.get("content_types", []),
                     }
                     for p in batch
@@ -183,6 +187,38 @@ async def get_graph_data(job_id: str) -> dict:
             """
             MATCH (a:Page {job_id: $job_id})-[r:LINKS_TO]->(b:Page {job_id: $job_id})
             RETURN a.url AS source, b.url AS target, 'LINKS_TO' AS type
+            """,
+            job_id=job_id,
+        )
+        async for record in result:
+            edges.append({
+                "source": record["source"],
+                "target": record["target"],
+                "type": record["type"],
+            })
+
+        result = await session.run(
+            """
+            MATCH (f:UserFlow {job_id: $job_id})
+            RETURN f.flow_id AS id, f.start_type AS start_type, f.target_url AS target_url, f.depth AS depth
+            """,
+            job_id=job_id,
+        )
+        async for record in result:
+            fid = record["id"]
+            if fid not in seen_ids:
+                seen_ids.add(fid)
+                nodes.append({
+                    "id": fid,
+                    "label": f"flow -> {record.get('target_url', '')}",
+                    "type": "flow",
+                    "subtype": record.get("depth", 0),
+                })
+
+        result = await session.run(
+            """
+            MATCH (f:UserFlow {job_id: $job_id})-[r:STARTS_AT|STEPS_THROUGH|ENDS_AT]->(p:Page)
+            RETURN f.flow_id AS source, p.url AS target, type(r) AS type
             """,
             job_id=job_id,
         )

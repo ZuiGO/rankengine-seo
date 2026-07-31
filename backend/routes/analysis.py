@@ -10,6 +10,7 @@ from backend.services.crawler import crawl_site
 from backend.services.graph_service import populate_graph
 from backend.services.content_extractor import extract_all_content
 from backend.services.vector_service import index_job_content
+from backend.services.user_flow import detect_user_flows
 from backend.services.audit_service import log_audit
 
 logger = get_logger("analysis")
@@ -83,6 +84,17 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},
+            {"$set": {"progress_message": "Identifying user flows..."}}
+        )
+
+        try:
+            flow_count = await detect_user_flows(job_id)
+        except Exception as flow_err:
+            logger.error("User flow detection warning job=%s: %s", job_id, flow_err)
+            flow_count = 0
+
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
             {"$set": {"progress_message": "Extracting content data..."}}
         )
 
@@ -134,6 +146,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_external_links": summary["total_external_links"],
                     "total_content_items": content_count,
                     "total_vectors": vector_count,
+                    "total_user_flows": flow_count,
                 },
             }}
         )
@@ -184,6 +197,17 @@ async def get_job_summary(job_id: str):
     async for row in content_breakdown_cursor:
         content_breakdown[row["_id"]] = row["count"]
 
+    page_type_pipeline = [
+        {"$match": {"job_id": job_id}},
+        {"$group": {"_id": "$page_type", "count": {"$sum": 1}}}
+    ]
+    page_type_cursor = db.pages.aggregate(page_type_pipeline)
+    page_type_breakdown = {}
+    async for row in page_type_cursor:
+        page_type_breakdown[row["_id"]] = row["count"]
+
+    user_flow_count = await db.user_flows.count_documents({"job_id": job_id})
+
     return {
         "job_id": job_id,
         "url": job.get("url", ""),
@@ -194,6 +218,8 @@ async def get_job_summary(job_id: str):
         "total_content_items": content_count,
         "total_action_items": action_count,
         "content_breakdown": content_breakdown,
+        "page_type_breakdown": page_type_breakdown,
+        "total_user_flows": user_flow_count,
         "summary": job.get("summary"),
         "created_at": job.get("created_at"),
         "completed_at": job.get("completed_at"),

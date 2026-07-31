@@ -177,6 +177,13 @@ function loadOverview(summary) {
       <div><div class="ct-count">${count}</div><div class="ct-name">${type}</div></div>
     </div>
   `).join("");
+
+  const flows = document.getElementById("overview-flows");
+  if (flows) {
+    flows.innerHTML = `
+      <div class="stat-card"><div class="stat-value">${summary.total_user_flows || 0}</div><div class="stat-label">User Flows Identified</div></div>
+    `;
+  }
 }
 
 async function loadPages(jobId) {
@@ -199,11 +206,12 @@ async function loadPages(jobId) {
   table.innerHTML = `
     <table class="data-table">
       <thead><tr>
-        <th>URL</th><th>Title</th><th>Words</th><th>Links</th><th>Images</th><th>Schema</th><th>Indexable</th>
+        <th>URL</th><th>Type</th><th>Title</th><th>Words</th><th>Links</th><th>Images</th><th>Schema</th><th>Indexable</th>
       </tr></thead>
       <tbody>${filtered.map(p => `
         <tr>
           <td class="page-url-cell" title="${p.url}">${p.url}</td>
+          <td><span class="page-type-badge">${p.page_type || "other"}</span></td>
           <td>${(p.title || "-").substring(0, 50)}</td>
           <td>${p.word_count || 0}</td>
           <td>${p.internal_links || 0}i / ${p.external_links || 0}e</td>
@@ -633,6 +641,28 @@ async function loadReport(jobId) {
       ${bl.rank !== undefined ? `<div class="stat-card"><div class="stat-value">${bl.rank}</div><div class="stat-label">Domain Rank</div></div>` : ""}
       ${ov.estimated_organic_traffic !== undefined ? `<div class="stat-card"><div class="stat-value">${ov.estimated_organic_traffic}</div><div class="stat-label">Organic Traffic</div></div>` : ""}
     </div>` : ""}
+    ${Object.keys(report.page_type_breakdown || {}).length ? `
+    <h4 style="margin:20px 0 10px">Page Architecture (${report.total_pages} pages)</h4>
+    <div class="content-types-grid">
+      ${Object.entries(report.page_type_breakdown).map(([type, count]) => `
+        <div class="content-type-card">
+          <div><div class="ct-count">${count}</div><div class="ct-name">${type}</div></div>
+        </div>
+      `).join("")}
+    </div>` : ""}
+    ${(report.user_flows || []).length ? `
+    <h4 style="margin:20px 0 10px">Top User Flows</h4>
+    <table class="data-table">
+      <thead><tr><th>Target Type</th><th>Depth</th><th>Flow Count</th><th>Target URL</th></tr></thead>
+      <tbody>${report.user_flows.map(f => `
+        <tr>
+          <td>${f.target_type}</td>
+          <td>${f.depth} hop(s)</td>
+          <td>${f.flow_count}</td>
+          <td class="page-url-cell" title="${f.target_url}">${f.target_url}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>` : ""}
     <h4 style="margin:20px 0 10px">SEO Action Items (${report.seo_action_items.length})</h4>
     ${report.seo_action_items.slice(0, 10).map(a => `
       <div style="padding:10px 0;border-bottom:1px solid var(--border)">

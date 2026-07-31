@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from backend.db.mongo import get_db
+from backend.services.user_flow import get_top_flows
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -26,6 +27,15 @@ async def generate_report(job_id: str):
     async for row in cursor:
         content_breakdown[row["_id"]] = row["count"]
 
+    page_type_pipeline = [
+        {"$match": {"job_id": job_id}},
+        {"$group": {"_id": "$page_type", "count": {"$sum": 1}}}
+    ]
+    page_type_breakdown = {}
+    cursor = db.pages.aggregate(page_type_pipeline)
+    async for row in cursor:
+        page_type_breakdown[row["_id"]] = row["count"]
+
     action_cursor = db.action_items.find({"job_id": job_id})
     action_items_list = []
     async for a in action_cursor:
@@ -40,6 +50,11 @@ async def generate_report(job_id: str):
     cached_insights = await db.seo_insights_cache.find_one({"job_id": job_id})
     insights = cached_insights.get("data", {}) if cached_insights else {}
 
+    try:
+        top_flows = await get_top_flows(job_id, limit=10)
+    except Exception:
+        top_flows = []
+
     summary = job.get("summary", {})
     report = {
         "report_title": f"SEO Analysis Report - {job.get('url', '')}",
@@ -51,6 +66,8 @@ async def generate_report(job_id: str):
         "total_internal_links": summary.get("total_internal_links", 0),
         "total_external_links": summary.get("total_external_links", 0),
         "content_breakdown": content_breakdown,
+        "page_type_breakdown": page_type_breakdown,
+        "user_flows": top_flows,
         "seo_action_items": action_items_list,
         "seo_insights": insights,
     }
@@ -117,6 +134,47 @@ th {{ background: #f9fafb; font-weight: 600; }}
         html += f"<tr><td>{row['_id']}</td><td>{row['count']}</td></tr>"
 
     html += """</table></div>
+<div class="section">
+<h2>Page Types (Architecture)</h2>
+<table>
+<tr><th>Page Type</th><th>Count</th></tr>"""
+
+    page_type_pipeline = [
+        {"$match": {"job_id": job_id}},
+        {"$group": {"_id": "$page_type", "count": {"$sum": 1}}}
+    ]
+    cursor = db.pages.aggregate(page_type_pipeline)
+    async for row in cursor:
+        html += f"<tr><td>{row['_id']}</td><td>{row['count']}</td></tr>"
+
+    html += """</table></div>
+<div class="section">
+<h2>User Flows</h2>"""
+
+    try:
+        from backend.services.user_flow import get_top_flows
+        top_flows = await get_top_flows(job_id, limit=10)
+    except Exception:
+        top_flows = []
+
+    if not top_flows:
+        html += '<p class="section-desc">No user flows identified.</p>'
+    else:
+        html += """
+<table>
+<tr><th>Target Page Type</th><th>Depth</th><th>Flow Count</th><th>Target URL</th></tr>"""
+        for flow in top_flows:
+            html += (
+                "<tr>"
+                f"<td>{flow['target_type']}</td>"
+                f"<td>{flow['depth']} hop(s)</td>"
+                f"<td>{flow['flow_count']}</td>"
+                f"<td>{flow['target_url']}</td>"
+                "</tr>"
+            )
+        html += "</table>"
+
+    html += """</div>
 <div class="section">
 <h2>SEO Action Items</h2>"""
 

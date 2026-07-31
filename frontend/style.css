@@ -347,6 +347,18 @@ body {
   white-space: nowrap;
 }
 
+.page-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #eef2ff;
+  color: #4f46e5;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
 .content-breakdown {
   display: flex;
   gap: 12px;

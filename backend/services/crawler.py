@@ -8,6 +8,7 @@ from backend.logging_setup import get_logger
 from backend.services.content_classifier import detect_content_types
 from backend.services.content_downloader import download_content
 from backend.services.seo_analyzer import analyze_content_item
+from backend.services.page_classifier import classify_page_type, page_role
 
 logger = get_logger("crawler")
 
@@ -81,6 +82,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                 if robots_meta:
                     noindex = "noindex" in robots_meta.get("content", "").lower()
 
+                page_type = classify_page_type(url, soup, title, meta_description)
+
                 items = detect_content_types(url, html)
 
                 downloaded_types = set()
@@ -108,6 +111,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                     "url": url,
                     "title": title,
                     "meta_description": meta_description,
+                    "page_type": page_type,
+                    "page_role": page_role(page_type),
                     "word_count": word_count,
                     "status_code": resp.status,
                     "h1_count": h1_count,
