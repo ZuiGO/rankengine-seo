@@ -12,6 +12,8 @@ from backend.services.page_classifier import classify_page_type, page_role
 
 logger = get_logger("crawler")
 
+MAX_HTML_STORED = 300_000
+
 
 async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurrency: int = 5):
     db = get_db()
@@ -125,6 +127,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                     "content_types": list(downloaded_types),
                     "internal_link_urls": internal_urls,
                     "external_link_urls": external_urls,
+                    "html": html[:MAX_HTML_STORED],
                 }
 
             except Exception as e:

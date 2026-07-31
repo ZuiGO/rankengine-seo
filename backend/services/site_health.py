@@ -19,7 +19,7 @@ def _grade(score: int) -> str:
 
 async def compute_site_health(job_id: str) -> dict:
     db = get_db()
-    pages = await db.pages.find({"job_id": job_id}).to_list(length=None)
+    pages = await db.pages.find({"job_id": job_id}, {"html": 0}).to_list(length=None)
     lh = await db.link_health_summaries.find_one({"job_id": job_id})
     issues: list[dict] = []
     metrics: dict = {}

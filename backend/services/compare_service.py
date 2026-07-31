@@ -66,9 +66,12 @@ def _link_health_after(job_id: str) -> dict:
     }
 
 
-async def _fetch_page(url: str) -> tuple[str, BeautifulSoup | None]:
-    html, _ = await _fetch_html(url)
-    return url, (BeautifulSoup(html, "lxml") if html is not None else None)
+async def _fetch_page(page: dict) -> tuple[str, BeautifulSoup | None]:
+    url = page["url"]
+    html = page.get("html")
+    if not html:
+        html, _ = await _fetch_html(url)
+    return url, (BeautifulSoup(html, "lxml") if html else None)
 
 
 async def compare_site_with_changes(job_id: str) -> dict:
@@ -98,12 +101,12 @@ async def compare_site_with_changes(job_id: str) -> dict:
     sem = asyncio.Semaphore(8)
     fetch_map: dict[str, BeautifulSoup | None] = {}
 
-    async def _bounded(url: str) -> None:
+    async def _bounded(p: dict) -> None:
         async with sem:
-            u, soup = await _fetch_page(url)
+            u, soup = await _fetch_page(p)
             fetch_map[u] = soup
 
-    await asyncio.gather(*(_bounded(p["url"]) for p in pages))
+    await asyncio.gather(*(_bounded(p) for p in pages))
 
     for page in pages:
         url = page["url"]

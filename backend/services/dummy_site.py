@@ -52,19 +52,48 @@ def _sanitize_path(path: str) -> str:
     return path.replace("..", "").lstrip("/")
 
 
-async def _fetch_html(url: str) -> tuple[str | None, int | None]:
-    try:
-        async with httpx.AsyncClient(
-            headers={"User-Agent": USER_AGENT},
+_shared_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = httpx.AsyncClient(
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+            },
             follow_redirects=True,
-            timeout=20,
-        ) as client:
-            resp = await client.get(url)
+            timeout=httpx.Timeout(20, connect=10),
+            limits=httpx.Limits(max_keepalive_connections=8),
+        )
+    return _shared_client
+
+
+async def _fetch_html(url: str) -> tuple[str | None, int | None]:
+    last_status: int | None = None
+    for attempt in range(2):
+        try:
+            resp = await _get_client().get(url)
+            last_status = resp.status_code
+            if resp.status_code in (403, 429) or resp.status_code >= 500:
+                if attempt == 0:
+                    await asyncio.sleep(2 + attempt)
+                    continue
             if resp.status_code >= 400:
                 return None, resp.status_code
             return resp.text, resp.status_code
-    except Exception:
-        return None, None
+        except Exception:
+            last_status = None
+            if attempt == 0:
+                await asyncio.sleep(2 + attempt)
+    return None, last_status
 
 
 async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> tuple[int, int]:
@@ -170,14 +199,21 @@ async def _pending_suggestions_banner(soup: BeautifulSoup, job_id: str, page_url
     ]
     if not relevant:
         return ""
-    rows = ""
-    for a in relevant[:10]:
+    seen = {}
+    for a in relevant:
         first = (a.get("improvement_suggestions") or [""])[0]
+        key = (a.get("content_type", ""), first)
+        count, impact = seen.get(key, (0, a.get("impact_on_ranking", "medium")))
+        seen[key] = (count + 1, impact)
+    rows = ""
+    for (ctype, first), (count, impact) in list(seen.items())[:10]:
+        label = f"{count} item{'s' if count > 1 else ''}" if count > 1 else ""
         rows += (
-            f"<li><strong>{a.get('content_type', '')}</strong>"
+            f"<li><strong>{ctype}</strong>"
             f"{(' — ' + first) if first else ''} "
             f"<a style=\"color:#92400e\" href=\"#\" onclick=\"return false\">"
-            f"(suggested {a.get('impact_on_ranking', 'medium')} impact)</a></li>"
+            f"(suggested {impact} impact)</a>"
+            f"{(' — ' + label) if label else ''}</li>"
         )
     return (
         '<div style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:12px 16px;'
@@ -228,8 +264,11 @@ async def generate_dummy_site(job_id: str) -> dict:
         async with semaphore:
             url = page["url"]
             rel_path = _sanitize_path(url_to_mirror_path(url))
-            html, status_code = await _fetch_html(url)
-            if html is None:
+            html = page.get("html")
+            status_code = page.get("status_code")
+            if not html:
+                html, status_code = await _fetch_html(url)
+            if not html:
                 html = (
                     f"<!DOCTYPE html><html><head><title>{page.get('title', '')}</title></head>"
                     f"<body><h1>Mirror unavailable</h1><p>Original page returned HTTP {status_code}.</p></body></html>"
