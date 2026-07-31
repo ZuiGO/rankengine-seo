@@ -11,7 +11,7 @@ from backend.config import settings
 from backend.db.mongo import connect_db, close_db
 from backend.db.neo4j_db import connect_neo4j, close_neo4j
 from backend.logging_setup import setup_logging, get_logger
-from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler
+from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler, logs
 from backend.services.scheduler import scheduler_loop
 
 logger = get_logger("rankengine")
@@ -77,6 +77,7 @@ app.include_router(graph.router)
 app.include_router(seo_insights.router)
 app.include_router(sites.router)
 app.include_router(scheduler.router)
+app.include_router(logs.router)
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 

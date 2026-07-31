@@ -89,6 +89,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
+      if (currentTab === "logs") loadLogs();
     }
   });
 });
@@ -1075,6 +1076,70 @@ document.getElementById("schedule-form")?.addEventListener("submit", async e => 
     showToast("Error: " + err.message);
   }
 });
+
+// Logs & Alerts
+async function loadLogs() {
+  const filter = document.getElementById("audit-event-filter").value;
+
+  const alertsEl = document.getElementById("alerts-list");
+  const auditEl = document.getElementById("audit-list");
+  const logsEl = document.getElementById("app-logs");
+
+  try {
+    const [alertsResp, auditResp, logsResp] = await Promise.all([
+      fetch(`${API_BASE}/logs/alerts`),
+      fetch(`${API_BASE}/logs/audit?limit=100${filter ? `&event=${encodeURIComponent(filter)}` : ""}`),
+      fetch(`${API_BASE}/logs/app?limit=100`),
+    ]);
+    const alerts = await alertsResp.json();
+    const audit = await auditResp.json();
+    const appLogs = await logsResp.json();
+
+    const failed = alerts.failed_analyses || [];
+    const broken = alerts.broken_schedules || [];
+    alertsEl.innerHTML = [
+      ...failed.map(a => `
+        <div class="alert-card alert-error">
+          <strong>Analysis failed</strong> — ${escapeHtml(a.url || a.job_id || "")} ${a.scheduled ? '<span class="site-status status-running">scheduled</span>' : ""}
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">${escapeHtml(a.error || "")}</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${new Date(a.timestamp).toLocaleString()}</div>
+        </div>
+      `),
+      ...broken.map(b => `
+        <div class="alert-card alert-error">
+          <strong>Broken schedule</strong> — ${escapeHtml(b.domain || "")} last run failed
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">${escapeHtml(b.last_error || "")}</div>
+        </div>
+      `),
+      ...(failed.length === 0 && broken.length === 0 ? ['<div class="insights-card">No alerts in the last 24h. All clear.</div>'] : []),
+    ].join("");
+
+    const entries = audit.entries || [];
+    auditEl.innerHTML = entries.length === 0
+      ? '<div class="insights-card">No audit entries.</div>'
+      : `<table class="data-table">
+          <thead><tr><th>Timestamp</th><th>Event</th><th>Job</th><th>Details</th></tr></thead>
+          <tbody>
+            ${entries.map(e => `
+              <tr>
+                <td style="white-space:nowrap">${new Date(e.timestamp).toLocaleString()}</td>
+                <td><span class="site-status ${e.event.includes("failed") ? "status-failed" : e.event.includes("completed") ? "status-completed" : "status-running"}">${escapeHtml(e.event)}</span></td>
+                <td style="font-size:12px">${e.job_id ? e.job_id.slice(0, 8) + "…" : "—"}</td>
+                <td style="font-size:12px;color:var(--text-secondary)">${escapeHtml(JSON.stringify(e.details || {}).slice(0, 120))}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>`;
+
+    logsEl.textContent = (appLogs.lines || []).join("\n") || "No log output yet.";
+    document.getElementById("app-log-path").textContent = appLogs.path ? `(${appLogs.path})` : "";
+  } catch (err) {
+    alertsEl.innerHTML = `<div class="insights-card">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+document.getElementById("refresh-logs-btn")?.addEventListener("click", loadLogs);
+document.getElementById("audit-event-filter")?.addEventListener("change", loadLogs);
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + " B";

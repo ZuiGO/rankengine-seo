@@ -60,6 +60,7 @@
         <button class="tab" data-tab="chat">Chat</button>
         <button class="tab" data-tab="seo-insights">SEO Insights</button>
         <button class="tab" data-tab="schedules">Schedules</button>
+        <button class="tab" data-tab="logs">Logs & Alerts</button>
       </nav>
 
       <div class="tab-content" id="tab-overview">
@@ -206,6 +207,34 @@
         </form>
         <div id="schedules-list" class="schedules-list">
           <div class="insights-card">Loading schedules...</div>
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-logs">
+        <div class="logs-controls">
+          <button id="refresh-logs-btn" class="btn-secondary">Refresh</button>
+          <select id="audit-event-filter" class="filter-select">
+            <option value="">All Events</option>
+            <option value="analysis_started">Analysis Started</option>
+            <option value="analysis_completed">Analysis Completed</option>
+            <option value="analysis_failed">Analysis Failed</option>
+            <option value="action_approved">Action Approved</option>
+            <option value="action_rejected">Action Rejected</option>
+          </select>
+        </div>
+
+        <div class="logs-section">
+          <h3>Alerts</h3>
+          <div id="alerts-list" class="insights-grid"></div>
+        </div>
+
+        <div class="logs-section">
+          <h3>Audit Trail</h3>
+          <div id="audit-list" class="table-container"></div>
+        </div>
+
+        <div class="logs-section">
+          <h3>Application Logs <span id="app-log-path" style="font-size:12px;color:var(--text-secondary);font-weight:400"></span></h3>
+          <pre id="app-logs" class="log-viewer">Loading...</pre>
         </div>
       </div>
     </div>
