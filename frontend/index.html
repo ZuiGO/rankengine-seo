@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RankEngine</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="header">
+    <div class="logo">RankEngine</div>
+    <div class="header-sub">SEO Analysis Engine</div>
+  </header>
+
+  <main class="main">
+    <div id="input-section" class="input-section">
+      <h1>Analyze any website</h1>
+      <p class="subtitle">Enter a URL to crawl, analyze content, and generate SEO recommendations</p>
+      <form id="analyze-form" class="url-form">
+        <div class="input-group">
+          <input type="url" id="url-input" placeholder="https://example.com" required autofocus>
+          <button type="submit" id="analyze-btn">Analyze</button>
+        </div>
+        <div class="examples">
+          Try: <a href="#" data-url="https://example.com">example.com</a>
+        </div>
+      </form>
+    </div>
+
+    <div id="progress-section" class="progress-section hidden">
+      <div class="progress-card">
+        <h3 id="progress-title">Crawling...</h3>
+        <div class="progress-bar-track">
+          <div id="progress-bar" class="progress-bar-fill"></div>
+        </div>
+        <p id="progress-message" class="progress-message">Starting...</p>
+        <div id="status-badge" class="status-badge status-queued">Queued</div>
+      </div>
+    </div>
+
+    <div id="results-section" class="results-section hidden">
+      <div class="results-header">
+        <div>
+          <h2 id="results-url"></h2>
+          <p id="results-status" class="results-status"></p>
+        </div>
+        <button id="new-analysis-btn" class="btn-secondary">New Analysis</button>
+      </div>
+
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="pages">Pages</button>
+        <button class="tab" data-tab="content">Content</button>
+        <button class="tab" data-tab="links">Links</button>
+        <button class="tab" data-tab="graph">Graph</button>
+        <button class="tab" data-tab="actions">SEO Actions</button>
+        <button class="tab" data-tab="report">Report</button>
+        <button class="tab" data-tab="chat">Chat</button>
+        <button class="tab" data-tab="seo-insights">SEO Insights</button>
+      </nav>
+
+      <div class="tab-content" id="tab-overview">
+        <div class="stats-grid" id="overview-stats"></div>
+        <div class="content-breakdown" id="content-breakdown"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-pages">
+        <div class="table-controls">
+          <input type="text" id="pages-search" placeholder="Search pages..." class="search-input">
+          <span id="pages-count" class="count-label"></span>
+        </div>
+        <div class="table-container" id="pages-table"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-content">
+        <div class="table-controls">
+          <select id="content-type-filter" class="filter-select">
+            <option value="">All Types</option>
+            <option value="image">Images</option>
+            <option value="pdf">PDFs</option>
+            <option value="video">Videos</option>
+            <option value="doc">Documents</option>
+            <option value="xlsx">Spreadsheets</option>
+            <option value="presentation">Presentations</option>
+            <option value="audio">Audio</option>
+          </select>
+          <span id="content-count" class="count-label"></span>
+        </div>
+        <div class="table-container" id="content-table"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-links">
+        <div class="stats-grid" id="links-stats"></div>
+        <h3>Backlinks</h3>
+        <div id="backlinks-list"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-graph">
+        <div id="graph-stats" class="stats-grid"></div>
+        <div class="graph-container">
+          <canvas id="graph-canvas" width="900" height="500"></canvas>
+        </div>
+        <div class="graph-legend" id="graph-legend"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-actions">
+        <p class="section-desc">SEO impact analysis for each content item. Approve or reject suggested improvements.</p>
+        <div class="table-controls">
+          <select id="action-status-filter" class="filter-select">
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <span id="actions-count" class="count-label"></span>
+        </div>
+        <div id="actions-list"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-report">
+        <div class="report-actions">
+          <a id="report-download-link" class="btn-primary" target="_blank">Download HTML Report</a>
+          <button id="refresh-report-btn" class="btn-secondary">Refresh</button>
+        </div>
+        <div id="report-preview" class="report-preview"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-chat">
+        <div class="chat-section-selector">
+          <label>Discuss:</label>
+          <select id="chat-section">
+            <option value="overview">Overview</option>
+            <option value="pages">Pages</option>
+            <option value="content">Content Items</option>
+            <option value="links">Links & Backlinks</option>
+            <option value="actions">SEO Actions</option>
+          </select>
+        </div>
+        <div class="chat-box" id="chat-box">
+          <div class="chat-messages" id="chat-messages">
+            <div class="chat-message bot">Select a section and ask me anything about the analysis.</div>
+          </div>
+          <form id="chat-form" class="chat-input-group">
+            <input type="text" id="chat-input" placeholder="Ask about this section..." disabled>
+            <button type="submit" id="chat-send" disabled>Send</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-seo-insights">
+        <div class="insights-controls">
+          <button id="refresh-insights-btn" class="btn-secondary">Refresh Insights</button>
+          <button id="suggest-keywords-btn" class="btn-secondary">Suggest Keywords</button>
+        </div>
+        <div id="insights-error" class="insights-error hidden"></div>
+        <div id="insights-keywords" class="insights-section">
+          <h3>Keywords</h3>
+          <div id="keywords-list" class="insights-grid"></div>
+        </div>
+        <div id="insights-backlinks" class="insights-section">
+          <h3>Backlinks</h3>
+          <div id="backlinks-summary" class="insights-card"></div>
+        </div>
+        <div id="insights-overview" class="insights-section">
+          <h3>Domain Overview</h3>
+          <div id="domain-overview" class="insights-card"></div>
+        </div>
+        <div id="insights-onpage" class="insights-section">
+          <h3>On-Page Analysis</h3>
+          <div id="onpage-summary" class="insights-card"></div>
+        </div>
+        <div id="insights-serp" class="insights-section">
+          <h3>SERP Rankings</h3>
+          <div id="serp-rankings" class="insights-card"></div>
+          <div class="serp-search-form" style="margin-top:12px;display:flex;gap:8px">
+            <input type="text" id="serp-keyword-input" placeholder="Check keyword ranking..." style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+            <button id="serp-search-btn" class="btn-secondary">Search</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
