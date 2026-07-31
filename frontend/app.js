@@ -87,6 +87,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "report") loadReport(currentJobId);
       if (currentTab === "chat") initChat();
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
+      if (currentTab === "sites") loadSites();
     }
   });
 });
@@ -152,7 +153,7 @@ async function showResults(jobId) {
   initChat();
 
   // Switch to overview
-  document.querySelectorAll(".tab")[0].click();
+  document.querySelector('.tab[data-tab="overview"]').click();
 }
 
 function loadOverview(summary) {
@@ -867,6 +868,129 @@ document.getElementById("serp-search-btn")?.addEventListener("click", async () =
 document.getElementById("serp-keyword-input")?.addEventListener("keydown", e => {
   if (e.key === "Enter") document.getElementById("serp-search-btn")?.click();
 });
+
+// Sites dashboard
+let selectedSiteIds = new Set();
+
+async function loadSites() {
+  const grid = document.getElementById("sites-grid");
+  grid.innerHTML = '<div class="insights-card">Loading sites...</div>';
+  try {
+    const resp = await fetch(`${API_BASE}/sites`);
+    const data = await resp.json();
+    const sites = data.sites || [];
+    document.getElementById("sites-count").textContent = `${sites.length} site(s) analyzed`;
+    if (sites.length === 0) {
+      grid.innerHTML = '<div class="insights-card">No sites analyzed yet. Run an analysis first.</div>';
+      updateCompareBtn();
+      return;
+    }
+    grid.innerHTML = sites.map(s => `
+      <div class="site-card ${s.status !== "completed" ? "site-card-muted" : ""}">
+        <label class="site-select">
+          <input type="checkbox" data-job="${s.job_id}" ${selectedSiteIds.has(s.job_id) ? "checked" : ""}>
+          <div>
+            <div class="site-domain">${escapeHtml(s.domain)}</div>
+            <div class="site-url">${escapeHtml(s.url)}</div>
+            <div class="site-status status-${s.status}">${s.status}</div>
+          </div>
+        </label>
+        <div class="site-stats">
+          <div class="site-stat"><span>${s.total_pages}</span> pages</div>
+          <div class="site-stat"><span>${s.total_content_items}</span> content</div>
+          <div class="site-stat"><span>${s.backlinks ?? "N/A"}</span> backlinks</div>
+          <div class="site-stat"><span>${s.domain_rank ?? "N/A"}</span> rank</div>
+        </div>
+        <button class="btn-secondary site-open" data-job="${s.job_id}">Open</button>
+      </div>
+    `).join("");
+
+    grid.querySelectorAll('input[data-job]').forEach(cb => {
+      cb.addEventListener("change", () => {
+        const jid = cb.dataset.job;
+        if (cb.checked) selectedSiteIds.add(jid);
+        else selectedSiteIds.delete(jid);
+        updateCompareBtn();
+      });
+    });
+    grid.querySelectorAll(".site-open").forEach(btn => {
+      btn.addEventListener("click", () => {
+        openSite(btn.dataset.job);
+      });
+    });
+    updateCompareBtn();
+  } catch (err) {
+    grid.innerHTML = `<div class="insights-card">Error loading sites: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function updateCompareBtn() {
+  const btn = document.getElementById("compare-sites-btn");
+  btn.disabled = selectedSiteIds.size < 2;
+}
+
+async function openSite(jobId) {
+  stopPolling();
+  currentJobId = jobId;
+  const resp = await fetch(`${API_BASE}/analysis/${jobId}`);
+  const job = await resp.json();
+  if (job.status === "completed") {
+    showResults(jobId);
+  } else {
+    resultsUrl.textContent = job.url;
+    resultsStatus.textContent = `Status: ${job.status}`;
+    resultsSection.classList.remove("hidden");
+    inputSection.classList.add("hidden");
+    showProgress();
+    startPolling(jobId);
+  }
+  window.scrollTo(0, 0);
+}
+
+function switchTab(name) {
+  document.querySelector('.tab[data-tab="' + name + '"]').click();
+}
+
+async function compareSelected() {
+  if (selectedSiteIds.size < 2) return;
+  const resp = await fetch(`${API_BASE}/sites/compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_ids: [...selectedSiteIds] }),
+  });
+  const data = await resp.json();
+  const sites = data.sites || [];
+  const comp = data.comparison || {};
+
+  document.getElementById("sites-comparison").classList.remove("hidden");
+  document.getElementById("comparison-table").innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Metric</th>${sites.map(s => `<th>${escapeHtml(s.domain)}</th>`).join("")}</tr></thead>
+      <tbody>
+        <tr><td>Status</td>${sites.map(s => `<td>${s.status}</td>`).join("")}</tr>
+        <tr><td>Pages</td>${sites.map(s => `<td>${s.total_pages}</td>`).join("")}</tr>
+        <tr><td>Content Items</td>${sites.map(s => `<td>${s.total_content_items}</td>`).join("")}</tr>
+        <tr><td>Vectors</td>${sites.map(s => `<td>${s.total_vectors}</td>`).join("")}</tr>
+        <tr><td>Backlinks</td>${sites.map(s => `<td>${s.backlinks ?? "N/A"}</td>`).join("")}</tr>
+        <tr><td>Referring Domains</td>${sites.map(s => `<td>${s.referring_domains ?? "N/A"}</td>`).join("")}</tr>
+        <tr><td>Domain Rank</td>${sites.map(s => `<td>${s.domain_rank ?? "N/A"}</td>`).join("")}</tr>
+        <tr><td>Action Items</td>${sites.map(s => `<td>${s.total_action_items}</td>`).join("")}</tr>
+      </tbody>
+    </table>
+  `;
+
+  const byType = comp.most_content_by_type || {};
+  const typeEntries = Object.entries(byType);
+  document.getElementById("comparison-insights").innerHTML = typeEntries.length ? `
+    <div class="insights-card"><strong>Largest site:</strong> ${escapeHtml(comp.largest_site || "N/A")}</div>
+    <div class="insights-card"><strong>Most backlinks:</strong> ${escapeHtml(comp.most_backlinks || "N/A")}</div>
+    ${typeEntries.map(([t, v]) => `<div class="insights-card"><strong>Most ${escapeHtml(t)}:</strong> ${escapeHtml(v.domain)} (${v.count})</div>`).join("")}
+  ` : `<div class="insights-card"><strong>Largest site:</strong> ${escapeHtml(comp.largest_site || "N/A")}</div>
+    <div class="insights-card"><strong>Most backlinks:</strong> ${escapeHtml(comp.most_backlinks || "N/A")}</div>`;
+}
+
+document.getElementById("compare-sites-btn")?.addEventListener("click", compareSelected);
+document.getElementById("refresh-sites-btn")?.addEventListener("click", loadSites);
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + " B";

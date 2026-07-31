@@ -49,6 +49,7 @@
       </div>
 
       <nav class="tabs" id="tabs">
+        <button class="tab" data-tab="sites">Sites</button>
         <button class="tab active" data-tab="overview">Overview</button>
         <button class="tab" data-tab="pages">Pages</button>
         <button class="tab" data-tab="content">Content</button>
@@ -63,6 +64,21 @@
       <div class="tab-content" id="tab-overview">
         <div class="stats-grid" id="overview-stats"></div>
         <div class="content-breakdown" id="content-breakdown"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-sites">
+        <p class="section-desc">All analyzed sites. Select sites to compare side-by-side.</p>
+        <div class="sites-controls">
+          <button id="compare-sites-btn" class="btn-primary" disabled>Compare Selected</button>
+          <button id="refresh-sites-btn" class="btn-secondary">Refresh</button>
+          <span id="sites-count" class="count-label"></span>
+        </div>
+        <div id="sites-grid" class="sites-grid"></div>
+        <div id="sites-comparison" class="hidden" style="margin-top:24px">
+          <h3>Comparison</h3>
+          <div id="comparison-table" class="table-container"></div>
+          <div id="comparison-insights" class="insights-grid" style="margin-top:16px"></div>
+        </div>
       </div>
 
       <div class="tab-content hidden" id="tab-pages">
