@@ -59,6 +59,7 @@
         <button class="tab" data-tab="report">Report</button>
         <button class="tab" data-tab="chat">Chat</button>
         <button class="tab" data-tab="seo-insights">SEO Insights</button>
+        <button class="tab" data-tab="schedules">Schedules</button>
       </nav>
 
       <div class="tab-content" id="tab-overview">
@@ -193,6 +194,18 @@
             <input type="text" id="serp-keyword-input" placeholder="Check keyword ranking..." style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
             <button id="serp-search-btn" class="btn-secondary">Search</button>
           </div>
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-schedules">
+        <p class="section-desc">Schedule recurring crawls. Each run creates a new analysis job you can open from the Sites tab.</p>
+        <form id="schedule-form" class="schedule-form">
+          <input type="url" id="schedule-url" placeholder="https://example.com" required>
+          <input type="number" id="schedule-interval" placeholder="Interval (hours)" min="0.1" step="0.1" value="24" required>
+          <input type="number" id="schedule-max-pages" placeholder="Max pages" min="1" max="200" value="50">
+          <button type="submit" class="btn-primary">Add Schedule</button>
+        </form>
+        <div id="schedules-list" class="schedules-list">
+          <div class="insights-card">Loading schedules...</div>
         </div>
       </div>
     </div>

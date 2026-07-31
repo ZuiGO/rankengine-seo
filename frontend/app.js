@@ -88,6 +88,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "chat") initChat();
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
       if (currentTab === "sites") loadSites();
+      if (currentTab === "schedules") loadSchedules();
     }
   });
 });
@@ -991,6 +992,89 @@ async function compareSelected() {
 
 document.getElementById("compare-sites-btn")?.addEventListener("click", compareSelected);
 document.getElementById("refresh-sites-btn")?.addEventListener("click", loadSites);
+
+// Schedules
+async function loadSchedules() {
+  const list = document.getElementById("schedules-list");
+  try {
+    const resp = await fetch(`${API_BASE}/scheduler`);
+    const data = await resp.json();
+    const schedules = data.schedules || [];
+    if (schedules.length === 0) {
+      list.innerHTML = '<div class="insights-card">No schedules yet. Add one above to auto-crawl a site on an interval.</div>';
+      return;
+    }
+    list.innerHTML = schedules.map(s => `
+      <div class="schedule-card">
+        <div>
+          <div class="schedule-domain">${escapeHtml(s.domain)}</div>
+          <div class="site-url">${escapeHtml(s.url)}</div>
+          <div class="site-status status-completed" style="margin-top:6px">${s.enabled ? "Enabled" : "Disabled"}</div>
+        </div>
+        <div class="schedule-meta">
+          <div>Every <strong>${s.interval_hours}h</strong></div>
+          <div>Max <strong>${s.max_pages}</strong> pages</div>
+          <div>Runs: <strong>${s.history?.length || 0}</strong></div>
+          <div class="schedule-next">Next: ${s.next_run_at ? new Date(s.next_run_at).toLocaleString() : "—"}</div>
+        </div>
+        <div class="schedule-actions">
+          <button class="btn-secondary schedule-history" data-id="${s.id}">History</button>
+          <button class="btn-secondary schedule-delete" data-id="${s.id}">Delete</button>
+        </div>
+      </div>
+    `).join("");
+
+    list.querySelectorAll(".schedule-delete").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await fetch(`${API_BASE}/scheduler/${btn.dataset.id}`, { method: "DELETE" });
+        showToast("Schedule deleted");
+        loadSchedules();
+      });
+    });
+    list.querySelectorAll(".schedule-history").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const resp = await fetch(`${API_BASE}/scheduler/${btn.dataset.id}/history`);
+        const data = await resp.json();
+        const history = data.history || [];
+        const body = history.length === 0
+          ? "<p>No runs yet.</p>"
+          : history.map(h => `
+            <div class="data-row">
+              <span class="label">${new Date(h.created_at).toLocaleString()}</span>
+              <span class="value">${h.status} ${h.summary ? `(${h.summary.total_pages} pages)` : ""}</span>
+            </div>
+          `).join("");
+        showModal(`History (${history.length} runs)`, body);      });
+    });
+  } catch (err) {
+    list.innerHTML = `<div class="insights-card">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+document.getElementById("schedule-form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const url = document.getElementById("schedule-url").value.trim();
+  const interval = parseFloat(document.getElementById("schedule-interval").value);
+  const maxPages = parseInt(document.getElementById("schedule-max-pages").value) || 50;
+  if (!url) return;
+  try {
+    const resp = await fetch(`${API_BASE}/scheduler`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, interval_hours: interval, max_pages: maxPages }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json();
+      showToast("Error: " + (err.detail || resp.status));
+      return;
+    }
+    document.getElementById("schedule-url").value = "";
+    showToast("Schedule added — first crawl starts in " + interval + "h");
+    loadSchedules();
+  } catch (err) {
+    showToast("Error: " + err.message);
+  }
+});
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + " B";

@@ -856,6 +856,65 @@ body {
   padding: 6px 12px;
 }
 
+.schedule-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.schedule-form input {
+  flex: 1;
+  min-width: 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--card);
+}
+
+.schedule-form button { white-space: nowrap; }
+
+.schedules-list {
+  display: grid;
+  gap: 12px;
+}
+
+.schedule-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.schedule-domain {
+  font-size: 15px;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.schedule-meta {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 2px;
+}
+
+.schedule-next {
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 8px;
+}
+
 @media (max-width: 600px) {
   .main { padding: 20px 12px; }
   .input-section h1 { font-size: 24px; }

@@ -1,3 +1,4 @@
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,23 +11,30 @@ from backend.config import settings
 from backend.db.mongo import connect_db, close_db
 from backend.db.neo4j_db import connect_neo4j, close_neo4j
 from backend.logging_setup import setup_logging, get_logger
-from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites
+from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler
+from backend.services.scheduler import scheduler_loop
 
 logger = get_logger("rankengine")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
+scheduler_task = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global scheduler_task
     setup_logging()
     await connect_db(settings.mongodb_uri)
     try:
         await connect_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
     except Exception as e:
         logger.warning("Neo4j not available: %s", e)
+    scheduler_task = asyncio.create_task(scheduler_loop())
     logger.info("Application startup complete")
     yield
+    if scheduler_task:
+        scheduler_task.cancel()
     await close_db()
     await close_neo4j()
     logger.info("Application shutdown")
@@ -68,6 +76,7 @@ app.include_router(chat.router)
 app.include_router(graph.router)
 app.include_router(seo_insights.router)
 app.include_router(sites.router)
+app.include_router(scheduler.router)
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
