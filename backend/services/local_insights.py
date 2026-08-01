@@ -61,3 +61,27 @@ async def local_backlinks(job_id: str) -> dict | None:
         "rank": None,
         "source": "serp-discovery",
     }
+
+
+async def local_overview(job_id: str) -> dict | None:
+    """Local domain-overview fallback built from crawl + audit data."""
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return None
+    pages = await db.pages.count_documents({"job_id": job_id})
+    health = await db.site_health.find_one({"job_id": job_id})
+    insights = await db.seo_insights_cache.find_one({"job_id": job_id})
+    bl = (insights or {}).get("data", {}).get("backlinks") or {}
+    return {
+        "domain": (job.get("url", "").split("//")[-1].split("/")[0] if "//" in job.get("url", "") else job.get("url", "")),
+        "pages_crawled": pages,
+        "health_grade": (health or {}).get("grade"),
+        "health_score": (health or {}).get("score"),
+        "backlinks": bl.get("backlinks"),
+        "referring_domains": bl.get("referring_domains"),
+        "estimated_organic_traffic": None,
+        "organic_keywords_count": None,
+        "paid_keywords_count": None,
+        "source": "local-crawl",
+    }

@@ -195,31 +195,16 @@ async def _actions_context(job_id: str) -> str:
 
 async def _graph_context(job_id: str) -> str:
     db = get_db()
-    parts = []
-    node_count = 0
-    edge_count = 0
-    try:
-        from backend.services.graph_service import get_graph_summary, get_graph_data
-        gs = await get_graph_summary(job_id)
-        if gs:
-            parts.append(
-                f"Graph summary: pages={gs.get('page_count')}, content={gs.get('content_count')}, "
-                f"internal links={gs.get('internal_link_count')}"
-            )
-        data = await get_graph_data(job_id)
-        node_count = len(data["nodes"])
-        edge_count = len(data["edges"])
-    except Exception:
-        pass
     flows = await db.user_flows.find({"job_id": job_id}).to_list(length=10)
-    if flows:
-        parts.append(f"User flows ({len(flows)} recorded):")
-        for f in flows[:8]:
-            parts.append(
-                f"- {f.get('start_type', '')} -> {f.get('intermediate_type') or '-'} -> "
-                f"{f.get('target_type', '')} depth={f.get('depth', 0)} target={f.get('target_url', '')[:60]}"
-            )
-    return "\n".join(parts) if parts else f"Graph nodes={node_count}, edges={edge_count}"
+    if not flows:
+        return "No user flows recorded."
+    parts = [f"User flows ({len(flows)} recorded):"]
+    for f in flows[:8]:
+        parts.append(
+            f"- {f.get('start_type', '')} -> {f.get('intermediate_type') or '-'} -> "
+            f"{f.get('target_type', '')} depth={f.get('depth', 0)} target={f.get('target_url', '')[:60]}"
+        )
+    return "\n".join(parts)
 
 
 async def _report_context(job_id: str) -> str:
@@ -313,6 +298,50 @@ async def chat_with_context(job_id: str, message: str, section: str = "content")
         from backend.services.spend_tracker import record_usage
         usage = getattr(completion, "usage", None)
         await record_usage("groq", job_id, "chat", tokens=(usage.total_tokens if usage else 0))
+    except Exception:
+        pass
+    return completion.choices[0].message.content or "No reply generated."
+
+
+GENERAL_SYSTEM_PROMPT = (
+    "You are the RankEngine SEO assistant. Answer general questions about SEO, website "
+    "analysis, Core Web Vitals, page speed, backlinks, keyword research, content strategy, "
+    "and how to use the RankEngine app. Be concise, practical, and accurate. If the question "
+    "is about a specific analyzed website, ask the user to open that site in RankEngine first."
+)
+
+
+async def general_chat(message: str) -> str:
+    """General-purpose assistant mode used when no site/job is open."""
+    if not settings.groq_api_key:
+        return (
+            "[Simulated] No Groq API key configured. I can still help with general SEO tips: "
+            "keep titles under 60 chars, meta descriptions 140-160 chars, use descriptive alt "
+            "text, and make sure every page has one H1."
+        )
+
+    from backend.services.groq_limiter import acquire_token_budget
+
+    await acquire_token_budget(est_tokens=512)
+    client = AsyncGroq(api_key=settings.groq_api_key)
+    try:
+        completion = await client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": GENERAL_SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+            temperature=0.4,
+            max_tokens=768,
+        )
+    except Exception as e:
+        from backend.logging_setup import get_logger
+        get_logger("chat").warning("Groq general chat request failed: %s", e)
+        return f"Error: The AI service (Groq) is currently unavailable. Details: {e}"
+    try:
+        from backend.services.spend_tracker import record_usage
+        usage = getattr(completion, "usage", None)
+        await record_usage("groq", "", "chat", tokens=(usage.total_tokens if usage else 0))
     except Exception:
         pass
     return completion.choices[0].message.content or "No reply generated."

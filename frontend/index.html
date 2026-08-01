@@ -254,23 +254,23 @@
   <div id="chat-panel" class="chat-panel hidden">
     <div class="chat-panel-header">
       <span class="chat-panel-title">💬 AI Assistant</span>
+      <span id="chat-context-hint" class="chat-context-hint"></span>
       <select id="chat-section" class="chat-section-select" title="Section context">
         <option value="overview">Overview</option>
         <option value="pages">Pages</option>
         <option value="content">Content Items</option>
         <option value="links">Links & Backlinks</option>
         <option value="actions">SEO Actions</option>
-        <option value="graph">Graph & Flows</option>
         <option value="insights">SEO Insights</option>
       </select>
       <button id="chat-close" class="chat-close" title="Close">✕</button>
     </div>
     <div class="chat-box" id="chat-box">
       <div class="chat-messages" id="chat-messages">
-        <div class="chat-message bot">Select a section and ask me anything about the analysis.</div>
+        <div class="chat-message bot">Hi! I'm the RankEngine assistant. Ask me about SEO, or open an analyzed site and ask about it in context.</div>
       </div>
       <form id="chat-form" class="chat-input-group">
-        <input type="text" id="chat-input" placeholder="Ask about this section..." disabled>
+        <input type="text" id="chat-input" placeholder="Ask me anything about SEO..." disabled>
         <button type="submit" id="chat-send" disabled>Send</button>
       </form>
     </div>

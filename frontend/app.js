@@ -90,6 +90,10 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
       if (currentTab === "logs") loadLogs();
+    } else if (["sites", "schedules", "logs"].includes(currentTab)) {
+      if (currentTab === "sites") loadSites();
+      if (currentTab === "schedules") loadSchedules();
+      if (currentTab === "logs") loadLogs();
     }
   });
 });
@@ -324,17 +328,28 @@ document.getElementById("pages-search")?.addEventListener("input", () => {
 });
 
 async function loadContent(jobId) {
+  const table = document.getElementById("content-table");
+  table.innerHTML = '<div class="insights-card">Loading content...</div>';
   const filter = document.getElementById("content-type-filter").value;
   const params = new URLSearchParams({ limit: "500" });
   if (filter) params.set("content_type", filter);
 
-  const resp = await fetch(`${API_BASE}/content/${jobId}?${params}`);
-  const data = await resp.json();
+  let data;
+  try {
+    const resp = await fetch(`${API_BASE}/content/${jobId}?${params}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    data = await resp.json();
+  } catch (err) {
+    document.getElementById("content-count").textContent = "0 items";
+    table.innerHTML = `<div class="insights-card">Failed to load content: ${escapeHtml(err.message)}</div>`;
+    return;
+  }
+
   document.getElementById("content-count").textContent = `${data.total} items`;
 
-  const table = document.getElementById("content-table");
-  if (data.items.length === 0) {
-    table.innerHTML = '<p class="section-desc">No content items found.</p>';
+  const items = data.items || [];
+  if (items.length === 0) {
+    table.innerHTML = '<div class="insights-card">No content items found.</div>';
     return;
   }
 
@@ -345,14 +360,14 @@ async function loadContent(jobId) {
       <thead><tr>
         <th>Type</th><th>Preview</th><th>Source URL</th><th>Page URL</th><th>Size</th><th>MIME</th>
       </tr></thead>
-      <tbody>${data.items.map(c => `
+      <tbody>${items.map(c => `
         <tr style="cursor:pointer" onclick="showContentDetail('${c.id}')">
-          <td>${typeIcons[c.content_type] || "📄"} ${c.content_type}</td>
+          <td>${typeIcons[c.content_type] || "📄"} ${escapeHtml(c.content_type)}</td>
           <td>${contentPreview(c)}</td>
-          <td class="page-url-cell" title="${c.source_url}">${c.source_url}</td>
-          <td class="page-url-cell" title="${c.page_url}">${c.page_url}</td>
+          <td class="page-url-cell" title="${escapeHtml(c.source_url)}">${escapeHtml(c.source_url)}</td>
+          <td class="page-url-cell" title="${escapeHtml(c.page_url)}">${escapeHtml(c.page_url)}</td>
           <td>${c.file_size ? formatSize(c.file_size) : "-"}</td>
-          <td>${c.mime_type || "-"}</td>
+          <td>${escapeHtml(c.mime_type) || "-"}</td>
         </tr>
       `).join("")}</tbody>
     </table>
@@ -553,13 +568,14 @@ async function loadDummySite(jobId) {
       };
       return;
     }
-    el.innerHTML = `
+      el.innerHTML = `
       ${data.stale ? `<div class="service-error" style="background:#fffbeb;border-color:#fde68a"><div class="service-error-title" style="color:#92400e">Mirror is out of date</div><div class="service-error-msg" style="color:#78350f">SEO actions were reviewed after this mirror was generated. Regenerate to apply the latest approved changes.</div></div>` : ""}
       <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
         <div class="insights-card"><div class="insights-label">Files</div><div class="insights-value">${data.file_count}</div></div>
         <div class="insights-card"><div class="insights-label">Pages Mirrored</div><div class="insights-value">${data.pages}</div></div>
         <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${data.changes_applied}</div></div>
-        <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value" style="color:#d97706">${data.pending_changes ?? 0}</div></div>
+        <div class="insights-card"><div class="insights-label">Suggestions Previewed</div><div class="insights-value" style="color:#d97706">${data.suggestions_applied ?? 0}</div></div>
+        <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value">${data.pending_changes ?? 0}</div></div>
         <div class="insights-card"><div class="insights-label">Links Rewritten</div><div class="insights-value">${data.links_rewritten}</div></div>
       </div>
       <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
@@ -567,7 +583,8 @@ async function loadDummySite(jobId) {
         <a class="btn-secondary" href="${API_BASE}/dummy/${jobId}/download">Download ZIP</a>
         <button id="regenerate-dummy-btn" class="btn-secondary">Regenerate</button>
         <button id="compare-dummy-btn" class="btn-secondary">Compare & Report</button>
-        <a class="btn-secondary" href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Download Comparison</a>
+        <a class="btn-secondary" href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Comparison HTML</a>
+        <a class="btn-secondary" href="${API_BASE}/reports/${jobId}/compare/pdf" target="_blank" rel="noopener">Comparison PDF</a>
       </div>`;
     document.getElementById("regenerate-dummy-btn").onclick = async () => {
       await fetch(`${API_BASE}/dummy/${jobId}/generate`, { method: "POST" });
@@ -589,18 +606,21 @@ async function loadDummySite(jobId) {
         const lb = c.link_health_before || {};
         const la = c.link_health_after || {};
         const dummy = c.dummy || {};
+        const health = c.health || {};
         showModal("Original vs Suggested-Changes", `
           <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
             <div class="insights-card"><div class="insights-label">Pages Compared</div><div class="insights-value">${c.pages_compared}</div></div>
             <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${dummy.changes_applied ?? 0}</div></div>
-            <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value" style="color:#d97706">${c.pending_suggestions ?? 0}</div></div>
+            <div class="insights-card"><div class="insights-label">Suggestions Previewed</div><div class="insights-value" style="color:#d97706">${dummy.suggestions_applied ?? 0}</div></div>
+            <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value">${c.pending_suggestions ?? 0}</div></div>
+            ${health.score !== undefined ? `<div class="insights-card"><div class="insights-label">Site Health</div><div class="insights-value">${health.grade ?? "N/A"} (${health.score}/100)</div></div>` : ""}
           </div>
           <h4 style="margin-top:16px">Alt text coverage: ${alt.coverage_before ?? "N/A"}% → <b style="color:var(--success)">${alt.coverage_after ?? "N/A"}%</b></h4>
           <div class="data-row"><span class="label">Images without alt (before)</span><span class="value">${alt.missing_before ?? "N/A"}</span></div>
           <div class="data-row"><span class="label">Images without alt (after)</span><span class="value" style="color:${(alt.missing_after ?? 999) < (alt.missing_before ?? 0) ? "var(--success)" : ""}">${alt.missing_after ?? "N/A"}</span></div>
           <div class="data-row"><span class="label">Broken links (original)</span><span class="value">${lb.broken ?? 0} / ${lb.checked ?? 0}</span></div>
           <div class="data-row"><span class="label">Broken links (dummy mirror)</span><span class="value">${la.broken ?? 0} / ${la.checked ?? 0}</span></div>
-          <p class="section-desc" style="margin-top:12px"><a href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Download full comparison report (HTML)</a></p>
+          <p class="section-desc" style="margin-top:12px"><a href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Full comparison report (HTML)</a> · <a href="${API_BASE}/reports/${jobId}/compare/pdf" target="_blank" rel="noopener">PDF</a></p>
         `);
       } catch (err) {
         showToast("Comparison failed: " + err.message);
@@ -751,6 +771,10 @@ async function approveAction(actionId, status) {
   }
 }
 
+document.getElementById("refresh-report-btn")?.addEventListener("click", () => {
+  if (currentJobId) loadReport(currentJobId);
+});
+
 async function loadReport(jobId) {
   const link = document.getElementById("report-download-link");
   link.href = `${API_BASE}/reports/${jobId}/download`;
@@ -817,7 +841,14 @@ async function loadReport(jobId) {
 function initChat() {
   document.getElementById("chat-input").disabled = false;
   document.getElementById("chat-send").disabled = false;
+  document.getElementById("chat-section").disabled = !currentJobId;
+  const hint = document.getElementById("chat-context-hint");
+  if (hint) hint.textContent = currentJobId
+    ? "Asking about the currently open site. Select a section above."
+    : "Global assistant — open a site to ask about it in context.";
 }
+
+initChat();
 
 document.getElementById("chat-toggle").addEventListener("click", () => {
   const panel = document.getElementById("chat-panel");
@@ -837,7 +868,7 @@ document.getElementById("chat-form").addEventListener("submit", async e => {
   e.preventDefault();
   const input = document.getElementById("chat-input");
   const msg = input.value.trim();
-  if (!msg || !currentJobId) return;
+  if (!msg) return;
 
   const messages = document.getElementById("chat-messages");
   messages.innerHTML += `<div class="chat-message user">${escapeHtml(msg)}</div>`;
@@ -845,12 +876,15 @@ document.getElementById("chat-form").addEventListener("submit", async e => {
   messages.scrollTop = messages.scrollHeight;
 
   const section = document.getElementById("chat-section").value;
+  const payload = currentJobId
+    ? { job_id: currentJobId, section, message: msg }
+    : { message: msg };
 
   try {
     const resp = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: currentJobId, section, message: msg }),
+      body: JSON.stringify(payload),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
@@ -894,6 +928,17 @@ function serviceErrorHtml(service, message, hint) {
   </div>`;
 }
 
+function insightErrorHtml(error) {
+  const msg = String(error || "");
+  if (/402|credits|fund|payment|quota/i.test(msg)) {
+    return `<div class="service-error" style="background:#fffbeb;border-color:#fde68a">
+      <div class="service-error-title" style="color:#92400e">DataForSEO unavailable (no credits)</div>
+      <div class="service-error-msg" style="color:#78350f">Showing data from local crawl analysis instead. Add credits to DataForSEO for live keyword, backlink and domain data.</div>
+    </div>`;
+  }
+  return serviceErrorHtml("External service", msg);
+}
+
 function sourceLabel(source) {
   const map = { dataforseo: "DataForSEO", serp: "SERP API", local: "local crawl data", none: "not available" };
   return map[source] || source || "not available";
@@ -901,7 +946,7 @@ function sourceLabel(source) {
 
 function renderInsightSection(el, { data, error, source, emptyText, render }) {
   let html = "";
-  if (error) html += serviceErrorHtml(source === "dataforseo" ? "DataForSEO" : source === "serp" ? "SERP API" : "External service", error);
+  if (error) html += insightErrorHtml(error);
   if (data && render) {
     html += `<p class="source-note">Source: ${sourceLabel(source)}</p>`;
     html += render(data);
@@ -1296,6 +1341,7 @@ async function loadSites() {
             ? `<button class="btn-secondary site-restore" data-job="${s.job_id}" style="padding:6px 10px;font-size:12px">Restore</button>`
             : `<button class="btn-secondary site-open" data-job="${s.job_id}">Open</button>
                <button class="btn-secondary site-delete" data-job="${s.job_id}" style="padding:6px 10px;font-size:12px;color:#dc2626">Archive</button>`}
+          <button class="btn-secondary site-hard-delete" data-job="${s.job_id}" data-url="${escapeHtml(s.url)}" style="padding:6px 10px;font-size:12px;color:#dc2626;border-color:#fecaca">Delete</button>
         </div>
       </div>
     `).join("");
@@ -1326,6 +1372,23 @@ async function loadSites() {
       btn.addEventListener("click", async () => {
         await fetch(`${API_BASE}/sites/${btn.dataset.job}/restore`, { method: "POST" });
         showToast("Site restored");
+        loadSites();
+      });
+    });
+    grid.querySelectorAll(".site-hard-delete").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const jid = btn.dataset.job;
+        const url = btn.dataset.url;
+        if (!confirm(`Permanently delete ${url}?\n\nThis removes ALL data for this site: pages, content, action items, reports, dummy site, downloads, insights and vectors. This cannot be undone.`)) return;
+        try {
+          const resp = await fetch(`${API_BASE}/sites/${jid}/hard`, { method: "DELETE" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+          selectedSiteIds.delete(jid);
+          showToast(`Site deleted (${(data.deleted && Object.values(data.deleted).reduce((a, b) => a + b, 0)) || 0} records purged)`);
+        } catch (err) {
+          showToast("Delete failed: " + err.message);
+        }
         loadSites();
       });
     });
@@ -1496,9 +1559,10 @@ document.getElementById("schedule-form")?.addEventListener("submit", async e => 
 
 function formatInterval(hours) {
   if (!hours || hours <= 0) return "—";
-  if (hours < 1) return Math.round(hours * 60) + " min";
-  if (hours % 24 === 0) return Math.round(hours / 24) + " day(s)";
-  return (hours % 1 === 0 ? hours : Math.round(hours * 10) / 10) + " h";
+  if (hours < 1) return Math.round(hours * 60) + " minute" + (Math.round(hours * 60) === 1 ? "" : "s");
+  if (hours % 24 === 0) return Math.round(hours / 24) + " day" + (Math.round(hours / 24) === 1 ? "" : "s");
+  if (hours % 1 === 0) return hours + " hour" + (hours === 1 ? "" : "s");
+  return Math.round(hours * 60) + " minutes";
 }
 
 // Logs & Alerts

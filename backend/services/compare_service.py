@@ -86,7 +86,7 @@ async def compare_site_with_changes(job_id: str) -> dict:
 
     dummy = await get_dummy_site(job_id)
     if dummy.get("status") == "not_generated" or not dummy.get("file_count"):
-        await generate_dummy_site(job_id)
+        await generate_dummy_site(job_id, auto_compare=False)
         dummy = await get_dummy_site(job_id)
 
     target_dir = os.path.join(DUMMY_ROOT, job_id)
@@ -164,7 +164,7 @@ async def compare_site_with_changes(job_id: str) -> dict:
         "fetch_error": f"Could not re-fetch {len(fetch_failures)} page(s): " + "; ".join(fetch_failures[:3]) if fetch_failures else None,
         "approved_changes": versions,
         "pending_suggestions": pending,
-        "dummy": {k: dummy.get(k) for k in ("file_count", "changes_applied", "pending_changes", "generated_at")},
+        "dummy": {k: dummy.get(k) for k in ("file_count", "changes_applied", "suggestions_applied", "pending_changes", "generated_at")},
         "alt_text": {
             "images_before": total_images_before,
             "images_after": total_images_after,
@@ -179,6 +179,7 @@ async def compare_site_with_changes(job_id: str) -> dict:
             "broken": before_counts.get("broken", 0) + before_counts.get("timeout", 0) + before_counts.get("error", 0) + before_counts.get("blocked", 0),
         },
         "link_health_after": _link_health_after(job_id),
+        "health": await _health_summary(job_id),
         "per_page": per_page,
     }
     await db.site_comparisons.update_one(
@@ -187,6 +188,18 @@ async def compare_site_with_changes(job_id: str) -> dict:
         upsert=True,
     )
     return summary
+
+
+async def _health_summary(job_id: str) -> dict:
+    db = get_db()
+    doc = await db.site_health.find_one({"job_id": job_id})
+    if not doc:
+        return {}
+    return {
+        "grade": doc.get("grade"),
+        "score": doc.get("score"),
+        "issues": doc.get("issues") or [],
+    }
 
 
 async def get_site_comparison(job_id: str) -> dict | None:

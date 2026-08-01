@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 from backend.services.crawler import crawl_site
-from backend.services.graph_service import populate_graph
 from backend.services.content_extractor import extract_all_content
 from backend.services.vector_service import index_job_vectors
 from backend.services.user_flow import detect_user_flows
@@ -75,16 +74,6 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},
-            {"$set": {"progress_message": "Building graph database..."}}
-        )
-
-        try:
-            await populate_graph(job_id)
-        except Exception as graph_err:
-            logger.error("Graph population warning job=%s: %s", job_id, graph_err)
-
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
             {"$set": {"progress_message": "Identifying user flows..."}}
         )
 
@@ -112,11 +101,12 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         try:
             from backend.services.dataforseo import fetch_all_insights
+            from backend.routes.seo_insights import CACHE_VERSION
             domain = url.split("//")[-1].split("/")[0]
-            insights = await fetch_all_insights(domain)
+            insights = await fetch_all_insights(domain, job_id)
             await db.seo_insights_cache.update_one(
                 {"job_id": job_id},
-                {"$set": {"job_id": job_id, "data": insights, "fetched_at": datetime.utcnow()}},
+                {"$set": {"job_id": job_id, "data": insights, "v": CACHE_VERSION, "fetched_at": datetime.utcnow()}},
                 upsert=True,
             )
         except Exception as insight_err:

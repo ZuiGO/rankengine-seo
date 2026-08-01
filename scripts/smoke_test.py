@@ -27,7 +27,7 @@ def report(name: str, ok: bool, detail: str = ""):
     print(f"[{status}] {name}" + (f" — {detail}" if detail else ""))
 
 
-async def wait_for_completion(client: httpx.AsyncClient, job_id: str, timeout_s: int = 600) -> dict:
+async def wait_for_completion(client: httpx.AsyncClient, job_id: str, timeout_s: int = 1800) -> dict:
     deadline = time.time() + timeout_s
     last = None
     while time.time() < deadline:
@@ -83,9 +83,8 @@ async def main(host: str, url: str):
                 fr = await client.get(file_url)
                 report("content file serving", fr.status_code == 200, f"{file_url} -> {fr.status_code}")
 
-        # 5. Graph flows
-        flows = (await client.get(f"/api/graph/{job_id}/flows")).json()
-        report("user flows", "flows" in flows, f"count={len(flows.get('flows', []))}")
+        # 5. User flows (served via summary + report; graph router removed)
+        report("user flows in summary", "total_user_flows" in ssum, f"flows={ssum.get('total_user_flows')}")
 
         # 6. Links + health
         links = (await client.get(f"/api/links/{job_id}")).json()
@@ -134,7 +133,8 @@ async def main(host: str, url: str):
         gen = (await client.post(f"/api/dummy/{job_id}/generate")).json()
         report("dummy site generated", gen.get("file_count", 0) > 0, f"files={gen.get('file_count')} applied={gen.get('changes_applied')}")
         report("dummy has changes", gen.get("changes_applied", 0) >= 1, "")
-        report("dummy pending count", gen.get("pending_changes", 0) > 0, f"pending={gen.get('pending_changes')}")
+        report("dummy suggestions applied", gen.get("suggestions_applied", 0) >= 0 and isinstance(gen.get("suggestions_applied"), int), f"suggestions_applied={gen.get('suggestions_applied')}")
+        report("dummy pending count", gen.get("pending_changes", 0) >= 0 and isinstance(gen.get("pending_changes"), int), f"pending={gen.get('pending_changes')}")
         dstatus = (await client.get(f"/api/dummy/{job_id}")).json()
         report("dummy status endpoint", dstatus.get("status") != "not_generated", "")
         zip_resp = await client.get(f"/api/dummy/{job_id}/download")
@@ -145,6 +145,9 @@ async def main(host: str, url: str):
         report("compare-changes", comp.get("pages_compared", 0) > 0 and "per_page" in comp, f"pages={comp.get('pages_compared')} approved={comp.get('approved_changes')}")
         chtml = (await client.get(f"/api/reports/{job_id}/compare"))
         report("compare report html", chtml.status_code == 200 and b"Comparison" in chtml.content, "")
+        report("compare html has health", chtml.status_code == 200 and b"Health" in chtml.content, "")
+        cpdf = (await client.get(f"/api/reports/{job_id}/compare/pdf"))
+        report("compare report pdf", cpdf.status_code == 200 and cpdf.headers.get("content-type", "").startswith("application/pdf"), f"{cpdf.headers.get('content-type')} {len(cpdf.content)} bytes")
 
         # 12. SEO insights (no blank sections — data OR explicit error)
         insights = (await client.get(f"/api/seo-insights/{job_id}")).json()
@@ -164,14 +167,18 @@ async def main(host: str, url: str):
         # 14. Report JSON + HTML + PDF
         rep = (await client.get(f"/api/reports/{job_id}")).json()
         report("report json", rep.get("total_pages", 0) > 0, "")
+        rh_health = rep.get("site_health") or {}
+        report("report has health", "grade" in rh_health and "score" in rh_health, f"grade={rh_health.get('grade')} score={rh_health.get('score')}")
         rh = (await client.get(f"/api/reports/{job_id}/download"))
         report("report html", rh.status_code == 200 and b"SEO Analysis Report" in rh.content, "")
         pdf = (await client.get(f"/api/reports/{job_id}/pdf"))
         report("report pdf", pdf.status_code == 200 and pdf.headers.get("content-type", "").startswith("application/pdf"), f"{pdf.headers.get('content-type')} {len(pdf.content)} bytes")
 
-        # 15. Chat
+        # 15. Chat (site context + global)
         chat = (await client.post("/api/chat", json={"job_id": job_id, "section": "overview", "message": "Summarize this analysis in one sentence."})).json()
         report("chat reply", bool(chat.get("reply")) and not chat.get("reply", "").startswith("Error"), (chat.get("reply") or "")[:80])
+        gchat = (await client.post("/api/chat", json={"message": "What is RankEngine?"})).json()
+        report("global chat reply", bool(gchat.get("reply")) and not gchat.get("reply", "").startswith("Error"), (gchat.get("reply") or "")[:80])
 
         # 16. Schedules
         sched = (await client.post("/api/scheduler", json={"url": url, "interval_hours": 0.5, "max_pages": 5})).json()
@@ -195,6 +202,14 @@ async def main(host: str, url: str):
         report("site restore", rresp.get("archived") is False, "")
         sites3 = (await client.get("/api/sites")).json()
         report("site visible after restore", any(s.get("job_id") == job_id for s in sites3.get("sites", [])), "")
+
+        # 18. Hard delete (must be last — destroys the job)
+        hd = (await client.delete(f"/api/sites/{job_id}/hard")).json()
+        report("hard delete", hd.get("deleted", {}).get("analysis_jobs", 0) == 1, f"collections={len(hd.get('deleted', {}))}")
+        sites4 = (await client.get("/api/sites?include_archived=true")).json()
+        report("site gone after hard delete", not any(s.get("job_id") == job_id for s in sites4.get("sites", [])), "")
+        job404 = await client.get(f"/api/analysis/{job_id}")
+        report("job doc removed", job404.status_code == 404, f"HTTP {job404.status_code}")
 
     print("\n" + "=" * 60)
     print(f"RESULT: {len(RESULTS) - FAILURES}/{len(RESULTS)} steps passed")

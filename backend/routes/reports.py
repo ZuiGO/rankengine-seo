@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from backend.db.mongo import get_db
 from backend.services.user_flow import get_top_flows
@@ -85,6 +85,14 @@ async def generate_report(job_id: str):
         "seo_action_items": action_items_list,
         "seo_insights": insights,
     }
+
+    try:
+        from backend.services.site_health import get_site_health
+        health = await get_site_health(job_id)
+        health.pop("_id", None)
+        report["site_health"] = health
+    except Exception:
+        report["site_health"] = None
 
     return report
 
@@ -231,6 +239,39 @@ th {{ background: #f9fafb; font-weight: 600; }}
 
     html += "</div>"
 
+    try:
+        from backend.services.site_health import get_site_health
+        health = await get_site_health(job_id)
+        health.pop("_id", None)
+    except Exception:
+        health = None
+
+    if health and health.get("score") is not None:
+        html += f"""
+<div class="section">
+<h2>Site Health</h2>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Grade</td><td><strong>{health.get('grade', 'N/A')}</strong></td></tr>
+<tr><td>Score</td><td>{health.get('score')}/100</td></tr>
+<tr><td>Broken Links</td><td>{health.get('broken_links', 0)}</td></tr>
+<tr><td>Meta Description Coverage</td><td>{health.get('meta_description_coverage', 'N/A')}</td></tr>
+<tr><td>Alt Text Coverage</td><td>{health.get('alt_text_coverage', 'N/A')}</td></tr>
+<tr><td>Avg CWV Score</td><td>{health.get('avg_cwv_score', 'N/A')}</td></tr>
+<tr><td>Thin Pages</td><td>{health.get('thin_pages', 0)}</td></tr>
+<tr><td>Duplicate Pages</td><td>{health.get('duplicate_pages', 0)}</td></tr>
+<tr><td>Canonical Conflicts</td><td>{health.get('canonical_conflicts', 0)}</td></tr>
+</table>
+"""
+        issues = health.get("issues") or []
+        if issues:
+            html += "<h3>Issues</h3><ul>"
+            for issue in issues[:20]:
+                sev = issue.get("severity", "")
+                html += f"<li>{sev.upper()}: {issue.get('message', '')}</li>"
+            html += "</ul>"
+        html += "</div>"
+
     cached_insights = await db.seo_insights_cache.find_one({"job_id": job_id})
     insights = cached_insights.get("data", {}) if cached_insights else {}
     backlinks = insights.get("backlinks") or {}
@@ -307,9 +348,61 @@ async def download_report_pdf(job_id: str):
     )
 
 
+@router.get("/{job_id}/compare/pdf")
+async def download_comparison_report_pdf(job_id: str):
+    from fastapi.responses import Response
+    from playwright.async_api import async_playwright
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return {"error": "Job not found"}
+
+    html = await _comparison_html(job_id)
+    if isinstance(html, dict):
+        return html
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            try:
+                page = await browser.new_page()
+                await page.set_content(html, wait_until="load")
+                pdf_bytes = await page.pdf(format="A4", print_background=True)
+            finally:
+                await browser.close()
+    except Exception as e:
+        from backend.logging_setup import get_logger
+        get_logger("reports").error("Comparison PDF export failed job=%s: %s", job_id, e)
+        return {"error": f"Comparison PDF export failed: {e}"}
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="comparison-{job_id}.pdf"'},
+    )
+
+
 @router.get("/{job_id}/compare")
 async def download_comparison_report(job_id: str):
     from fastapi.responses import HTMLResponse
+    from backend.services.compare_service import get_site_comparison
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return {"error": "Job not found"}
+
+    comp = await get_site_comparison(job_id)
+    if not comp:
+        return {"error": "Comparison not generated yet. Use Compare & Report first."}
+
+    html = await _comparison_html(job_id)
+    if isinstance(html, dict):
+        return html
+    return HTMLResponse(html)
+
+
+async def _comparison_html(job_id: str) -> str | dict:
     from backend.services.compare_service import get_site_comparison
 
     db = get_db()
@@ -325,6 +418,7 @@ async def download_comparison_report(job_id: str):
     lb = comp.get("link_health_before", {})
     la = comp.get("link_health_after", {})
     dummy = comp.get("dummy", {})
+    health = comp.get("health", {})
     per_page = comp.get("per_page", [])
 
     rows = ""
@@ -340,6 +434,20 @@ async def download_comparison_report(job_id: str):
 <td>{p.get('alt_missing_after', 0)}</td>
 <td>{p.get('alt_texts_changed', 0)}</td>
 </tr>"""
+
+    health_rows = ""
+    if health.get("score") is not None:
+        health_rows = f"""
+<div class="section">
+<h2>Site Health (original)</h2>
+<div class="card">
+Grade: <strong>{health.get('grade', 'N/A')}</strong> | Score: <strong>{health.get('score')}/100</strong>
+</div>
+<ul>
+"""
+        for issue in (health.get("issues") or [])[:20]:
+            health_rows += f"<li>{issue.get('severity', '').upper()}: {issue.get('message', '')}</li>"
+        health_rows += "</ul></div>"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -365,9 +473,12 @@ th {{ background: #f9fafb; }}
 <div class="card">
 Pages compared: <strong>{comp.get('pages_compared', 0)}</strong> |
 Approved changes applied to dummy site: <strong>{dummy.get('changes_applied', 0)}</strong> |
-Pending suggestions: <strong>{dummy.get('pending_changes', 0)}</strong>
+Suggestions previewed: <strong>{dummy.get('suggestions_applied', 0)}</strong> |
+Remaining pending: <strong>{dummy.get('pending_changes', 0)}</strong>
 </div>
 </div>
+
+{health_rows}
 
 <div class="section">
 <h2>On-Page Signals (before → after)</h2>
@@ -401,4 +512,4 @@ Pending suggestions: <strong>{dummy.get('pending_changes', 0)}</strong>
 </table>
 </div>
 </body></html>"""
-    return HTMLResponse(html)
+    return html

@@ -164,8 +164,9 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["overview_error"] = None
     except Exception as e:
         insights["overview_error"] = str(e)
-        insights["overview"] = None
-        insights["overview_source"] = "none"
+        from backend.services.local_insights import local_overview
+        insights["overview"] = await local_overview(job_id) if job_id else None
+        insights["overview_source"] = "local" if insights["overview"] else "none"
 
     try:
         insights["onpage"] = await onpage_summary(f"https://{domain}")

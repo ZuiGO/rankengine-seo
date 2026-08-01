@@ -12,7 +12,7 @@ from backend.config import settings
 from backend.db.mongo import connect_db, close_db, get_db
 from backend.db.neo4j_db import connect_neo4j, close_neo4j
 from backend.logging_setup import setup_logging, get_logger
-from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler, logs, dummy, quality, tracking, spend
+from backend.routes import analysis, pages, content, links, actions, reports, chat, seo_insights, sites, scheduler, logs, dummy, quality, tracking, spend
 from backend.services.scheduler import scheduler_loop
 from backend.services.dummy_site import DUMMY_ROOT
 from backend.services.embeddings import embedding_source
@@ -81,7 +81,6 @@ app.include_router(links.router)
 app.include_router(actions.router)
 app.include_router(reports.router)
 app.include_router(chat.router)
-app.include_router(graph.router)
 app.include_router(seo_insights.router)
 app.include_router(sites.router)
 app.include_router(scheduler.router)

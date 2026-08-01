@@ -7,6 +7,14 @@ from backend.db.mongo import get_db
 router = APIRouter(prefix="/api/sites", tags=["sites"])
 
 
+async def log_audit(event: str, job_id: str, details: dict | None = None):
+    try:
+        from backend.services.audit_service import log_audit as _log
+        await _log(event, job_id=job_id, details=details)
+    except Exception:
+        pass
+
+
 def _domain(url: str) -> str:
     if "//" in url:
         return url.split("//")[-1].split("/")[0]
@@ -18,7 +26,7 @@ async def _site_metrics(job: dict) -> dict:
     job_id = job["_id"]
     pages = await db.pages.count_documents({"job_id": job_id})
     content = await db.content_items.count_documents({"job_id": job_id})
-    vectors = await db.embeddings.count_documents({"job_id": job_id})
+    vectors = (job.get("summary") or {}).get("total_vectors", 0)
     actions = await db.action_items.count_documents({"job_id": job_id})
 
     breakdown = {}
@@ -129,6 +137,48 @@ async def restore_site(job_id: str):
         {"$unset": {"deleted": "", "deleted_at": ""}},
     )
     return {"status": "ok", "job_id": job_id, "archived": False}
+
+
+@router.delete("/{job_id}/hard")
+async def hard_delete_site(job_id: str):
+    """Permanently delete a site and every trace of it (DB rows, vectors, files)."""
+    import os
+    import shutil
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    collections = [
+        "pages", "page_links", "content_items", "content_extractions",
+        "action_items", "content_versions", "link_health", "link_health_summaries",
+        "backlinks", "backlink_meta", "seo_insights_cache", "site_health",
+        "duplicate_content", "structured_data", "geo_alignment", "orphan_pages",
+        "page_performance", "page_performance_summaries", "user_flows",
+        "dummy_sites", "site_comparisons", "keyword_tracking",
+        "keyword_tracking_summaries", "audit_logs", "api_usage", "embeddings",
+    ]
+    deleted = {}
+    for coll in collections:
+        deleted[coll] = (await db[coll].delete_many({"job_id": job_id})).deleted_count
+    deleted["analysis_jobs"] = (await db.analysis_jobs.delete_one({"_id": job_id})).deleted_count
+    await db.crawl_schedules.update_many(
+        {}, {"$pull": {"history": {"job_id": job_id}}},
+    )
+
+    try:
+        from backend.db.chroma import delete_collection
+        delete_collection(f"job_{job_id}")
+    except Exception:
+        pass
+
+    for path in (os.path.join("dummy_site", job_id), os.path.join("downloads", job_id)):
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+
+    await log_audit("site_deleted", job_id, {"url": job.get("url"), "purged": sum(deleted.values())})
+    return {"status": "ok", "job_id": job_id, "deleted": deleted}
 
 
 class CompareRequest(BaseModel):
