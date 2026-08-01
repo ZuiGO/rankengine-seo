@@ -5,9 +5,15 @@ from typing import Optional
 
 from backend.db.chroma import get_or_create_collection, delete_collection
 from backend.db.mongo import get_db
-from backend.services.embeddings import embed_texts, embedding_source
+from backend.logging_setup import get_logger
+from backend.services.embeddings import embed_texts, embed_text_hash, embedding_source
+
+logger = get_logger("vector")
 
 BATCH_SIZE = 100
+MAX_INDEX_DOCS = 500
+VECTOR_DIM = 256
+GEMINI_DIM = 768
 
 
 def _collection_name(job_id: str) -> str:
@@ -116,22 +122,40 @@ async def _collect_docs(db, job_id: str) -> list[tuple[str, str, dict]]:
 
 
 async def index_job_vectors(job_id: str) -> int:
-    """Rebuild the semantic index for a job (Chroma collection, wiped first)."""
+    """Rebuild the semantic index for a job (Chroma collection, wiped first).
+
+    Embeds everything up front so a mid-run quota hit cannot mix embedding dimensions;
+    if dimensions are mixed, the job falls back to hash vectors for consistency.
+    """
     db = get_db()
-    docs = await _collect_docs(db, job_id)
+    docs = (await _collect_docs(db, job_id))[:MAX_INDEX_DOCS]
     name = _collection_name(job_id)
     delete_collection(name)
     collection = get_or_create_collection(name)
 
+    all_vectors = []
+    for start in range(0, len(docs), BATCH_SIZE):
+        chunk = docs[start:start + BATCH_SIZE]
+        all_vectors.extend(await embed_texts([t for _, t, _ in chunk], job_id))
+
+    if not all_vectors:
+        return 0
+
+    dims = {len(v) for v in all_vectors}
+    if len(dims) != 1 or dims not in ({VECTOR_DIM}, {GEMINI_DIM}):
+        logger.warning(
+            "Vector dimensions mixed (%s) for job=%s; re-embedding with hash fallback",
+            sorted(dims), job_id,
+        )
+        all_vectors = [embed_text_hash(t) for _, t, _ in docs]
+
     indexed = 0
     for start in range(0, len(docs), BATCH_SIZE):
         chunk = docs[start:start + BATCH_SIZE]
-        texts = [t for _, t, _ in chunk]
-        vectors = await embed_texts(texts, job_id)
         collection.add(
             ids=[doc_id for doc_id, _, _ in chunk],
-            embeddings=vectors,
-            documents=texts,
+            embeddings=all_vectors[start:start + BATCH_SIZE],
+            documents=[t for _, t, _ in chunk],
             metadatas=[m for _, _, m in chunk],
         )
         indexed += len(chunk)
@@ -159,6 +183,13 @@ async def search_similar(
         return []
 
     query_vec = (await embed_texts([query], job_id))[0]
+
+    try:
+        sample = collection.get(include=["embeddings"], limit=1)["embeddings"][0]
+        if len(query_vec) != len(sample):
+            query_vec = embed_text_hash(query)
+    except Exception:
+        pass
 
     where = {}
     if doc_types:

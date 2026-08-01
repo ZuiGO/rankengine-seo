@@ -4,6 +4,8 @@ from backend.config import settings
 from backend.services.queue import redis_settings
 
 async def startup(ctx):
+    from backend.logging_setup import setup_logging
+    setup_logging()
     from backend.db.mongo import connect_db
     await connect_db(settings.mongodb_uri)
     from backend.logging_setup import get_logger

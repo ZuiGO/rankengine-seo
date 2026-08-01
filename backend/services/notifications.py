@@ -23,6 +23,7 @@ async def send_slack(title: str, fields: dict, color: str = "good") -> bool:
         if resp.status_code >= 400:
             logger.warning("Slack webhook failed: HTTP %s", resp.status_code)
             return False
+        logger.info("Slack notification sent: %s", title)
         return True
     except Exception as e:
         logger.warning("Slack webhook error: %s", e)

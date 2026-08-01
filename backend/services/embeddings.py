@@ -5,6 +5,7 @@ machine; Gemini's free tier (batch embed, 1500 req/day) is the primary embedder.
 present the legacy hash embedder is used so the system keeps working (degraded semantic quality).
 """
 
+import asyncio
 import hashlib
 
 import httpx
@@ -55,6 +56,8 @@ async def _gemini_embed(texts: list[str]) -> list[list[float]]:
     body = {"requests": _gemini_request_items(texts)}
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(GEMINI_URL, params={"key": settings.gemini_api_key}, json=body)
+        if resp.status_code == 429 and "quota" in resp.text:
+            raise QuotaExceeded(resp.text[:200])
         if resp.status_code >= 400:
             raise RuntimeError(f"Gemini embed failed (HTTP {resp.status_code}): {resp.text[:200]}")
     data = resp.json()
@@ -64,17 +67,31 @@ async def _gemini_embed(texts: list[str]) -> list[list[float]]:
     return out
 
 
+class QuotaExceeded(RuntimeError):
+    """Gemini free-tier daily quota exhausted; embeddings unavailable for the rest of the day."""
+
+
 async def embed_texts(texts: list[str], job_id: str | None = None) -> list[list[float]]:
     """Embed a batch of texts. Gemini when a key exists, otherwise hash vectors."""
     cleaned = [t if t else "" for t in texts]
     if settings.gemini_api_key:
-        try:
-            vectors = await _gemini_embed(cleaned)
-            from backend.services.spend_tracker import record_usage
-            tokens = sum(max(1, len(t.split())) for t in cleaned)
-            await record_usage("gemini", job_id or "", "embed_texts", tokens=tokens)
-            return vectors
-        except Exception:
-            from backend.logging_setup import get_logger
-            get_logger("embeddings").warning("Gemini embed failed, using hash fallback")
+        for attempt in range(2):
+            try:
+                vectors = await _gemini_embed(cleaned)
+                from backend.services.spend_tracker import record_usage
+                tokens = sum(max(1, len(t.split())) for t in cleaned)
+                await record_usage("gemini", job_id or "", "embed_texts", tokens=tokens)
+                return vectors
+            except QuotaExceeded as e:
+                from backend.logging_setup import get_logger
+                get_logger("embeddings").warning(
+                    "Gemini quota exhausted for the day (%s); using hash fallback", str(e)[:120],
+                )
+                break
+            except Exception as e:
+                if attempt == 0:
+                    await asyncio.sleep(2)
+                    continue
+                from backend.logging_setup import get_logger
+                get_logger("embeddings").warning("Gemini embed failed (%s), using hash fallback", e)
     return [embed_text_hash(t) for t in cleaned]
