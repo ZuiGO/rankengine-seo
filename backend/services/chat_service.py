@@ -309,4 +309,10 @@ async def chat_with_context(job_id: str, message: str, section: str = "content")
             f"Details: {e}. "
             f"\n\nMeanwhile, here is the raw analysis context that would have been used:\n{context[:1200]}"
         )
+    try:
+        from backend.services.spend_tracker import record_usage
+        usage = getattr(completion, "usage", None)
+        await record_usage("groq", job_id, "chat", tokens=(usage.total_tokens if usage else 0))
+    except Exception:
+        pass
     return completion.choices[0].message.content or "No reply generated."

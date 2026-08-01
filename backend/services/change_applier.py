@@ -106,6 +106,13 @@ async def _groq_generate(item: dict, field: str) -> str | None:
         content = completion.choices[0].message.content
         parsed = json.loads(content)
         after = str(parsed.get("after") or parsed.get(field) or "").strip()
+        try:
+            from backend.services.spend_tracker import record_usage
+            usage = getattr(completion, "usage", None)
+            await record_usage("groq", item.get("job_id", ""), "change_generation",
+                               tokens=(usage.total_tokens if usage else 0))
+        except Exception:
+            pass
         return after or None
     except Exception as e:
         if "429" in str(e):
@@ -180,6 +187,13 @@ async def _qa_check(item: dict, before: str, after: str) -> bool:
             )
             content = completion.choices[0].message.content
             parsed = json.loads(content)
+            try:
+                from backend.services.spend_tracker import record_usage
+                usage = getattr(completion, "usage", None)
+                await record_usage("groq", item.get("job_id", ""), "qa_check",
+                                   tokens=(usage.total_tokens if usage else 0))
+            except Exception:
+                pass
             return bool(parsed.get("consistent", True))
         except Exception as e:
             if "429" in str(e):

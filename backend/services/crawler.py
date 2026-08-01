@@ -1,8 +1,12 @@
 import asyncio
 from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
+
+import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
+from backend.config import settings
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 from backend.services.content_classifier import detect_content_types
@@ -13,6 +17,41 @@ from backend.services.page_classifier import classify_page_type, page_role
 logger = get_logger("crawler")
 
 MAX_HTML_STORED = 300_000
+USER_AGENT = "RankEngine/1.0 (+https://rankengine.ai)"
+
+
+async def _robots_delay(origin: str) -> float:
+    """Crawl-delay from robots.txt (clamped), falling back to the configured default."""
+    delay = settings.crawl_politeness_delay
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            resp = await client.get(origin + "/robots.txt", headers={"User-Agent": USER_AGENT})
+        if resp.status_code == 200:
+            rp = RobotFileParser()
+            rp.parse(resp.text.splitlines())
+            for agent in (USER_AGENT.split("/")[0], "*"):
+                d = rp.crawl_delay(agent)
+                if d is not None:
+                    try:
+                        delay = min(max(float(d), 0.2), settings.crawl_robots_delay_max)
+                    except ValueError:
+                        pass
+                    break
+    except Exception as e:
+        logger.warning("robots.txt fetch failed for %s: %s", origin, e)
+    return delay
+
+
+async def _goto_polite(page, url: str, gate: asyncio.Lock, delay: float, timeout: int = 30000):
+    """Sequential-min-interval gate + one retry on 429."""
+    async with gate:
+        await asyncio.sleep(delay)
+    resp = await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    if resp is not None and resp.status == 429:
+        logger.warning("429 for %s; backing off before retry", url)
+        await asyncio.sleep(min(15, 2 * delay + 2))
+        resp = await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    return resp
 
 
 async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurrency: int = 5):
@@ -27,6 +66,9 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
     total_external = 0
     lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(concurrency)
+    delay = await _robots_delay(f"{parsed.scheme}://{parsed.netloc}")
+    gate = asyncio.Lock()
+    logger.info("Crawl politeness job=%s delay=%.2fs", job_id, delay)
 
     async def update_progress(crawled: int, msg: str):
         await db.analysis_jobs.update_one(
@@ -43,9 +85,9 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
             try:
                 page = await browser.new_page()
                 await page.set_extra_http_headers({
-                    "User-Agent": "RankEngine/1.0 (+https://rankengine.ai)"
+                    "User-Agent": USER_AGENT
                 })
-                resp = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                resp = await _goto_polite(page, url, gate, delay)
                 if resp is None:
                     await page.close()
                     return None
@@ -192,14 +234,16 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                 url = result["url"]
                 try:
                     page = await mobile_browser.new_page(**iphone)
-                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    await page.set_extra_http_headers({"User-Agent": USER_AGENT})
+                    resp = await _goto_polite(page, url, gate, delay)
                     mhtml = await page.content()
                     await page.close()
+                    status = resp.status if resp is not None else None
                     await db.pages.update_one(
                         {"job_id": job_id, "url": url},
                         {"$set": {
                             "html_mobile": mhtml[:MAX_HTML_STORED],
-                            "mobile_status_code": 200,
+                            "mobile_status_code": status,
                             "viewport": "mobile",
                         }},
                     )

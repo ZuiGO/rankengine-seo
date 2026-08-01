@@ -12,6 +12,7 @@ from backend.services.content_extractor import extract_all_content
 from backend.services.vector_service import index_job_vectors
 from backend.services.user_flow import detect_user_flows
 from backend.services.audit_service import log_audit
+from backend.services.queue import run_or_fallback
 
 logger = get_logger("analysis")
 
@@ -50,7 +51,7 @@ async def start_analysis(req: AnalyzeRequest):
         "summary": None,
     })
 
-    asyncio.create_task(run_analysis_pipeline(job_id, url, req.max_pages))
+    await run_or_fallback("analyze_job", run_analysis_pipeline, job_id, url, req.max_pages)
     await log_audit("analysis_started", job_id, {"url": url, "max_pages": req.max_pages})
 
     return {"job_id": job_id, "status": "queued", "url": url, "max_pages": req.max_pages}
@@ -253,6 +254,23 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         await log_audit("analysis_completed", job_id, {"pages": summary["total_pages"], "content_items": content_count})
         logger.info("Analysis completed job=%s pages=%s", job_id, summary["total_pages"])
 
+        try:
+            from backend.services.notifications import send_slack
+            await send_slack(
+                "Analysis complete",
+                {
+                    "Site": url,
+                    "Pages": summary["total_pages"],
+                    "Content items": content_count,
+                    "Health grade": health_grade,
+                    "Broken links": link_health.get("broken", 0),
+                    "Action items": summary.get("total_action_items", 0),
+                },
+                color="good",
+            )
+        except Exception as n_err:
+            logger.warning("Slack notification failed job=%s: %s", job_id, n_err)
+
     except Exception as e:
         logger.error("Analysis failed job=%s: %s", job_id, e)
         await log_audit("analysis_failed", job_id, {"error": str(e)})
@@ -265,6 +283,11 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                 "completed_at": datetime.utcnow(),
             }}
         )
+        try:
+            from backend.services.notifications import send_slack
+            await send_slack("Analysis failed", {"Site": url, "Error": str(e)[:300]}, color="danger")
+        except Exception as n_err:
+            logger.warning("Slack failure notification failed job=%s: %s", job_id, n_err)
 
 
 @router.get("/{job_id}")

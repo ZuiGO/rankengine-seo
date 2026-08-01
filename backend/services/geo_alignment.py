@@ -80,7 +80,7 @@ async def _topic_vector(db, job_id: str, page: dict) -> tuple[list[str], list[fl
     keywords = _top_keywords(tokens)
     if not keywords:
         return [], []
-    vectors = await embed_texts(keywords)
+    vectors = await embed_texts(keywords, job_id)
     return keywords, _mean_vec(vectors)
 
 
@@ -98,7 +98,7 @@ async def audit_geo_alignment(job_id: str) -> dict:
     if not industry_keywords:
         return {"status": "error", "message": "No keywords extractable from homepage"}
 
-    industry_vec = _mean_vec(await embed_texts(industry_keywords))
+    industry_vec = _mean_vec(await embed_texts(industry_keywords, job_id))
 
     report = []
     off_topic_pages = 0

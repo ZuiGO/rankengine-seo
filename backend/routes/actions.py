@@ -62,7 +62,8 @@ async def approve_all_actions(job_id: str):
         return {"status": "ok", "job_id": job_id, "approved": 0, "failed": 0, "errors": []}
 
     _active_batches.add(job_id)
-    asyncio.create_task(_approve_all_batch(job_id))
+    from backend.services.queue import run_or_fallback
+    await run_or_fallback("approve_all_batch", _approve_all_batch, job_id)
     return {"status": "started", "job_id": job_id, "pending": pending}
 
 

@@ -1,4 +1,4 @@
-"""Real embeddings via Gemini text-embedding-004, with hash-vector fallback when no key is configured.
+"""Real embeddings via Gemini gemini-embedding-2, with hash-vector fallback when no key is configured.
 
 Python 3.14 has no wheels for onnxruntime/torch/mlx, so a local model is not installable on this
 machine; Gemini's free tier (batch embed, 1500 req/day) is the primary embedder. When no key is
@@ -15,9 +15,16 @@ from backend.config import settings
 VECTOR_DIM = 256
 NGRAM_RANGE = (2, 4)
 
-GEMINI_MODEL = "text-embedding-004"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents"
+GEMINI_MODEL = "gemini-embedding-2"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:batchEmbedContents"
 GEMINI_DIM = 768
+
+
+def _gemini_request_items(texts: list[str]) -> list[dict]:
+    return [
+        {"model": f"models/{GEMINI_MODEL}", "content": {"parts": [{"text": t}]}, "outputDimensionality": GEMINI_DIM}
+        for t in texts
+    ]
 
 
 def _hash_feature(text: str, index: int) -> int:
@@ -45,12 +52,7 @@ def embedding_source() -> str:
 
 
 async def _gemini_embed(texts: list[str]) -> list[list[float]]:
-    body = {
-        "requests": [
-            {"model": f"models/{GEMINI_MODEL}", "content": {"parts": [{"text": t}]}}
-            for t in texts
-        ]
-    }
+    body = {"requests": _gemini_request_items(texts)}
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(GEMINI_URL, params={"key": settings.gemini_api_key}, json=body)
         if resp.status_code >= 400:
@@ -62,12 +64,16 @@ async def _gemini_embed(texts: list[str]) -> list[list[float]]:
     return out
 
 
-async def embed_texts(texts: list[str]) -> list[list[float]]:
+async def embed_texts(texts: list[str], job_id: str | None = None) -> list[list[float]]:
     """Embed a batch of texts. Gemini when a key exists, otherwise hash vectors."""
     cleaned = [t if t else "" for t in texts]
     if settings.gemini_api_key:
         try:
-            return await _gemini_embed(cleaned)
+            vectors = await _gemini_embed(cleaned)
+            from backend.services.spend_tracker import record_usage
+            tokens = sum(max(1, len(t.split())) for t in cleaned)
+            await record_usage("gemini", job_id or "", "embed_texts", tokens=tokens)
+            return vectors
         except Exception:
             from backend.logging_setup import get_logger
             get_logger("embeddings").warning("Gemini embed failed, using hash fallback")

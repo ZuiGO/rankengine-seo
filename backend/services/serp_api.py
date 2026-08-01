@@ -43,6 +43,11 @@ async def search_keyword(keyword: str, domain: Optional[str] = None) -> dict:
         )
     data = resp.json()
     _raise_api_error(data, keyword)
+    try:
+        from backend.services.spend_tracker import record_usage
+        await record_usage("serp", "", f"search_{keyword[:40]}", requests=1)
+    except Exception:
+        pass
     organic = data.get("organic_results", [])
     if domain:
         rank = next(

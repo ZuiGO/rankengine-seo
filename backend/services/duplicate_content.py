@@ -39,7 +39,7 @@ def canonical_audit(page_url: str, html: str) -> dict:
     if not html:
         return result
     soup = BeautifulSoup(html, "lxml")
-    canonicals = [t for t in soup.find_all("link", rel=lambda r: r and "canonical" in [x.lower() for x in r])]
+    canonicals = [t for t in soup.find_all("link", rel="canonical")]
     hrefs = []
     for c in canonicals:
         h = (c.get("href") or "").strip()
@@ -88,7 +88,7 @@ async def detect_duplicate_content(job_id: str) -> dict:
         targets.append(p["url"])
 
     if len(texts) > 1:
-        vectors = await embed_texts(texts)
+        vectors = await embed_texts(texts, job_id)
         dim = len(vectors[0])
         matched = [False] * len(texts)
         for i in range(len(texts)):

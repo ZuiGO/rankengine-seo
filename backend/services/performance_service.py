@@ -110,6 +110,11 @@ async def fetch_page_performance(url: str, strategy: str = "mobile") -> dict:
             hint=HINT,
         )
     data = resp.json()
+    try:
+        from backend.services.spend_tracker import record_usage
+        await record_usage("pagespeed", "", f"psi_{strategy}", requests=1)
+    except Exception:
+        pass
     field = _field_metrics(data)
     lab = _lab_metrics(data.get("lighthouseResult") or {})
     cwv = {k: (field.get(k) if field.get(k) is not None else lab.get(k)) for k in CWV_WEIGHTS}

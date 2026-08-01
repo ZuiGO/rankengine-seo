@@ -93,13 +93,15 @@ async def _run_due_crawls():
                 "next_run_at": now + timedelta(hours=schedule["interval_hours"]),
             }, "$push": {"history": job_id}},
         )
-        asyncio.create_task(run_analysis_pipeline(job_id, schedule["url"], schedule["max_pages"]))
+        from backend.services.queue import run_or_fallback
+        await run_or_fallback("analyze_job", run_analysis_pipeline, job_id, schedule["url"], schedule["max_pages"])
         logger.info("Scheduled crawl triggered id=%s job=%s url=%s", schedule["_id"], job_id, schedule["url"])
 
 
 async def _run_keyword_check(schedule: dict, now: datetime):
     db = get_db()
     try:
+        from backend.services.queue import run_or_fallback
         from backend.services.keyword_tracking import check_keywords
         latest = await db.analysis_jobs.find_one(
             {"url": schedule["url"], "status": "completed"},
@@ -108,8 +110,8 @@ async def _run_keyword_check(schedule: dict, now: datetime):
         if not latest:
             logger.warning("Keyword check skipped: no completed job for %s", schedule["url"])
             return
-        result = await check_keywords(str(latest["_id"]))
-        logger.info("Scheduled keyword check id=%s job=%s -> %s", schedule["_id"], latest["_id"], result.get("status"))
+        await run_or_fallback("keyword_check", check_keywords, str(latest["_id"]))
+        logger.info("Scheduled keyword check enqueued id=%s job=%s", schedule["_id"], latest["_id"])
     except Exception as e:
         logger.error("Scheduled keyword check failed id=%s: %s", schedule["_id"], e)
     await db.crawl_schedules.update_one(

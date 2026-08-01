@@ -113,6 +113,12 @@ async def main(host: str, url: str):
         orph = (await client.get(f"/api/quality/{job_id}/orphans")).json()
         report("quality orphans", "orphan_pages" in orph, f"orphans={orph.get('orphan_pages')}")
 
+        # 8c. Spend tracking (Phase 3)
+        spend = (await client.get(f"/api/spend/{job_id}")).json()
+        report("spend per job", "total_requests" in spend, f"req={spend.get('total_requests')} cost=${spend.get('total_est_cost')}")
+        gspend = (await client.get("/api/spend")).json()
+        report("spend global", "total_requests" in gspend, f"req={gspend.get('total_requests')}")
+
         # 9. Keyword tracking (Phase 1)
         kcheck = (await client.post(f"/api/tracking/{job_id}/check")).json()
         report("tracking check runs", kcheck.get("status") in ("ok", "error") or "ranked" in kcheck, f"status={kcheck.get('status')} ranked={kcheck.get('ranked')}")

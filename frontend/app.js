@@ -914,14 +914,29 @@ async function loadQuality(jobId) {
   const el = document.getElementById("quality-content");
   if (!el) return;
   el.innerHTML = '<div class="insights-card">Loading quality audits...</div>';
-  const [dup, sd, perf, geo, orphans] = await Promise.all([
+  const [dup, sd, perf, geo, orphans, spend] = await Promise.all([
     clientGet(`${API_BASE}/quality/${jobId}/duplicates`),
     clientGet(`${API_BASE}/quality/${jobId}/structured-data`),
     clientGet(`${API_BASE}/quality/${jobId}/performance`),
     clientGet(`${API_BASE}/quality/${jobId}/geo-alignment`),
     clientGet(`${API_BASE}/quality/${jobId}/orphans`),
+    clientGet(`${API_BASE}/spend/${jobId}`),
   ]);
-  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans);
+  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans) + renderSpend(spend);
+}
+
+function renderSpend(spend) {
+  if (!spend) return "";
+  const rows = (spend.services || []).map(s => `
+    <div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:13px">
+      <span>${escapeHtml(s.service)}</span>
+      <span class="count-label">${s.requests} req · ${s.tokens || 0} tokens · $${(s.est_cost || 0).toFixed(5)}</span>
+    </div>`).join("");
+  return `<div class="insights-card" style="margin-bottom:14px"><h3>API Spend & Usage</h3>
+    <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+      <div class="insights-card"><div class="insights-label">Total Requests</div><div class="insights-value">${spend.total_requests ?? 0}</div></div>
+      <div class="insights-card"><div class="insights-label">Est. Cost</div><div class="insights-value">$${(spend.total_est_cost || 0).toFixed(5)}</div></div>
+    </div>${rows}</div>`;
 }
 
 async function clientGet(url) {

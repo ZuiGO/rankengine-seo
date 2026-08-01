@@ -127,7 +127,7 @@ async def index_job_vectors(job_id: str) -> int:
     for start in range(0, len(docs), BATCH_SIZE):
         chunk = docs[start:start + BATCH_SIZE]
         texts = [t for _, t, _ in chunk]
-        vectors = await embed_texts(texts)
+        vectors = await embed_texts(texts, job_id)
         collection.add(
             ids=[doc_id for doc_id, _, _ in chunk],
             embeddings=vectors,
@@ -158,7 +158,7 @@ async def search_similar(
     except Exception:
         return []
 
-    query_vec = (await embed_texts([query]))[0]
+    query_vec = (await embed_texts([query], job_id))[0]
 
     where = {}
     if doc_types:

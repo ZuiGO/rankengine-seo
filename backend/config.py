@@ -12,9 +12,15 @@ class Settings(BaseSettings):
     dataforseo_password: str = ""
     gemini_api_key: str = ""
     pagespeed_api_key: str = ""
+    slack_webhook_url: str = ""
+    gemini_cost_per_million: float = 0.125
+    groq_cost_per_million: float = 0.0
+    dataforseo_cost_per_million: float = 0.0
     crawl_max_pages: int = 50
     crawl_concurrency: int = 5
     crawl_timeout_seconds: int = 360
+    crawl_politeness_delay: float = 0.5
+    crawl_robots_delay_max: float = 5.0
     log_level: str = "INFO"
     log_dir: str = "logs"
 
