@@ -31,15 +31,25 @@ def _metric_value(lh_audit: dict) -> float | None:
 
 
 def _field_metrics(data: dict) -> dict:
-    """CrUX field data from loadingExperience (ms; CLS is a ratio)."""
+    """CrUX field data from loadingExperience. PSI v5 exposes `percentile` as a number;
+    CrUX-style `percentiles.p75` dicts are accepted as a fallback."""
     exp = data.get("loadingExperience") or {}
     metrics = exp.get("metrics") or {}
     out = {}
     for key, m in metrics.items():
-        percentiles = m.get("percentile") or {}
-        value = percentiles.get("p75")
-        if value is not None:
-            out[key.lower()] = value / 1000.0 if key.lower() == "cls" else value
+        if not isinstance(m, dict):
+            continue
+        percentiles = m.get("percentile")
+        if isinstance(percentiles, dict):
+            value = percentiles.get("p75")
+        else:
+            value = percentiles if isinstance(percentiles, (int, float)) else None
+        if value is None:
+            continue
+        if key.lower() == "cls":
+            out[key.lower()] = value / 1000.0 if value > 1 else value
+        else:
+            out[key.lower()] = value
     return out
 
 
