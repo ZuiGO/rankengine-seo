@@ -42,6 +42,11 @@ async def wait_for_completion(client: httpx.AsyncClient, job_id: str, timeout_s:
 
 async def main(host: str, url: str):
     async with httpx.AsyncClient(base_url=host, timeout=60) as client:
+        # 0. Health
+        health = (await client.get("/api/health")).json()
+        report("health mongo+redis+chroma", health.get("mongo") == "up" and health.get("redis") == "up" and str(health.get("chroma", "")).startswith("up"),
+               f"mongo={health.get('mongo')} redis={health.get('redis')} chroma={health.get('chroma')}")
+
         # 1. Analysis
         report("start analysis", True, url)
         resp = await client.post("/api/analysis", json={"url": url})

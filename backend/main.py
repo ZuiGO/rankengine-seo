@@ -9,12 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.config import settings
-from backend.db.mongo import connect_db, close_db
+from backend.db.mongo import connect_db, close_db, get_db
 from backend.db.neo4j_db import connect_neo4j, close_neo4j
 from backend.logging_setup import setup_logging, get_logger
 from backend.routes import analysis, pages, content, links, actions, reports, chat, graph, seo_insights, sites, scheduler, logs, dummy, quality, tracking, spend
 from backend.services.scheduler import scheduler_loop
 from backend.services.dummy_site import DUMMY_ROOT
+from backend.services.embeddings import embedding_source
 
 logger = get_logger("rankengine")
 
@@ -23,6 +24,7 @@ DUMMY_DIR = Path(__file__).parent.parent / DUMMY_ROOT
 DOWNLOADS_DIR = Path(__file__).parent.parent / "downloads"
 
 scheduler_task = None
+STARTED_AT = time.time()
 
 
 @asynccontextmanager
@@ -100,7 +102,39 @@ app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_DIR)), name="downloa
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    checks = {"status": "ok"}
+    try:
+        await get_db().command("ping")
+        checks["mongo"] = "up"
+    except Exception as e:
+        checks["mongo"] = f"down: {e}"
+
+    try:
+        from backend.services.queue import get_pool
+        pool = await get_pool()
+        await pool.ping()
+        checks["redis"] = "up"
+        try:
+            queue = await pool.queued_jobs()
+            checks["queue_depth"] = len(queue)
+        except Exception:
+            checks["queue_depth"] = None
+    except Exception as e:
+        checks["redis"] = f"down: {e}"
+
+    try:
+        from backend.db.chroma import get_or_create_collection, delete_collection
+        collection = get_or_create_collection("health_check")
+        count = collection.count()
+        delete_collection("health_check")
+        checks["chroma"] = f"up ({count} vectors)"
+    except Exception as e:
+        checks["chroma"] = f"down: {e}"
+
+    checks["embeddings"] = embedding_source()
+    checks["uptime_s"] = round(time.time() - STARTED_AT)
+    checks["version"] = app.version
+    return checks
 
 
 @app.get("/")
