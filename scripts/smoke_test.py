@@ -57,8 +57,8 @@ async def main(host: str, url: str):
         summary = (await client.get(f"/api/analysis/{job_id}/summary")).json()
         report("summary totals", summary.get("total_pages", 0) > 0, f"pages={summary.get('total_pages')} content={summary.get('total_content_items')}")
         ssum = summary.get("summary") or {}
-        report("summary phase-1 keys", all(k in ssum for k in ("cwv_pages", "duplicate_pages", "canonical_issues", "structured_data_valid")),
-               f"cwv={ssum.get('cwv_pages')} dup={ssum.get('duplicate_pages')} canon={ssum.get('canonical_issues')} sd={ssum.get('structured_data_valid')}")
+        report("summary phase-1 keys", all(k in ssum for k in ("cwv_pages", "duplicate_pages", "canonical_issues", "structured_data_valid", "geo_off_topic_pages", "orphan_pages")),
+               f"cwv={ssum.get('cwv_pages')} dup={ssum.get('duplicate_pages')} canon={ssum.get('canonical_issues')} sd={ssum.get('structured_data_valid')} geo={ssum.get('geo_off_topic_pages')} orphans={ssum.get('orphan_pages')}")
 
         # 3. Pages
         pages = (await client.get(f"/api/pages/{job_id}?limit=500")).json()
@@ -106,6 +106,12 @@ async def main(host: str, url: str):
             ok = qr.status_code == 200
             detail = qr.json() if qr.status_code == 200 else f"HTTP {qr.status_code}"
             report(f"quality {ep}", ok, f"{detail if ep != 'embeddings' else 'indexed=' + str((detail or {}).get('indexed'))}" if not isinstance(detail, str) else str(detail)[:60])
+
+        # 8b. Quality endpoints (Phase 2)
+        geo = (await client.get(f"/api/quality/{job_id}/geo-alignment")).json()
+        report("quality geo-alignment", "off_topic_pages" in geo, f"off_topic={geo.get('off_topic_pages')} analyzed={geo.get('pages_analyzed')}")
+        orph = (await client.get(f"/api/quality/{job_id}/orphans")).json()
+        report("quality orphans", "orphan_pages" in orph, f"orphans={orph.get('orphan_pages')}")
 
         # 9. Keyword tracking (Phase 1)
         kcheck = (await client.post(f"/api/tracking/{job_id}/check")).json()

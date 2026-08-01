@@ -193,6 +193,27 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             logger.error("Structured data audit warning job=%s: %s", job_id, sd_err)
             structured_valid = 0
 
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"progress_message": "Checking industry alignment and orphan pages..."}}
+        )
+
+        try:
+            from backend.services.geo_alignment import audit_geo_alignment
+            geo = await audit_geo_alignment(job_id)
+            geo_off_topic = geo.get("off_topic_pages", 0)
+        except Exception as geo_err:
+            logger.error("GEO alignment warning job=%s: %s", job_id, geo_err)
+            geo_off_topic = 0
+
+        try:
+            from backend.services.orphan_detection import detect_orphan_pages
+            orphans = await detect_orphan_pages(job_id)
+            orphan_count = orphans.get("orphan_pages", 0)
+        except Exception as o_err:
+            logger.error("Orphan detection warning job=%s: %s", job_id, o_err)
+            orphan_count = 0
+
         try:
             from backend.services.site_health import compute_site_health
             health = await compute_site_health(job_id)
@@ -224,6 +245,8 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "duplicate_pages": duplicate_pages,
                     "canonical_issues": canonical_issues,
                     "structured_data_valid": structured_valid,
+                    "geo_off_topic_pages": geo_off_topic,
+                    "orphan_pages": orphan_count,
                 },
             }}
         )

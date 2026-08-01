@@ -129,6 +129,18 @@ async def compute_site_health(job_id: str) -> dict:
         if sd.get("invalid_types", 0) > 0:
             issues.append({"severity": "low", "message": f"{sd.get('invalid_types')} page(s) have invalid structured data markup."})
 
+    geo = await db.geo_alignment.find_one({"job_id": job_id})
+    if geo:
+        metrics["geo_off_topic_pages"] = geo.get("off_topic_pages", 0)
+        if geo.get("off_topic_pages", 0) > 0:
+            issues.append({"severity": "low", "message": f"{geo.get('off_topic_pages')} page(s) diverge from the site's core industry — a risk for generative-search visibility."})
+
+    orphans = await db.orphan_pages.find_one({"job_id": job_id})
+    if orphans:
+        metrics["orphan_pages"] = orphans.get("orphan_pages", 0)
+        if orphans.get("orphan_pages", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{orphans.get('orphan_pages')} page(s) have no internal links pointing to them (orphans)."})
+
     health = {
         "job_id": job_id,
         "grade": _grade(score),

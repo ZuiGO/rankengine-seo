@@ -86,6 +86,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "report") loadReport(currentJobId);
       if (currentTab === "chat") initChat();
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
+      if (currentTab === "quality") loadQuality(currentJobId);
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
       if (currentTab === "logs") loadLogs();
@@ -907,6 +908,82 @@ function renderInsightSection(el, { data, error, source, emptyText, render }) {
   }
   if (!data && !error) html += `<div class="insights-card">${emptyText}</div>`;
   el.innerHTML = html;
+}
+
+async function loadQuality(jobId) {
+  const el = document.getElementById("quality-content");
+  if (!el) return;
+  el.innerHTML = '<div class="insights-card">Loading quality audits...</div>';
+  const [dup, sd, perf, geo, orphans] = await Promise.all([
+    clientGet(`${API_BASE}/quality/${jobId}/duplicates`),
+    clientGet(`${API_BASE}/quality/${jobId}/structured-data`),
+    clientGet(`${API_BASE}/quality/${jobId}/performance`),
+    clientGet(`${API_BASE}/quality/${jobId}/geo-alignment`),
+    clientGet(`${API_BASE}/quality/${jobId}/orphans`),
+  ]);
+  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans);
+}
+
+async function clientGet(url) {
+  try {
+    const resp = await fetch(url);
+    if (resp.status === 404) return null;
+    return resp.ok ? await resp.json() : null;
+  } catch { return null; }
+}
+
+function qualitySection(title, inner) {
+  return `<div class="insights-card" style="margin-bottom:14px"><h3>${title}</h3>${inner}</div>`;
+}
+
+function renderQuality(dup, sd, perf, geo, orphans) {
+  let html = "";
+
+  html += qualitySection("Duplicate Content & Canonicals", dup
+    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+         <div class="insights-card"><div class="insights-label">Duplicate Groups</div><div class="insights-value">${dup.duplicate_groups?.length ?? 0}</div></div>
+         <div class="insights-card"><div class="insights-label">Duplicate Pages</div><div class="insights-value">${dup.duplicate_pages ?? 0}</div></div>
+         <div class="insights-card"><div class="insights-label">Canonical Missing</div><div class="insights-value">${dup.canonical_missing ?? 0}</div></div>
+         <div class="insights-card"><div class="insights-label">Canonical Conflicts</div><div class="insights-value">${(dup.canonical_conflicting ?? 0) + (dup.canonical_cross_domain ?? 0)}</div></div>
+       </div>
+       ${(dup.duplicate_groups || []).map(g => `<div style="margin-top:8px;font-size:13px;color:var(--text-secondary)">${escapeHtml(g.urls.join("  ≈  "))} <span class="count-label">(${escapeHtml(g.similarity)})</span></div>`).join("")}
+       ${(dup.canonical_flags || []).filter(f => f.canonical_conflicting || f.canonical_cross_domain).map(f => `<div style="margin-top:6px;font-size:13px">${f.canonical_cross_domain ? "cross-domain canonical" : "conflicting canonical"} → ${escapeHtml(f.page_url)}${f.canonical_target ? " → " + escapeHtml(f.canonical_target) : ""}</div>`).join("")}`.trim()
+    : '<div class="insights-label">Not run for this job yet.</div>');
+
+  html += qualitySection("Structured Data", sd
+    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+         <div class="insights-card"><div class="insights-label">Valid Pages</div><div class="insights-value">${sd.valid ?? 0}</div></div>
+         <div class="insights-card"><div class="insights-label">No Structured Data</div><div class="insights-value">${sd.no_structured_data ?? 0}</div></div>
+         <div class="insights-card"><div class="insights-label">Invalid Markup</div><div class="insights-value">${sd.invalid_types ?? 0}</div></div>
+       </div>
+       ${Object.entries(sd.type_counts || {}).map(([t, c]) => `<span class="count-label" style="margin-right:10px">${escapeHtml(t)}: ${c}</span>`).join("")}`
+    : '<div class="insights-label">Not run for this job yet.</div>');
+
+  html += qualitySection("Core Web Vitals", perf
+    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+         <div class="insights-card"><div class="insights-label">Pages Measured</div><div class="insights-value">${perf.checked ?? 0}</div></div>
+         <div class="insights-card"><div class="insights-label">Avg CWV Score</div><div class="insights-value">${perf.avg_cwv_score ?? "N/A"}</div></div>
+       </div>
+       ${(perf.errors || []).slice(0, 3).map(e => `<div style="margin-top:6px;font-size:12px;color:var(--danger)">${escapeHtml(e)}</div>`).join("")}`
+    : '<div class="insights-label">Not run for this job yet.</div>');
+
+  html += qualitySection("Industry Alignment (GEO)", geo
+    ? `<div class="insights-label" style="margin-bottom:8px">Core industry keywords: <span class="count-label">${(geo.industry_keywords || []).map(escapeHtml).join(", ")}</span></div>
+       <div class="insights-label">Off-topic pages: ${geo.off_topic_pages ?? 0} of ${geo.pages_analyzed ?? 0}</div>
+       ${(geo.pages || []).filter(p => p.off_topic).slice(0, 12).map(p => `
+         <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+           <div style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(p.page_url)}">${escapeHtml(p.title || p.page_url)}</div>
+           <div class="bar-track" style="width:120px"><div class="bar-fill" style="width:${Math.max(2, Math.round((p.alignment || 0) * 100))}%;background:var(--danger)"></div></div>
+           <span class="count-label">${(p.alignment || 0).toFixed(2)}</span>
+         </div>`).join("")}`
+    : '<div class="insights-label">Not run for this job yet.</div>');
+
+  html += qualitySection("Orphan Pages", orphans
+    ? `<div class="insights-label">Pages with no internal links pointing to them: ${orphans.orphan_pages ?? 0}</div>
+       ${(orphans.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${escapeHtml(p.page_url)}</div>`).join("")}`
+    : '<div class="insights-label">Not run for this job yet.</div>');
+
+  return html;
 }
 
 async function loadSeoInsights(jobId) {
