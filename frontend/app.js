@@ -151,6 +151,7 @@ async function showResults(jobId) {
   loadReport(jobId);
   initChat();
   loadSiteHealth(jobId);
+  loadTracking(jobId);
 
   // Switch to overview
   document.querySelector('.tab[data-tab="overview"]').click();
@@ -206,8 +207,14 @@ async function loadSiteHealth(jobId) {
         <div class="insights-card"><div class="insights-label">Broken Links</div><div class="insights-value">${m.broken_links ?? "N/A"}${m.broken_link_rate != null ? ` (${m.broken_link_rate}%)` : ""}</div></div>
         <div class="insights-card"><div class="insights-label">Meta Description</div><div class="insights-value">${m.meta_description_coverage ?? "N/A"}%</div></div>
         <div class="insights-card"><div class="insights-label">Alt Text Coverage</div><div class="insights-value">${m.alt_text_coverage ?? "N/A"}%</div></div>
+        <div class="insights-card"><div class="insights-label">Core Web Vitals</div><div class="insights-value">${m.avg_cwv_score ?? "N/A"}<span style="font-size:11px">${m.cwv_pages_checked ? ` (${m.cwv_pages_checked} pages)` : ""}</span></div></div>
         <div class="insights-card"><div class="insights-label">Thin Pages</div><div class="insights-value">${m.thin_pages ?? 0}</div></div>
         <div class="insights-card"><div class="insights-label">Pending Actions</div><div class="insights-value">${m.pending_action_items ?? 0}</div></div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
+        <div class="insights-card" style="min-width:180px"><div class="insights-label">Duplicate Pages</div><div class="insights-value">${m.duplicate_pages ?? "N/A"}</div></div>
+        <div class="insights-card" style="min-width:180px"><div class="insights-label">Canonical Conflicts</div><div class="insights-value">${m.canonical_conflicts ?? "N/A"}</div></div>
+        <div class="insights-card" style="min-width:180px"><div class="insights-label">Structured Data Valid</div><div class="insights-value">${m.structured_data_valid ?? "N/A"}</div></div>
       </div>
       ${issues.length ? `
         <h3 style="margin-top:16px">Health Issues (${issues.length})</h3>
@@ -221,6 +228,54 @@ async function loadSiteHealth(jobId) {
     `;
   } catch (err) {
     el.innerHTML = serviceErrorHtml("Site health", err.message);
+  }
+}
+
+async function loadTracking(jobId) {
+  const el = document.getElementById("overview-tracking");
+  if (!el) return;
+  try {
+    const resp = await fetch(`${API_BASE}/tracking/${jobId}`);
+    if (resp.status === 404) {
+      el.innerHTML = "";
+      return;
+    }
+    const data = await resp.json();
+    const latest = data.latest;
+    if (!latest) {
+      el.innerHTML = "";
+      return;
+    }
+    const results = latest.results || [];
+    el.innerHTML = `
+      <h3>Keyword Tracking <span class="count-label">(last check ${latest.checked_at ? new Date(latest.checked_at).toLocaleString() : "N/A"})</span></h3>
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+        ${results.map(r => {
+          const delta = r.delta;
+          const arrow = delta > 0 ? `<span style="color:var(--success)">▲ +${delta}</span>` : delta < 0 ? `<span style="color:var(--danger)">▼ ${delta}</span>` : "";
+          return `<div class="insights-card">
+            <div class="insights-label">${escapeHtml(r.keyword)}</div>
+            <div class="insights-value">${r.rank ? `#${r.rank}` : "Not ranked"} <span style="font-size:12px">${arrow}</span></div>
+            <div style="font-size:12px;color:var(--text-secondary)">${r.approved_action_types && r.approved_action_types.length ? "Approved changes: " + r.approved_action_types.join(", ") : ""}</div>
+          </div>`;
+        }).join("")}
+      </div>
+      <button class="btn-approve" style="margin-top:12px;padding:6px 14px;font-size:13px" onclick="runTrackingCheck('${jobId}')">Check Rankings Now</button>
+    `;
+  } catch (err) {
+    el.innerHTML = "";
+  }
+}
+
+async function runTrackingCheck(jobId) {
+  try {
+    const resp = await fetch(`${API_BASE}/tracking/${jobId}/check`, { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    showToast(`Keyword check done: ${data.ranked ?? 0} ranked, ${data.moved_up ?? 0} moved up`);
+    loadTracking(jobId);
+  } catch (err) {
+    showToast("Keyword check failed: " + err.message);
   }
 }
 

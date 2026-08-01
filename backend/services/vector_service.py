@@ -1,62 +1,22 @@
-import hashlib
-from typing import List, Optional
-import numpy as np
+"""Semantic indexing and search backed by Chroma with real embeddings (Gemini) or hash fallback."""
 
+import asyncio
+from typing import Optional
+
+from backend.db.chroma import get_or_create_collection, delete_collection
 from backend.db.mongo import get_db
+from backend.services.embeddings import embed_texts, embedding_source
 
-VECTOR_DIM = 256
-NGRAM_RANGE = (2, 4)
-
-def _hash_feature(text: str, index: int) -> int:
-    h = hashlib.md5(f"{text}:{index}".encode()).hexdigest()
-    return int(h, 16)
-
-def embed_text(text: str) -> List[float]:
-    vec = np.zeros(VECTOR_DIM, dtype=np.float64)
-    text_lower = text.lower()
-    for n in range(NGRAM_RANGE[0], NGRAM_RANGE[1] + 1):
-        for i in range(len(text_lower) - n + 1):
-            ngram = text_lower[i:i + n]
-            idx = _hash_feature(ngram, 0) % VECTOR_DIM
-            sign = 1 if _hash_feature(ngram, 1) % 2 == 0 else -1
-            vec[idx] += sign
-    norm = np.linalg.norm(vec)
-    if norm > 0:
-        vec = vec / norm
-    return vec.tolist()
-
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    aa = np.array(a, dtype=np.float64)
-    bb = np.array(b, dtype=np.float64)
-    dot = float(np.dot(aa, bb))
-    na = float(np.linalg.norm(aa))
-    nb = float(np.linalg.norm(bb))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
+BATCH_SIZE = 100
 
 
-async def _index_doc(db, job_id: str, doc_type: str, doc_id: str, text: str, fields: dict):
-    if not text.strip():
-        return 0
-    vector = embed_text(text)
-    await db.embeddings.update_one(
-        {"doc_type": doc_type, "doc_id": doc_id, "job_id": job_id},
-        {"$set": {
-            "doc_type": doc_type,
-            "doc_id": doc_id,
-            "job_id": job_id,
-            "vector": vector,
-            "text": text[:2000],
-            **fields,
-        }},
-        upsert=True,
-    )
-    return 1
+def _collection_name(job_id: str) -> str:
+    return f"job_{job_id}"
 
 
-async def _index_content_items(db, job_id: str) -> int:
-    count = 0
+async def _collect_docs(db, job_id: str) -> list[tuple[str, str, dict]]:
+    docs: list[tuple[str, str, dict]] = []
+
     cursor = db.content_items.find({"job_id": job_id})
     async for doc in cursor:
         extraction = await db.content_extractions.find_one(
@@ -81,20 +41,18 @@ async def _index_content_items(db, job_id: str) -> int:
             meta = extraction.get("metadata") or {}
             if meta:
                 text_parts.append(" ".join(f"{k}={v}" for k, v in meta.items()))
-        count += await _index_doc(
-            db, job_id, "content", str(doc["_id"]), " ".join(text_parts),
+        docs.append((
+            str(doc["_id"]),
+            " ".join(text_parts),
             {
+                "doc_type": "content",
                 "source_url": doc.get("source_url", ""),
                 "content_type": doc.get("content_type", ""),
                 "page_url": doc.get("page_url", ""),
             },
-        )
-    return count
+        ))
 
-
-async def _index_pages(db, job_id: str) -> int:
-    count = 0
-    cursor = db.pages.find({"job_id": job_id})
+    cursor = db.pages.find({"job_id": job_id}, {"html": 0, "html_mobile": 0})
     async for doc in cursor:
         text = " ".join([
             doc.get("url", ""),
@@ -104,15 +62,16 @@ async def _index_pages(db, job_id: str) -> int:
             f"page role: {doc.get('page_role', '')}",
             f"word count: {doc.get('word_count', 0)}",
         ])
-        count += await _index_doc(
-            db, job_id, "page", str(doc["_id"]), text,
-            {"url": doc.get("url", ""), "page_type": doc.get("page_type", "other")},
-        )
-    return count
+        docs.append((
+            str(doc["_id"]),
+            text,
+            {
+                "doc_type": "page",
+                "url": doc.get("url", ""),
+                "page_type": doc.get("page_type", "other"),
+            },
+        ))
 
-
-async def _index_actions(db, job_id: str) -> int:
-    count = 0
     cursor = db.action_items.find({"job_id": job_id})
     async for doc in cursor:
         text = " ".join([
@@ -122,20 +81,18 @@ async def _index_actions(db, job_id: str) -> int:
             "improvements: " + "; ".join(doc.get("improvement_suggestions", [])),
             f"status: {doc.get('status', '')}",
         ])
-        count += await _index_doc(
-            db, job_id, "action", str(doc["_id"]), text,
+        docs.append((
+            str(doc["_id"]),
+            text,
             {
+                "doc_type": "action",
                 "content_type": doc.get("content_type", ""),
                 "source_url": doc.get("source_url", ""),
                 "page_url": doc.get("page_url", ""),
                 "impact": doc.get("impact_on_ranking", ""),
             },
-        )
-    return count
+        ))
 
-
-async def _index_backlinks(db, job_id: str) -> int:
-    count = 0
     cursor = db.backlinks.find({"job_id": job_id})
     async for doc in cursor:
         text = " ".join([
@@ -144,26 +101,41 @@ async def _index_backlinks(db, job_id: str) -> int:
             f"anchor: {doc.get('anchor', '')}",
             f"target domain: {doc.get('target_domain', '')}",
         ])
-        count += await _index_doc(
-            db, job_id, "backlink", str(doc["_id"]), text,
+        docs.append((
+            str(doc["_id"]),
+            text,
             {
+                "doc_type": "backlink",
                 "source_url": doc.get("source_url", ""),
                 "source_domain": doc.get("source_domain", ""),
                 "target_domain": doc.get("target_domain", ""),
             },
-        )
-    return count
+        ))
+
+    return docs
 
 
 async def index_job_vectors(job_id: str) -> int:
-    """Index pages, content items (with extractions), action items, and backlinks."""
+    """Rebuild the semantic index for a job (Chroma collection, wiped first)."""
     db = get_db()
-    await db.embeddings.delete_many({"job_id": job_id})
-    counts = await _index_content_items(db, job_id)
-    counts += await _index_pages(db, job_id)
-    counts += await _index_actions(db, job_id)
-    counts += await _index_backlinks(db, job_id)
-    return counts
+    docs = await _collect_docs(db, job_id)
+    name = _collection_name(job_id)
+    delete_collection(name)
+    collection = get_or_create_collection(name)
+
+    indexed = 0
+    for start in range(0, len(docs), BATCH_SIZE):
+        chunk = docs[start:start + BATCH_SIZE]
+        texts = [t for _, t, _ in chunk]
+        vectors = await embed_texts(texts)
+        collection.add(
+            ids=[doc_id for doc_id, _, _ in chunk],
+            embeddings=vectors,
+            documents=texts,
+            metadatas=[m for _, _, m in chunk],
+        )
+        indexed += len(chunk)
+    return indexed
 
 
 async def index_job_content(job_id: str) -> int:
@@ -176,30 +148,60 @@ async def search_similar(
     limit: int = 5,
     doc_types: Optional[list[str]] = None,
     content_type: Optional[str] = None,
-) -> List[dict]:
-    db = get_db()
-    query_vec = embed_text(query)
-    cursor = db.embeddings.find({"job_id": job_id})
-    scored = []
-    async for doc in cursor:
-        if doc_types and doc.get("doc_type") not in doc_types:
-            continue
-        if content_type and doc.get("content_type") != content_type:
-            continue
-        vec = doc.get("vector", [])
-        if not vec:
-            continue
-        score = cosine_similarity(query_vec, vec)
-        scored.append({
-            "doc_type": doc.get("doc_type", "content"),
-            "doc_id": doc.get("doc_id", ""),
-            "score": score,
-            "source_url": doc.get("source_url", ""),
-            "content_type": doc.get("content_type", ""),
-            "page_url": doc.get("page_url", ""),
-            "url": doc.get("url", ""),
-            "impact": doc.get("impact", ""),
-            "text": doc.get("text", ""),
+) -> list[dict]:
+    if not query.strip():
+        return []
+    try:
+        collection = get_or_create_collection(_collection_name(job_id))
+        if collection.count() == 0:
+            return []
+    except Exception:
+        return []
+
+    query_vec = (await embed_texts([query]))[0]
+
+    where = {}
+    if doc_types:
+        where["doc_type"] = {"$in": doc_types}
+    if content_type:
+        where["content_type"] = content_type
+
+    try:
+        result = await asyncio.to_thread(
+            collection.query,
+            query_embeddings=[query_vec],
+            n_results=min(max(limit, 1), 50),
+            where=where or None,
+        )
+    except Exception:
+        return []
+
+    ids = (result.get("ids") or [[]])[0]
+    distances = (result.get("distances") or [[]])[0]
+    metas = (result.get("metadatas") or [[]])[0]
+    texts = (result.get("documents") or [[]])[0]
+
+    out = []
+    for i, doc_id in enumerate(ids):
+        m = metas[i] if i < len(metas) else {}
+        distance = distances[i] if i < len(distances) else 1.0
+        out.append({
+            "doc_type": m.get("doc_type", "content"),
+            "doc_id": doc_id,
+            "score": round(max(0.0, min(1.0, 1.0 - distance)), 4),
+            "source_url": m.get("source_url", ""),
+            "content_type": m.get("content_type", ""),
+            "page_url": m.get("page_url", ""),
+            "url": m.get("url", ""),
+            "impact": m.get("impact", ""),
+            "text": texts[i] if i < len(texts) else "",
         })
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:limit]
+    return out[:limit]
+
+
+async def get_embedding_report(job_id: str) -> dict:
+    try:
+        collection = get_or_create_collection(_collection_name(job_id))
+        return {"indexed": collection.count(), "source": embedding_source()}
+    except Exception:
+        return {"indexed": 0, "source": embedding_source()}

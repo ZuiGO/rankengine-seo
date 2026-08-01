@@ -16,6 +16,9 @@ downloads/
 logs/
 dummy_site/
 
+# Vector store (local Chroma data)
+chroma_data/
+
 # OS
 .DS_Store
 

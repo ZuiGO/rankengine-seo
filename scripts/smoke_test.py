@@ -56,10 +56,15 @@ async def main(host: str, url: str):
         # 2. Summary
         summary = (await client.get(f"/api/analysis/{job_id}/summary")).json()
         report("summary totals", summary.get("total_pages", 0) > 0, f"pages={summary.get('total_pages')} content={summary.get('total_content_items')}")
+        ssum = summary.get("summary") or {}
+        report("summary phase-1 keys", all(k in ssum for k in ("cwv_pages", "duplicate_pages", "canonical_issues", "structured_data_valid")),
+               f"cwv={ssum.get('cwv_pages')} dup={ssum.get('duplicate_pages')} canon={ssum.get('canonical_issues')} sd={ssum.get('structured_data_valid')}")
 
         # 3. Pages
         pages = (await client.get(f"/api/pages/{job_id}?limit=500")).json()
         report("pages endpoint", pages.get("total", 0) > 0, f"total={pages.get('total')}")
+        mobile_pages = sum(1 for p in pages.get("pages", []) if p.get("mobile_status_code") == 200)
+        report("mobile crawl pass", mobile_pages > 0, f"mobile_ok={mobile_pages}")
 
         # 4. Content
         content = (await client.get(f"/api/content/{job_id}?limit=500")).json()
@@ -88,13 +93,27 @@ async def main(host: str, url: str):
         report("actions endpoint", actions.get("total", 0) > 0, f"total={actions.get('total')}")
         action_id = actions["actions"][0]["id"]
         approv = (await client.post(f"/api/actions/{action_id}/approve", json={"status": "approved"})).json()
-        report("action approve + version", bool(approv.get("version")), f"field={ (approv.get('version') or {}).get('field') }")
+        version = approv.get("version") or {}
+        report("action approve + version", bool(version), f"field={version.get('field')} qa={version.get('qa')}")
         versions = (await client.get(f"/api/actions/{job_id}/versions")).json()
         report("versions endpoint", versions.get("applied", 0) >= 1, f"applied={versions.get('applied')}")
         bulk = (await client.post(f"/api/actions/{job_id}/approve-all")).json()
         report("approve all starts", bulk.get("status") in ("started", "ok", "running"), f"status={bulk.get('status')} pending={bulk.get('pending')}")
 
-        # 8. Dummy site
+        # 8. Quality endpoints (Phase 1)
+        for ep in ("duplicates", "structured-data", "performance", "embeddings"):
+            qr = await client.get(f"/api/quality/{job_id}/{ep}")
+            ok = qr.status_code == 200
+            detail = qr.json() if qr.status_code == 200 else f"HTTP {qr.status_code}"
+            report(f"quality {ep}", ok, f"{detail if ep != 'embeddings' else 'indexed=' + str((detail or {}).get('indexed'))}" if not isinstance(detail, str) else str(detail)[:60])
+
+        # 9. Keyword tracking (Phase 1)
+        kcheck = (await client.post(f"/api/tracking/{job_id}/check")).json()
+        report("tracking check runs", kcheck.get("status") in ("ok", "error") or "ranked" in kcheck, f"status={kcheck.get('status')} ranked={kcheck.get('ranked')}")
+        ktrack = (await client.get(f"/api/tracking/{job_id}")).json()
+        report("tracking endpoint", "summary" in ktrack and "latest" in ktrack, "")
+
+        # 10. Dummy site
         gen = (await client.post(f"/api/dummy/{job_id}/generate")).json()
         report("dummy site generated", gen.get("file_count", 0) > 0, f"files={gen.get('file_count')} applied={gen.get('changes_applied')}")
         report("dummy has changes", gen.get("changes_applied", 0) >= 1, "")
@@ -104,13 +123,13 @@ async def main(host: str, url: str):
         zip_resp = await client.get(f"/api/dummy/{job_id}/download")
         report("dummy zip", zip_resp.status_code == 200 and len(zip_resp.content) > 100, f"{len(zip_resp.content)} bytes")
 
-        # 9. Compare changes
+        # 11. Compare changes
         comp = (await client.post(f"/api/sites/{job_id}/compare-changes")).json()
         report("compare-changes", comp.get("pages_compared", 0) > 0 and "per_page" in comp, f"pages={comp.get('pages_compared')} approved={comp.get('approved_changes')}")
         chtml = (await client.get(f"/api/reports/{job_id}/compare"))
         report("compare report html", chtml.status_code == 200 and b"Comparison" in chtml.content, "")
 
-        # 10. SEO insights (no blank sections — data OR explicit error)
+        # 12. SEO insights (no blank sections — data OR explicit error)
         insights = (await client.get(f"/api/seo-insights/{job_id}")).json()
         for section in ("keywords", "backlinks", "onpage", "overview", "serp"):
             data_key = "serp_rankings" if section == "serp" else section
@@ -121,11 +140,11 @@ async def main(host: str, url: str):
         bl = (await client.get(f"/api/seo-insights/{job_id}/backlinks")).json()
         report("insights backlinks list", "backlinks" in bl, f"total={bl.get('total')}")
 
-        # 11. Site health
+        # 13. Site health
         health_doc = (await client.get(f"/api/sites/{job_id}/health")).json()
         report("site health", "grade" in health_doc and "score" in health_doc, f"grade={health_doc.get('grade')} score={health_doc.get('score')}")
 
-        # 12. Report JSON + HTML + PDF
+        # 14. Report JSON + HTML + PDF
         rep = (await client.get(f"/api/reports/{job_id}")).json()
         report("report json", rep.get("total_pages", 0) > 0, "")
         rh = (await client.get(f"/api/reports/{job_id}/download"))
@@ -133,11 +152,11 @@ async def main(host: str, url: str):
         pdf = (await client.get(f"/api/reports/{job_id}/pdf"))
         report("report pdf", pdf.status_code == 200 and pdf.headers.get("content-type", "").startswith("application/pdf"), f"{pdf.headers.get('content-type')} {len(pdf.content)} bytes")
 
-        # 13. Chat
+        # 15. Chat
         chat = (await client.post("/api/chat", json={"job_id": job_id, "section": "overview", "message": "Summarize this analysis in one sentence."})).json()
         report("chat reply", bool(chat.get("reply")) and not chat.get("reply", "").startswith("Error"), (chat.get("reply") or "")[:80])
 
-        # 14. Schedules
+        # 16. Schedules
         sched = (await client.post("/api/scheduler", json={"url": url, "interval_hours": 0.5, "max_pages": 5})).json()
         sid = sched.get("id")
         report("schedule create", bool(sid), f"interval={sched.get('interval_hours')}h")
@@ -146,7 +165,7 @@ async def main(host: str, url: str):
         sdel = (await client.delete(f"/api/scheduler/{sid}"))
         report("schedule delete", sdel.status_code == 200, "")
 
-        # 15. Sites list + soft delete + restore
+        # 17. Sites list + soft delete + restore
         sites = (await client.get("/api/sites")).json()
         report("sites list", any(s.get("job_id") == job_id for s in sites.get("sites", [])), f"total={sites.get('total')}")
         dresp = (await client.delete(f"/api/sites/{job_id}")).json()

@@ -287,6 +287,9 @@ async def chat_with_context(job_id: str, message: str, section: str = "content")
     if not settings.groq_api_key:
         return f"[Simulated] Found {len(results)} relevant items. Context:\n{context[:500]}..."
 
+    from backend.services.groq_limiter import acquire_token_budget
+
+    await acquire_token_budget(est_tokens=1024)
     client = AsyncGroq(api_key=settings.groq_api_key)
     try:
         completion = await client.chat.completions.create(

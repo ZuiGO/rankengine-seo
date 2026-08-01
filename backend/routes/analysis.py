@@ -157,6 +157,42 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             logger.error("Link health check warning job=%s: %s", job_id, lh_err)
             link_health = {}
 
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"progress_message": "Measuring Core Web Vitals..."}}
+        )
+
+        try:
+            from backend.services.performance_service import fetch_performance
+            perf = await fetch_performance(job_id)
+            cwv_pages = perf.get("checked", 0)
+        except Exception as p_err:
+            logger.error("PageSpeed warning job=%s: %s", job_id, p_err)
+            cwv_pages = 0
+
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"progress_message": "Detecting duplicate content and validating structured data..."}}
+        )
+
+        try:
+            from backend.services.duplicate_content import detect_duplicate_content
+            dup = await detect_duplicate_content(job_id)
+            duplicate_pages = dup.get("duplicate_pages", 0)
+            canonical_issues = dup.get("canonical_conflicting", 0) + dup.get("canonical_cross_domain", 0)
+        except Exception as dup_err:
+            logger.error("Duplicate detection warning job=%s: %s", job_id, dup_err)
+            duplicate_pages = 0
+            canonical_issues = 0
+
+        try:
+            from backend.services.structured_data import audit_structured_data
+            sd = await audit_structured_data(job_id)
+            structured_valid = sd.get("valid", 0)
+        except Exception as sd_err:
+            logger.error("Structured data audit warning job=%s: %s", job_id, sd_err)
+            structured_valid = 0
+
         try:
             from backend.services.site_health import compute_site_health
             health = await compute_site_health(job_id)
@@ -184,6 +220,10 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "links_checked": link_health.get("checked", 0),
                     "broken_links": link_health.get("broken", 0),
                     "health_grade": health_grade,
+                    "cwv_pages": cwv_pages,
+                    "duplicate_pages": duplicate_pages,
+                    "canonical_issues": canonical_issues,
+                    "structured_data_valid": structured_valid,
                 },
             }}
         )

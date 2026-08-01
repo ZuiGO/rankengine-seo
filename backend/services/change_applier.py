@@ -1,5 +1,7 @@
+import asyncio
 import difflib
 import json
+import time
 from datetime import datetime
 
 from backend.config import settings
@@ -7,6 +9,9 @@ from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 
 logger = get_logger("change_applier")
+
+LAST_GROQ_429 = 0.0
+QA_SEM = asyncio.Semaphore(2)
 
 FIELD_BY_TYPE = {
     "image": "alt_text",
@@ -70,6 +75,9 @@ async def _groq_generate(item: dict, field: str) -> str | None:
     try:
         from groq import AsyncGroq
 
+        from backend.services.groq_limiter import acquire_token_budget
+
+        await acquire_token_budget()
         client = AsyncGroq(api_key=settings.groq_api_key)
         context = await _build_context(item)
         prompt = PROMPT_BY_FIELD.get(
@@ -100,6 +108,9 @@ async def _groq_generate(item: dict, field: str) -> str | None:
         after = str(parsed.get("after") or parsed.get(field) or "").strip()
         return after or None
     except Exception as e:
+        if "429" in str(e):
+            global LAST_GROQ_429
+            LAST_GROQ_429 = time.time()
         logger.warning("Groq change generation failed action=%s: %s", item.get("_id"), e)
         return None
 
@@ -129,6 +140,54 @@ def _make_diff(before: str, after: str) -> list[str]:
     return [line for line in diff if line[:1] in ("+", "-")][:40]
 
 
+async def _qa_check(item: dict, before: str, after: str) -> bool:
+    """Factual-consistency check of the rewrite vs the original. Failures degrade to 'proceed'."""
+    global LAST_GROQ_429
+    if not settings.groq_api_key or not before or not after:
+        return True
+    if time.time() - LAST_GROQ_429 < 60:
+        return True
+    async with QA_SEM:
+        try:
+            from groq import AsyncGroq
+
+            from backend.services.groq_limiter import acquire_token_budget
+
+            await acquire_token_budget(est_tokens=300)
+            client = AsyncGroq(api_key=settings.groq_api_key)
+            completion = await client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You verify that an SEO rewrite is factually consistent with its original. "
+                            'Respond with STRICT JSON only: {"consistent": true or false, "note": "short reason if inconsistent, else empty string"}'
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Original:\n{before}\n\nRewritten:\n{after}\n\n"
+                            "Check that numbers, names, prices, URLs, dates and factual claims still match. "
+                            "Is the rewrite factually consistent with the original?"
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=200,
+            )
+            content = completion.choices[0].message.content
+            parsed = json.loads(content)
+            return bool(parsed.get("consistent", True))
+        except Exception as e:
+            if "429" in str(e):
+                LAST_GROQ_429 = time.time()
+            logger.warning("QA check failed action=%s: %s", item.get("_id"), e)
+            return True
+
+
 async def create_version_for_action(item: dict, status: str) -> dict | None:
     """Generate the improved content for an approved action and store a before/after version."""
     db = get_db()
@@ -137,10 +196,18 @@ async def create_version_for_action(item: dict, status: str) -> dict | None:
 
     before = await _before_value(item, field)
 
+    qa_status = "skipped"
     if status == "approved":
         after = await _groq_generate(item, field)
-        if not after:
+        if after:
+            if await _qa_check(item, before, after):
+                qa_status = "passed"
+            else:
+                after = _fallback_after(item, field)
+                qa_status = "fallback"
+        else:
             after = _fallback_after(item, field)
+            qa_status = "template"
         generated_by = "groq:" + GROQ_MODEL if settings.groq_api_key else "fallback"
     else:
         after = None
@@ -159,6 +226,7 @@ async def create_version_for_action(item: dict, status: str) -> dict | None:
         "diff": _make_diff(before, after) if after else [],
         "status": status,
         "generated_by": generated_by,
+        "qa": qa_status,
         "reviewed_at": datetime.utcnow(),
     }
     await db.content_versions.insert_one(version)

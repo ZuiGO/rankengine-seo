@@ -11,12 +11,13 @@ class CreateScheduleRequest(BaseModel):
     url: str
     interval_hours: float = 24
     max_pages: int = 50
+    kind: str = "crawl"
 
 
 @router.post("")
 async def create(req: CreateScheduleRequest):
     try:
-        schedule = await create_schedule(req.url, req.interval_hours, req.max_pages)
+        schedule = await create_schedule(req.url, req.interval_hours, req.max_pages, req.kind)
     except ValueError as e:
         raise HTTPException(400, str(e))
     schedule["id"] = schedule.pop("_id")

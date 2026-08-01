@@ -184,12 +184,39 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
 
         await browser.close()
 
+        mobile_ok = 0
+        try:
+            mobile_browser = await pw.chromium.launch(headless=True)
+            iphone = pw.devices["iPhone 13"]
+            for result in crawled_pages:
+                url = result["url"]
+                try:
+                    page = await mobile_browser.new_page(**iphone)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    mhtml = await page.content()
+                    await page.close()
+                    await db.pages.update_one(
+                        {"job_id": job_id, "url": url},
+                        {"$set": {
+                            "html_mobile": mhtml[:MAX_HTML_STORED],
+                            "mobile_status_code": 200,
+                            "viewport": "mobile",
+                        }},
+                    )
+                    mobile_ok += 1
+                except Exception as me:
+                    logger.error("Mobile crawl error for %s: %s", url, me)
+            await mobile_browser.close()
+        except Exception as mb_err:
+            logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)
+
     total_links = total_internal + total_external
     summary = {
         "total_pages": len(crawled_pages),
         "total_links": total_links,
         "total_internal_links": total_internal,
         "total_external_links": total_external,
+        "mobile_pages": mobile_ok,
     }
 
     return summary

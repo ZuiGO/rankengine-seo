@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     serp_api_key: str = ""
     dataforseo_login: str = ""
     dataforseo_password: str = ""
+    gemini_api_key: str = ""
+    pagespeed_api_key: str = ""
     crawl_max_pages: int = 50
     crawl_concurrency: int = 5
     crawl_timeout_seconds: int = 360

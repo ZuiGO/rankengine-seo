@@ -79,6 +79,21 @@ async def compute_site_health(job_id: str) -> dict:
         if metrics["indexable_rate"] < 100:
             issues.append({"severity": "low", "message": f"{n - indexable} page(s) are blocked from indexing (noindex)."})
 
+        perfs = await db.page_performance.find({"job_id": job_id}).to_list(length=None)
+        cwv_scores = [p.get("cwv_score") for p in perfs if p.get("cwv_score") is not None]
+        avg_cwv = None
+        if cwv_scores:
+            avg_cwv = round(sum(cwv_scores) / len(cwv_scores))
+            metrics["cwv_pages_checked"] = len(perfs)
+            metrics["avg_cwv_score"] = avg_cwv
+            metrics["poor_lcp_pages"] = sum(1 for p in perfs if (p.get("cwv") or {}).get("lcp", 0) > 2500)
+            metrics["poor_inp_pages"] = sum(1 for p in perfs if (p.get("cwv") or {}).get("inp", 0) > 200)
+            metrics["poor_cls_pages"] = sum(1 for p in perfs if (p.get("cwv") or {}).get("cls", 0) > 0.1)
+            if avg_cwv < 60:
+                issues.append({"severity": "high", "message": f"Poor Core Web Vitals (avg score {avg_cwv}/100) - slow LCP/INP/CLS on {metrics['poor_lcp_pages'] + metrics['poor_inp_pages'] + metrics['poor_cls_pages']} page(s)."})
+            elif avg_cwv < 80:
+                issues.append({"severity": "medium", "message": f"Core Web Vitals need work (avg score {avg_cwv}/100)."})
+
         score = 100
         if metrics["broken_link_rate"] is not None:
             score -= min(30, round(3 * metrics["broken_link_rate"]))
@@ -86,12 +101,33 @@ async def compute_site_health(job_id: str) -> dict:
         score -= round(10 * (100 - metrics["meta_description_coverage"]) / 100)
         score -= round(5 * (100 - metrics["h1_coverage"]) / 100)
         score -= min(10, round(2 * metrics["thin_pages"]))
+        if cwv_scores:
+            score -= round(15 * (100 - avg_cwv) / 100)
         score = max(0, min(100, score))
 
     pending = await db.action_items.count_documents({"job_id": job_id, "status": "pending"})
     metrics["pending_action_items"] = pending
     if pending > 0:
         issues.append({"severity": "medium", "message": f"{pending} unresolved SEO action item(s). Approve or reject them to apply improvements."})
+
+    dup = await db.duplicate_content.find_one({"job_id": job_id})
+    if dup:
+        metrics["duplicate_pages"] = dup.get("duplicate_pages", 0)
+        metrics["canonical_missing"] = dup.get("canonical_missing", 0)
+        metrics["canonical_conflicts"] = dup.get("canonical_conflicting", 0) + dup.get("canonical_cross_domain", 0)
+        if dup.get("duplicate_pages", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{dup.get('duplicate_pages')} page(s) are near-duplicates of other pages."})
+        if dup.get("canonical_conflicting", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{dup.get('canonical_conflicting')} page(s) have conflicting canonical tags."})
+
+    sd = await db.structured_data.find_one({"job_id": job_id})
+    if sd:
+        metrics["structured_data_valid"] = sd.get("valid", 0)
+        metrics["structured_data_missing"] = sd.get("no_structured_data", 0)
+        if sd.get("no_structured_data", 0) > 0:
+            issues.append({"severity": "low", "message": f"{sd.get('no_structured_data')} page(s) have no structured data (Product/Article/Organization/Breadcrumb)."})
+        if sd.get("invalid_types", 0) > 0:
+            issues.append({"severity": "low", "message": f"{sd.get('invalid_types')} page(s) have invalid structured data markup."})
 
     health = {
         "job_id": job_id,
