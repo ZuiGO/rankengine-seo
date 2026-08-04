@@ -1,3 +1,8 @@
+import asyncio
+import os
+from datetime import datetime
+
+from backend.config import settings
 from backend.db.mongo import get_db
 from backend.db.neo4j_db import get_driver
 from backend.services.pdf_extractor import extract_pdf_data
@@ -21,95 +26,104 @@ async def extract_all_content(job_id: str):
     extracted_texts = []
     extracted_tables = []
     extracted_images = []
+    sem = asyncio.Semaphore(settings.extract_workers)
 
-    for item in items:
-        file_path = item.get("file_path", "")
-        content_type = item.get("content_type", "")
+    async def process_item(item: dict):
+        async with sem:
+            file_path = item.get("file_path", "")
+            content_type = item.get("content_type", "")
+            source_url = item["source_url"]
+            extracted_at = datetime.utcnow()
 
-        if content_type == "pdf" and file_path:
-            data = extract_pdf_data(file_path)
-            if "error" not in data:
+            if content_type == "pdf" and file_path:
+                data = await asyncio.to_thread(extract_pdf_data, file_path)
+                if "error" not in data:
+                    await db.content_extractions.insert_one({
+                        "job_id": job_id,
+                        "content_item_id": str(item["_id"]),
+                        "content_type": "pdf",
+                        "source_url": source_url,
+                        "extracted_at": extracted_at,
+                        **data,
+                    })
+
+                    extracted_texts.extend(
+                        {"source_url": source_url, "text": c["text"], "word_count": c["word_count"]}
+                        for c in data.get("text_chunks", [])
+                    )
+                    extracted_tables.extend(
+                        {**t, "source_url": source_url}
+                        for t in data.get("tables", [])
+                    )
+                    extracted_images.extend(
+                        {**img, "source_url": source_url}
+                        for img in data.get("images", [])
+                    )
+
+            elif content_type in ("doc", "xlsx", "presentation") and file_path:
+                data = await asyncio.to_thread(extract_doc_file, file_path, content_type)
+                mime_type = await asyncio.to_thread(classify_with_magic, file_path) or item.get("mime_type")
+                if "error" in data:
+                    await db.content_extractions.insert_one({
+                        "job_id": job_id,
+                        "content_item_id": str(item["_id"]),
+                        "content_type": content_type,
+                        "source_url": source_url,
+                        "file_path": file_path,
+                        "file_size": item.get("file_size"),
+                        "mime_type": mime_type,
+                        "extracted_at": extracted_at,
+                        "error": data["error"],
+                    })
+                else:
+                    await db.content_extractions.insert_one({
+                        "job_id": job_id,
+                        "content_item_id": str(item["_id"]),
+                        "content_type": content_type,
+                        "source_url": source_url,
+                        "file_path": file_path,
+                        "file_size": item.get("file_size"),
+                        "mime_type": mime_type,
+                        "extracted_at": extracted_at,
+                        "text": data.get("text", ""),
+                        "word_count": data.get("word_count", 0),
+                        "text_chunks": data.get("text_chunks", []),
+                        "tables": data.get("tables", data.get("slides", [])),
+                        "metadata": data.get("metadata", {}),
+                    })
+
+                    extracted_texts.extend(
+                        {"source_url": source_url, "text": c["text"], "word_count": c["word_count"]}
+                        for c in data.get("text_chunks", [])
+                    )
+                    extracted_tables.extend(
+                        {**t, "source_url": source_url}
+                        for t in data.get("tables", [])
+                    )
+
+            elif content_type == "image" and file_path:
+                stats = None
+                if await asyncio.to_thread(os.path.exists, file_path):
+                    stats = await asyncio.to_thread(os.stat, file_path)
+                meta = await asyncio.to_thread(parse_image_metadata, file_path)
+                mime_type = item.get("mime_type") or await asyncio.to_thread(classify_with_magic, file_path)
                 await db.content_extractions.insert_one({
                     "job_id": job_id,
                     "content_item_id": str(item["_id"]),
-                    "content_type": "pdf",
-                    "source_url": item["source_url"],
-                    "extracted_at": __import__("datetime").datetime.utcnow(),
-                    **data,
-                })
-
-                extracted_texts.extend(
-                    {"source_url": item["source_url"], "text": c["text"], "word_count": c["word_count"]}
-                    for c in data.get("text_chunks", [])
-                )
-                extracted_tables.extend(
-                    {**t, "source_url": item["source_url"]}
-                    for t in data.get("tables", [])
-                )
-                extracted_images.extend(
-                    {**img, "source_url": item["source_url"]}
-                    for img in data.get("images", [])
-                )
-
-        elif content_type in ("doc", "xlsx", "presentation") and file_path:
-            data = extract_doc_file(file_path, content_type)
-            if "error" in data:
-                await db.content_extractions.insert_one({
-                    "job_id": job_id,
-                    "content_item_id": str(item["_id"]),
-                    "content_type": content_type,
-                    "source_url": item["source_url"],
+                    "content_type": "image",
+                    "source_url": source_url,
                     "file_path": file_path,
-                    "file_size": item.get("file_size"),
-                    "mime_type": classify_with_magic(file_path) or item.get("mime_type"),
-                    "extracted_at": __import__("datetime").datetime.utcnow(),
-                    "error": data["error"],
-                })
-            else:
-                await db.content_extractions.insert_one({
-                    "job_id": job_id,
-                    "content_item_id": str(item["_id"]),
-                    "content_type": content_type,
-                    "source_url": item["source_url"],
-                    "file_path": file_path,
-                    "file_size": item.get("file_size"),
-                    "mime_type": classify_with_magic(file_path) or item.get("mime_type"),
-                    "extracted_at": __import__("datetime").datetime.utcnow(),
-                    "text": data.get("text", ""),
-                    "word_count": data.get("word_count", 0),
-                    "text_chunks": data.get("text_chunks", []),
-                    "tables": data.get("tables", data.get("slides", [])),
-                    "metadata": data.get("metadata", {}),
+                    "file_size": stats.st_size if stats else item.get("file_size"),
+                    "mime_type": mime_type,
+                    "extracted_at": extracted_at,
+                    "metadata": {
+                        "width": meta.get("width"),
+                        "height": meta.get("height"),
+                        "format": meta.get("format"),
+                    },
                 })
 
-                extracted_texts.extend(
-                    {"source_url": item["source_url"], "text": c["text"], "word_count": c["word_count"]}
-                    for c in data.get("text_chunks", [])
-                )
-                extracted_tables.extend(
-                    {**t, "source_url": item["source_url"]}
-                    for t in data.get("tables", [])
-                )
-
-        elif content_type == "image" and file_path:
-            import os
-            stats = os.stat(file_path) if os.path.exists(file_path) else None
-            meta = parse_image_metadata(file_path)
-            await db.content_extractions.insert_one({
-                "job_id": job_id,
-                "content_item_id": str(item["_id"]),
-                "content_type": "image",
-                "source_url": item["source_url"],
-                "file_path": file_path,
-                "file_size": stats.st_size if stats else item.get("file_size"),
-                "mime_type": item.get("mime_type") or classify_with_magic(file_path),
-                "extracted_at": __import__("datetime").datetime.utcnow(),
-                "metadata": {
-                    "width": meta.get("width"),
-                    "height": meta.get("height"),
-                    "format": meta.get("format"),
-                },
-            })
+    await asyncio.gather(*[process_item(item) for item in items])
 
     # Store in Neo4j if available
     if driver:

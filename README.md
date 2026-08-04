@@ -1,4 +1,4 @@
-# RankEngine SEO Analysis Engine
+# ZuiGO.ai SEO Analysis Engine
 
 A simple, standalone SEO analysis tool. Enter a URL, crawl the site, classify its content, run SEO analysis, store everything in MongoDB + Neo4j, and get recommendations — with a single-page web UI.
 

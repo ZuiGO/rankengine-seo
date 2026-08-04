@@ -151,7 +151,7 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
         deduped.append(p)
     pages = deduped
 
-    sem = asyncio.Semaphore(3)
+    sem = asyncio.Semaphore(settings.psi_concurrency)
     results = []
     errors = []
 

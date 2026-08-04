@@ -47,6 +47,7 @@ form.addEventListener("submit", async e => {
     });
     const data = await resp.json();
     currentJobId = data.job_id;
+    history.replaceState(null, "", "#job/" + data.job_id);
     resultsUrl.textContent = data.url;
     startPolling(data.job_id);
   } catch (err) {
@@ -61,6 +62,7 @@ form.addEventListener("submit", async e => {
 newBtn.addEventListener("click", () => {
   stopPolling();
   currentJobId = null;
+  history.replaceState(null, "", location.pathname + location.search);
   resultsSection.classList.add("hidden");
   inputSection.classList.remove("hidden");
   urlInput.value = "";
@@ -77,6 +79,10 @@ document.querySelectorAll(".tab").forEach(tab => {
     const target = document.getElementById(`tab-${tab.dataset.tab}`);
     if (target) target.classList.remove("hidden");
     currentTab = tab.dataset.tab;
+
+    if (currentJobId) {
+      history.replaceState(null, "", `#job/${currentJobId}/${currentTab}`);
+    }
 
     if (currentJobId) {
       if (currentTab === "pages") loadPages(currentJobId);
@@ -139,7 +145,7 @@ async function pollJob(jobId) {
   }
 }
 
-async function showResults(jobId) {
+async function showResults(jobId, opts = {}) {
   hideProgress();
   resultsSection.classList.remove("hidden");
   inputSection.classList.add("hidden");
@@ -160,8 +166,10 @@ async function showResults(jobId) {
   loadTracking(jobId);
   loadTrends(jobId);
 
-  // Switch to overview
-  document.querySelector('.tab[data-tab="overview"]').click();
+  // Switch to overview unless restoring a specific tab from the URL
+  if (!opts.preserveTab) {
+    document.querySelector('.tab[data-tab="overview"]').click();
+  }
 }
 
 function loadOverview(summary) {
@@ -1713,13 +1721,14 @@ function updateCompareBtn() {
   btn.disabled = selectedSiteIds.size < 2;
 }
 
-async function openSite(jobId) {
+async function openSite(jobId, opts = {}) {
   stopPolling();
   currentJobId = jobId;
+  history.replaceState(null, "", "#job/" + jobId);
   const resp = await fetch(`${API_BASE}/analysis/${jobId}`);
   const job = await resp.json();
   if (job.status === "completed") {
-    showResults(jobId);
+    showResults(jobId, opts);
   } else {
     resultsUrl.textContent = job.url;
     resultsStatus.textContent = `Status: ${job.status}`;
@@ -1970,3 +1979,32 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "quality", "schedules", "logs"]);
+
+function parseHash() {
+  const m = window.location.hash.match(/^#job\/([a-zA-Z0-9-]+)(?:\/([a-z-]+))?/);
+  if (!m) return null;
+  return { jobId: m[1], tab: m[2] || null };
+}
+
+async function restoreFromHash() {
+  const state = parseHash();
+  if (!state) return;
+  try {
+    const resp = await fetch(`${API_BASE}/analysis/${state.jobId}`);
+    if (!resp.ok) {
+      history.replaceState(null, "", location.pathname + location.search);
+      return;
+    }
+    const job = await resp.json();
+    if (!job || !job.id) return;
+    await openSite(job.id, { preserveTab: true });
+    if (state.tab && VALID_TABS.has(state.tab)) switchTab(state.tab);
+  } catch (err) {
+    console.error("Failed to restore job from URL", err);
+  }
+}
+
+window.addEventListener("hashchange", restoreFromHash);
+document.addEventListener("DOMContentLoaded", restoreFromHash);

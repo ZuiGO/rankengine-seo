@@ -23,7 +23,7 @@ AI_AGENTS = [
     ("Bytespider", "ByteDance"),
 ]
 
-USER_AGENT = "RankEngineBot/1.0 (+https://github.com/ZuiGO/rankengine-seo)"
+USER_AGENT = "ZuiGO.aiBot/1.0 (+https://zuigo.ai)"
 
 
 def _parse_robots(text: str) -> dict:

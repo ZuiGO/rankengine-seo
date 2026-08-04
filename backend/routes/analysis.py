@@ -1,4 +1,5 @@
 import asyncio
+import time
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
@@ -71,160 +72,130 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             raise Exception("Crawl returned no results")
 
         content_count = await db.content_items.count_documents({"job_id": job_id})
+        domain = url.split("//")[-1].split("/")[0]
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Identifying user flows..."}}
-        )
+        async def _progress(message: str):
+            await db.analysis_jobs.update_one(
+                {"_id": job_id},
+                {"$set": {"progress_message": message}}
+            )
 
-        try:
-            flow_count = await detect_user_flows(job_id)
-        except Exception as flow_err:
-            logger.error("User flow detection warning job=%s: %s", job_id, flow_err)
-            flow_count = 0
+        async def _stage(name: str, stage, fallback=None):
+            started = time.monotonic()
+            try:
+                value = await stage()
+                logger.info("Stage %s ok job=%s t=%.1fs", name, job_id, time.monotonic() - started)
+                return name, value
+            except Exception as err:
+                logger.error("Stage %s warning job=%s: %s", name, job_id, err)
+                return name, fallback
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Extracting content data..."}}
-        )
+        async def _user_flows():
+            await _progress("Identifying user flows...")
+            return await detect_user_flows(job_id)
 
-        try:
-            extraction_summary = await extract_all_content(job_id)
-        except Exception as ext_err:
-            logger.error("Content extraction warning job=%s: %s", job_id, ext_err)
-            extraction_summary = {}
+        async def _extraction():
+            await _progress("Extracting content data...")
+            return await extract_all_content(job_id)
 
-        try:
-            from backend.services.seo_analyzer import analyze_pages
-            await analyze_pages(job_id)
-        except Exception as act_err:
-            logger.error("Action analysis warning job=%s: %s", job_id, act_err)
-
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Fetching external SEO insights..."}}
-        )
-
-        try:
+        async def _insights():
+            await _progress("Fetching external SEO insights...")
             from backend.services.dataforseo import fetch_all_insights
             from backend.routes.seo_insights import CACHE_VERSION
-            domain = url.split("//")[-1].split("/")[0]
             insights = await fetch_all_insights(domain, job_id)
             await db.seo_insights_cache.update_one(
                 {"job_id": job_id},
                 {"$set": {"job_id": job_id, "data": insights, "v": CACHE_VERSION, "fetched_at": datetime.utcnow()}},
                 upsert=True,
             )
-        except Exception as insight_err:
-            logger.error("SEO insights warning job=%s: %s", job_id, insight_err)
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Listing backlink sources..."}}
-        )
-
-        try:
+        async def _backlinks():
+            await _progress("Listing backlink sources...")
             from backend.services.backlinks import fetch_backlinks
-            backlink_result = await fetch_backlinks(job_id, domain)
-            backlink_count = backlink_result["total"]
-        except Exception as bl_err:
-            logger.error("Backlink listing warning job=%s: %s", job_id, bl_err)
-            backlink_count = 0
+            return await fetch_backlinks(job_id, domain)
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Indexing content vectors..."}}
-        )
+        async def _vectors():
+            await _progress("Indexing content vectors...")
+            return await index_job_vectors(job_id)
 
-        try:
-            vector_count = await index_job_vectors(job_id)
-        except Exception as vec_err:
-            logger.error("Vector indexing warning job=%s: %s", job_id, vec_err)
-            vector_count = 0
-
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Checking link health..."}}
-        )
-
-        try:
+        async def _link_health():
+            await _progress("Checking link health...")
             from backend.services.link_checker import check_links
-            link_health = await check_links(job_id)
-        except Exception as lh_err:
-            logger.error("Link health check warning job=%s: %s", job_id, lh_err)
-            link_health = {}
+            return await check_links(job_id)
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Measuring Core Web Vitals..."}}
-        )
-
-        try:
+        async def _performance():
+            await _progress("Measuring Core Web Vitals...")
             from backend.services.performance_service import fetch_performance
-            perf = await fetch_performance(job_id)
-            cwv_pages = perf.get("pages_checked", perf.get("checked", 0))
-        except Exception as p_err:
-            logger.error("PageSpeed warning job=%s: %s", job_id, p_err)
-            cwv_pages = 0
+            return await fetch_performance(job_id)
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Detecting duplicate content and validating structured data..."}}
-        )
-
-        try:
+        async def _duplicate():
+            await _progress("Detecting duplicate content and validating structured data...")
             from backend.services.duplicate_content import detect_duplicate_content
-            dup = await detect_duplicate_content(job_id)
-            duplicate_pages = dup.get("duplicate_pages", 0)
-            canonical_issues = dup.get("canonical_conflicting", 0) + dup.get("canonical_cross_domain", 0)
-        except Exception as dup_err:
-            logger.error("Duplicate detection warning job=%s: %s", job_id, dup_err)
-            duplicate_pages = 0
-            canonical_issues = 0
+            return await detect_duplicate_content(job_id)
 
-        try:
+        async def _structured():
             from backend.services.structured_data import audit_structured_data
-            sd = await audit_structured_data(job_id)
-            structured_valid = sd.get("valid", 0)
-        except Exception as sd_err:
-            logger.error("Structured data audit warning job=%s: %s", job_id, sd_err)
-            structured_valid = 0
+            return await audit_structured_data(job_id)
 
-        await db.analysis_jobs.update_one(
-            {"_id": job_id},
-            {"$set": {"progress_message": "Checking industry alignment and orphan pages..."}}
-        )
-
-        try:
-            from backend.services.geo_alignment import audit_geo_alignment
-            geo = await audit_geo_alignment(job_id)
-            geo_off_topic = geo.get("off_topic_pages", 0)
-        except Exception as geo_err:
-            logger.error("GEO alignment warning job=%s: %s", job_id, geo_err)
-            geo_off_topic = 0
-
-        try:
-            from backend.services.orphan_detection import detect_orphan_pages
-            orphans = await detect_orphan_pages(job_id)
-            orphan_count = orphans.get("orphan_pages", 0)
-        except Exception as o_err:
-            logger.error("Orphan detection warning job=%s: %s", job_id, o_err)
-            orphan_count = 0
-
-        try:
-            from backend.services.site_health import compute_site_health
-            health = await compute_site_health(job_id)
-            health_grade = health.get("grade")
-        except Exception as h_err:
-            logger.error("Site health warning job=%s: %s", job_id, h_err)
-            health_grade = None
-
-        try:
+        async def _geo_readiness():
             from backend.services.geo_readiness import check_geo_readiness
-            geo_readiness = await check_geo_readiness(url)
-        except Exception as geo_err:
-            logger.error("GEO readiness warning job=%s: %s", job_id, geo_err)
-            geo_readiness = {"status": "unknown", "score": None, "robots_txt_found": False, "error": str(geo_err)[:200]}
+            return await check_geo_readiness(url)
+
+        async def _orphans():
+            await _progress("Checking industry alignment and orphan pages...")
+            from backend.services.orphan_detection import detect_orphan_pages
+            return await detect_orphan_pages(job_id)
+
+        w1 = dict(await asyncio.gather(*[
+            _stage("user_flows", _user_flows, fallback=0),
+            _stage("extraction", _extraction, fallback={}),
+            _stage("insights", _insights, fallback=None),
+            _stage("backlinks", _backlinks, fallback={"total": 0}),
+            _stage("link_health", _link_health, fallback={}),
+            _stage("performance", _performance, fallback={}),
+            _stage("duplicate", _duplicate, fallback={}),
+            _stage("structured", _structured, fallback={}),
+            _stage("geo_readiness", _geo_readiness, fallback={"status": "unknown", "score": None, "robots_txt_found": False, "error": "geo readiness stage failed"}),
+            _stage("orphans", _orphans, fallback={}),
+        ]))
+
+        flow_count = w1["user_flows"]
+        extraction_summary = w1["extraction"]
+        backlink_count = w1["backlinks"]["total"]
+        link_health = w1["link_health"]
+        perf = w1["performance"]
+        cwv_pages = perf.get("pages_checked", perf.get("checked", 0))
+        dup = w1["duplicate"]
+        duplicate_pages = dup.get("duplicate_pages", 0)
+        canonical_issues = dup.get("canonical_conflicting", 0) + dup.get("canonical_cross_domain", 0)
+        sd = w1["structured"]
+        structured_valid = sd.get("valid", 0)
+        geo_readiness = w1["geo_readiness"]
+        orphan_count = w1["orphans"].get("orphan_pages", 0)
+
+        async def _action_analysis():
+            from backend.services.seo_analyzer import analyze_pages
+            await analyze_pages(job_id)
+
+        async def _geo_alignment():
+            from backend.services.geo_alignment import audit_geo_alignment
+            return await audit_geo_alignment(job_id)
+
+        w2 = dict(await asyncio.gather(*[
+            _stage("action_analysis", _action_analysis, fallback=None),
+            _stage("geo_alignment", _geo_alignment, fallback={}),
+            _stage("vectors", _vectors, fallback=0),
+        ]))
+        vector_count = w2["vectors"]
+        geo_off_topic = w2["geo_alignment"].get("off_topic_pages", 0)
+
+        async def _health():
+            await _progress("Computing site health...")
+            from backend.services.site_health import compute_site_health
+            return await compute_site_health(job_id)
+
+        health = (await _stage("site_health", _health, fallback={}))[1]
+        health_grade = health.get("grade")
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},

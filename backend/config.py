@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     crawl_timeout_seconds: int = 360
     crawl_politeness_delay: float = 0.5
     crawl_robots_delay_max: float = 5.0
+    mobile_crawl_concurrency: int = 5
+    download_concurrency: int = 6
+    psi_concurrency: int = 5
+    extract_workers: int = 4
     log_level: str = "INFO"
     log_dir: str = "logs"
 

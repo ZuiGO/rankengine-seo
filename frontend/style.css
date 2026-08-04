@@ -41,6 +41,12 @@ body {
   letter-spacing: -0.5px;
 }
 
+.app-logo {
+  height: 28px;
+  width: auto;
+  display: inline;
+}
+
 .header-sub {
   font-size: 13px;
   color: var(--text-secondary);

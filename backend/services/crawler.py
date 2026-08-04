@@ -20,7 +20,7 @@ from backend.services.url_normalizer import normalize_url
 logger = get_logger("crawler")
 
 MAX_HTML_STORED = 300_000
-USER_AGENT = "RankEngine/1.0 (+https://rankengine.ai)"
+USER_AGENT = "ZuiGO.ai/1.0 (+https://zuigo.ai)"
 
 
 async def _robots_delay(origin: str) -> float:
@@ -70,6 +70,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
     total_external = 0
     lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(concurrency)
+    downloaded_urls = set()
     delay = await _robots_delay(f"{parsed.scheme}://{parsed.netloc}")
     gate = asyncio.Lock()
     logger.info("Crawl politeness job=%s delay=%.2fs", job_id, delay)
@@ -146,8 +147,21 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                 items = detect_content_types(url, html)
 
                 downloaded_types = set()
-                for item in items:
-                    dl = await download_content(item["source_url"], job_id, url)
+                download_sem = asyncio.Semaphore(settings.download_concurrency)
+
+                async def _fetch_one(item):
+                    if item["source_url"] in downloaded_urls:
+                        return None
+                    downloaded_urls.add(item["source_url"])
+                    async with download_sem:
+                        dl = await download_content(item["source_url"], job_id, url)
+                    if not dl:
+                        downloaded_urls.discard(item["source_url"])
+                    return (item, dl)
+
+                fetched = await asyncio.gather(*[_fetch_one(item) for item in items])
+
+                for item, dl in [f for f in fetched if f is not None]:
                     doc = {
                         "job_id": job_id,
                         "page_url": url,
@@ -251,26 +265,33 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
         try:
             mobile_browser = await pw.chromium.launch(headless=True)
             iphone = pw.devices["iPhone 13"]
-            for result in crawled_pages:
-                url = result["url"]
-                try:
-                    page = await mobile_browser.new_page(**iphone)
-                    await page.set_extra_http_headers({"User-Agent": USER_AGENT})
-                    resp = await _goto_polite(page, url, gate, delay)
-                    mhtml = await page.content()
-                    await page.close()
-                    status = resp.status if resp is not None else None
-                    await db.pages.update_one(
-                        {"job_id": job_id, "url": url},
-                        {"$set": {
-                            "html_mobile": mhtml[:MAX_HTML_STORED],
-                            "mobile_status_code": status,
-                            "viewport": "mobile",
-                        }},
-                    )
-                    mobile_ok += 1
-                except Exception as me:
-                    logger.error("Mobile crawl error for %s: %s", url, me)
+            mobile_sem = asyncio.Semaphore(settings.mobile_crawl_concurrency)
+            mobile_lock = asyncio.Lock()
+
+            async def mobile_pass(url: str):
+                nonlocal mobile_ok
+                async with mobile_sem:
+                    try:
+                        page = await mobile_browser.new_page(**iphone)
+                        await page.set_extra_http_headers({"User-Agent": USER_AGENT})
+                        resp = await _goto_polite(page, url, gate, delay)
+                        mhtml = await page.content()
+                        await page.close()
+                        status = resp.status if resp is not None else None
+                        await db.pages.update_one(
+                            {"job_id": job_id, "url": url},
+                            {"$set": {
+                                "html_mobile": mhtml[:MAX_HTML_STORED],
+                                "mobile_status_code": status,
+                                "viewport": "mobile",
+                            }},
+                        )
+                        async with mobile_lock:
+                            mobile_ok += 1
+                    except Exception as me:
+                        logger.error("Mobile crawl error for %s: %s", url, me)
+
+            await asyncio.gather(*[mobile_pass(result["url"]) for result in crawled_pages])
             await mobile_browser.close()
         except Exception as mb_err:
             logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)

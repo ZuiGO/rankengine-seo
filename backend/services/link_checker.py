@@ -12,7 +12,7 @@ logger = get_logger("link_checker")
 
 CHECK_CONCURRENCY = 10
 REQUEST_TIMEOUT = 12
-USER_AGENT = "RankEngine/1.0 link-checker (+https://rankengine.ai)"
+USER_AGENT = "ZuiGO.ai/1.0 link-checker (+https://zuigo.ai)"
 
 
 def classify_status(status_code: int) -> str:
@@ -75,25 +75,27 @@ async def check_links(job_id: str) -> dict:
     results = []
     semaphore = asyncio.Semaphore(CHECK_CONCURRENCY)
 
-    async def limited(url: str):
-        async with semaphore:
-            async with httpx.AsyncClient(
-                headers={"User-Agent": USER_AGENT},
-                follow_redirects=True,
-            ) as client:
+    async with httpx.AsyncClient(
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+        timeout=REQUEST_TIMEOUT,
+        limits=httpx.Limits(max_connections=CHECK_CONCURRENCY, max_keepalive_connections=CHECK_CONCURRENCY),
+    ) as client:
+        async def limited(url: str):
+            async with semaphore:
                 return await _check_one(client, url)
 
-    tasks = [limited(u) for u in unique_urls]
-    for i, outcome in enumerate(asyncio.as_completed(tasks)):
-        try:
-            res = await outcome
-        except Exception as e:
-            res = {"url": unique_urls[i], "status": "error", "error": str(e)[:200],
-                   "status_code": None, "final_url": unique_urls[i],
-                   "length_chars": len(unique_urls[i]), "checked_at": datetime.utcnow()}
-        res["job_id"] = job_id
-        res["pages"] = sorted(page_map.get(res["url"], []))
-        results.append(res)
+        tasks = [limited(u) for u in unique_urls]
+        for i, outcome in enumerate(asyncio.as_completed(tasks)):
+            try:
+                res = await outcome
+            except Exception as e:
+                res = {"url": unique_urls[i], "status": "error", "error": str(e)[:200],
+                       "status_code": None, "final_url": unique_urls[i],
+                       "length_chars": len(unique_urls[i]), "checked_at": datetime.utcnow()}
+            res["job_id"] = job_id
+            res["pages"] = sorted(page_map.get(res["url"], []))
+            results.append(res)
 
     await db.link_health.delete_many({"job_id": job_id})
     await db.link_health.insert_many(results)
