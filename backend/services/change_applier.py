@@ -230,6 +230,7 @@ async def create_version_for_action(item: dict, status: str) -> dict | None:
     version = {
         "job_id": item.get("job_id"),
         "action_id": str(item.get("_id")),
+        "issue_key": item.get("issue_key", ""),
         "page_url": item.get("page_url", ""),
         "content_item_id": item.get("content_item_id", ""),
         "content_type": ctype,

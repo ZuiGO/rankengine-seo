@@ -12,6 +12,15 @@ logger = get_logger("tracking")
 DEFAULT_MAX_KEYWORDS = 5
 
 
+def _integration_status(domain: str) -> str:
+    """'configured' when a SERP API key exists, else 'unconfigured'."""
+    try:
+        from backend.config import settings
+        return "configured" if getattr(settings, "serp_api_key", "") else "unconfigured"
+    except Exception:
+        return "unconfigured"
+
+
 async def _approved_action_types(db, job_id: str, page_url: str) -> list[str]:
     actions = await db.action_items.find({
         "job_id": job_id,
@@ -79,6 +88,7 @@ async def check_keywords(job_id: str, max_keywords: int = DEFAULT_MAX_KEYWORDS) 
         "moved_up": sum(1 for r in results if (r.get("delta") or 0) > 0),
         "moved_down": sum(1 for r in results if (r.get("delta") or 0) < 0),
         "ranked": sum(1 for r in results if r.get("rank") is not None),
+        "integration": _integration_status(domain),
     }
     await db.keyword_tracking_summaries.update_one(
         {"job_id": job_id},

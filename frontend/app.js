@@ -304,6 +304,18 @@ async function loadTrends(jobId) {
     const data = await resp.json();
     const points = data.points || [];
     if (points.length < 2) return;
+    const keywordCell = p => {
+      const ranked = p.keyword_ranked;
+      if (ranked === null || ranked === undefined) {
+        return `<span class="badge badge-warn" title="Connect a SERP API key in .env, then run Keyword Check">Unconfigured</span>`;
+      }
+      return ranked;
+    };
+    const brokenCell = p => {
+      const broken = p.broken_link_count ?? p.broken_links;
+      const scanned = p.total_links_scanned;
+      return (broken ?? "—") + (scanned ? ` / ${scanned}` : "");
+    };
     const rows = points.map(p => {
       const score = p.health_score;
       const bar = score !== null && score !== undefined
@@ -314,8 +326,8 @@ async function loadTrends(jobId) {
         <td>${escapeHtml(p.health_grade || "—")}</td>
         <td>${bar} ${score !== null && score !== undefined ? score : "—"}</td>
         <td>${p.avg_cwv_score ?? "—"}</td>
-        <td>${p.keyword_ranked ?? "—"}</td>
-        <td>${p.broken_links ?? "—"}</td>
+        <td>${keywordCell(p)}</td>
+        <td>${brokenCell(p)}</td>
         <td>${p.total_pages ?? "—"}</td>
       </tr>`;
     }).join("");

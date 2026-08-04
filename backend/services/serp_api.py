@@ -157,24 +157,6 @@ async def run_serp_rankings(domain: str, job_id: str | None, max_keywords: int =
 
 
 async def extract_keywords_from_content(job_id: str) -> list[str]:
-    from backend.db.mongo import get_db
-    db = get_db()
-    pipeline = [
-        {"$match": {"job_id": job_id}},
-        {"$group": {"_id": "$content_type", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 5},
-    ]
-    keywords = []
-    async for row in db.content_items.aggregate(pipeline):
-        keywords.append(row["_id"])
-    pages_pipeline = [
-        {"$match": {"job_id": job_id}},
-        {"$project": {"_id": 0, "title": 1}},
-        {"$match": {"title": {"$ne": ""}}},
-        {"$limit": 3},
-    ]
-    async for row in db.pages.aggregate(pages_pipeline):
-        words = row.get("title", "").split()[:3]
-        keywords.extend(words)
-    return list(set(kw.lower().rstrip("s") for kw in keywords if kw))[:10]
+    """Real corpus keywords (TF-IDF over crawled pages + extracted text)."""
+    from backend.services.keyword_extractor import extract_keywords_from_content as _extract
+    return await _extract(job_id, top_k=10)

@@ -95,6 +95,13 @@ async def audit_geo_alignment(job_id: str) -> dict:
     for p in home:
         home_tokens += _tokens(await _page_text(db, job_id, p))
     industry_keywords = _top_keywords(home_tokens, INDUSTRY_KEYWORDS)
+    try:
+        from backend.services.keyword_extractor import extract_keywords_from_content as corpus_keywords
+        corpus = await corpus_keywords(job_id, top_k=INDUSTRY_KEYWORDS)
+        if corpus:
+            industry_keywords = corpus
+    except Exception as kw_err:
+        logger.warning("Corpus keyword fallback for geo alignment job=%s: %s", job_id, kw_err)
     if not industry_keywords:
         return {"status": "error", "message": "No keywords extractable from homepage"}
 

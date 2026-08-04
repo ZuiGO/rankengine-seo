@@ -13,6 +13,7 @@ from backend.config import settings
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 from backend.services.service_errors import ServiceError
+from backend.services.url_normalizer import normalize_url
 
 logger = get_logger("performance")
 
@@ -137,6 +138,19 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
     if not pages:
         return {"status": "error", "message": "No pages for this job"}
 
+    seen = set()
+    deduped = []
+    for p in sorted(pages, key=lambda x: (x.get("page_type") == "home", x.get("url", ""))):
+        norm = normalize_url(p.get("url", ""))
+        if not norm:
+            continue
+        if norm in seen:
+            continue
+        seen.add(norm)
+        p["url"] = norm
+        deduped.append(p)
+    pages = deduped
+
     sem = asyncio.Semaphore(3)
     results = []
     errors = []
@@ -158,13 +172,28 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
 
     await asyncio.gather(*[fetch_one(p) for p in pages[:max_pages]])
 
+    urls_seen = set()
+    page_scores = []
+    desktop_checked = 0
+    for r in results:
+        if r.get("strategy") == "desktop":
+            desktop_checked += 1
+            continue
+        if r.get("url") in urls_seen:
+            continue
+        urls_seen.add(r.get("url"))
+        if r.get("cwv_score") is not None:
+            page_scores.append(r["cwv_score"])
+
     summary = {
         "job_id": job_id,
-        "checked": len(results),
+        "checks": len(results),
+        "pages_checked": len(urls_seen),
+        "desktop_checked": desktop_checked,
         "pages": min(len(pages), max_pages),
         "failed": len(errors),
         "errors": errors[:10],
-        "avg_cwv_score": round(sum(r["cwv_score"] for r in results if r.get("cwv_score") is not None) / max(1, sum(1 for r in results if r.get("cwv_score") is not None)), 1) if results else None,
+        "avg_cwv_score": round(sum(page_scores) / len(page_scores), 1) if page_scores else None,
     }
     await db.page_performance_summaries.update_one(
         {"job_id": job_id},

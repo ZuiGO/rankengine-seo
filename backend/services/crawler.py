@@ -15,6 +15,7 @@ from backend.services.content_classifier import detect_content_types
 from backend.services.content_downloader import download_content
 from backend.services.seo_analyzer import analyze_content_item
 from backend.services.page_classifier import classify_page_type, page_role
+from backend.services.url_normalizer import normalize_url
 
 logger = get_logger("crawler")
 
@@ -58,8 +59,9 @@ async def _goto_polite(page, url: str, gate: asyncio.Lock, delay: float, timeout
 
 async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurrency: int = 5):
     db = get_db()
+    target_url = normalize_url(target_url) or target_url
     parsed = urlparse(target_url)
-    base_domain = parsed.netloc
+    base_domain = parsed.netloc.lower()
 
     visited = set()
     queue = [target_url]
@@ -116,11 +118,14 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                 for a_tag in soup.find_all("a", href=True):
                     href = a_tag["href"].strip()
                     full_url = urljoin(url, href)
-                    full_parsed = urlparse(full_url)
+                    norm = normalize_url(full_url)
+                    if not norm:
+                        continue
+                    full_parsed = urlparse(norm)
                     if full_parsed.netloc == base_domain or not full_parsed.netloc:
-                        internal_urls.append(full_url)
+                        internal_urls.append(norm)
                     elif full_parsed.netloc and full_parsed.netloc != base_domain:
-                        external_urls.append(full_url)
+                        external_urls.append(norm)
 
                 has_structured_data = bool(soup.find("script", type="application/ld+json"))
                 noindex = False
@@ -151,6 +156,10 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                         "file_path": dl.get("file_path") if dl else None,
                         "file_size": dl.get("file_size") if dl else None,
                         "mime_type": dl.get("mime_type") if dl else None,
+                        "alt": item.get("alt", ""),
+                        "link_text": item.get("text", ""),
+                        "width": item.get("width"),
+                        "height": item.get("height"),
                     }
                     result = await db.content_items.insert_one(doc)
                     doc["_id"] = str(result.inserted_id)
@@ -215,8 +224,9 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
 
                     new_urls = []
                     for link in result.get("internal_link_urls", []):
-                        lp = urlparse(link)
-                        clean = f"{lp.scheme}://{lp.netloc}{lp.path}"
+                        clean = normalize_url(link)
+                        if not clean:
+                            continue
                         if clean not in visited and clean not in queue:
                             new_urls.append(clean)
                     queue.extend(new_urls)

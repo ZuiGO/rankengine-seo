@@ -13,6 +13,23 @@ router = APIRouter(prefix="/api/actions", tags=["actions"])
 _active_batches: set[str] = set()
 
 
+async def _record_feedback(db, item: dict, status: str) -> None:
+    """One row per review so generation can learn issue_key approval rates."""
+    issue_key = item.get("issue_key")
+    if not issue_key:
+        return
+    from datetime import datetime
+    await db.action_feedback.insert_one({
+        "job_id": item.get("job_id"),
+        "action_id": str(item.get("_id")),
+        "issue_key": issue_key,
+        "content_type": item.get("content_type", ""),
+        "page_url": item.get("page_url", ""),
+        "status": status,
+        "reviewed_at": datetime.utcnow(),
+    })
+
+
 async def _approve_all_batch(job_id: str) -> None:
     db = get_db()
     sem = asyncio.Semaphore(6)
@@ -26,6 +43,7 @@ async def _approve_all_batch(job_id: str) -> None:
                     {"_id": item["_id"]},
                     {"$set": {"status": "approved"}},
                 )
+                await _record_feedback(db, item, "approved")
                 await log_audit(
                     "action_approved",
                     job_id,
@@ -95,6 +113,7 @@ async def approve_action(action_id: str, req: ApproveRequest):
         {"_id": ObjectId(action_id)},
         {"$set": {"status": req.status}}
     )
+    await _record_feedback(db, item, req.status)
     await log_audit(
         "action_" + req.status,
         item.get("job_id"),

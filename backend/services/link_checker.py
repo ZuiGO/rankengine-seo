@@ -6,6 +6,7 @@ import httpx
 
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
+from backend.services.url_normalizer import normalize_url
 
 logger = get_logger("link_checker")
 
@@ -61,8 +62,11 @@ async def check_links(job_id: str) -> dict:
     async for doc in cursor:
         page_url = doc["url"]
         for target in doc.get("internal_link_urls", []):
-            unique_urls.add(target)
-            page_map.setdefault(target, set()).add(page_url)
+            norm = normalize_url(target)
+            if not norm:
+                continue
+            unique_urls.add(norm)
+            page_map.setdefault(norm, set()).add(page_url)
 
     unique_urls = sorted(unique_urls)
     if not unique_urls:
@@ -98,21 +102,29 @@ async def check_links(job_id: str) -> dict:
     for r in results:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
 
+    broken_link_count = (
+        counts.get("broken", 0)
+        + counts.get("timeout", 0)
+        + counts.get("error", 0)
+        + counts.get("blocked", 0)
+    )
     summary = {
         "checked": len(results),
+        "total_links_scanned": len(results),
         "ok": counts.get("ok", 0),
         "redirect": counts.get("redirect", 0),
         "broken": counts.get("broken", 0),
         "blocked": counts.get("blocked", 0),
         "timeout": counts.get("timeout", 0),
         "error": counts.get("error", 0),
+        "broken_link_count": broken_link_count,
     }
     await db.link_health_summaries.update_one(
         {"job_id": job_id},
         {"$set": {"job_id": job_id, **summary, "checked_at": datetime.utcnow()}},
         upsert=True,
     )
-    logger.info("Link health check job=%s checked=%s broken=%s", job_id, len(results), summary["broken"])
+    logger.info("Link health check job=%s checked=%s broken=%s", job_id, len(results), broken_link_count)
     return summary
 
 

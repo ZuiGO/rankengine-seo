@@ -39,6 +39,12 @@ async def domain_trends(domain: str, limit: int = 20):
         health = await db.site_health.find_one({"job_id": job["_id"]})
         perf = await db.page_performance_summaries.find_one({"job_id": job["_id"]})
         kt = await db.keyword_tracking_summaries.find_one({"job_id": job["_id"]})
+        kt_summary = kt or {}
+        try:
+            from backend.config import settings
+            serp_configured = bool(getattr(settings, "serp_api_key", ""))
+        except Exception:
+            serp_configured = False
         points.append({
             "job_id": job["_id"],
             "url": job.get("url", ""),
@@ -48,8 +54,11 @@ async def domain_trends(domain: str, limit: int = 20):
             "avg_cwv_score": (perf or {}).get("avg_cwv_score"),
             "cwv_pages": summary.get("cwv_pages"),
             "broken_links": summary.get("broken_links"),
+            "broken_link_count": summary.get("broken_link_count"),
+            "total_links_scanned": summary.get("total_links_scanned"),
             "total_pages": summary.get("total_pages"),
-            "keyword_ranked": (kt or {}).get("ranked"),
+            "keyword_ranked": kt_summary.get("ranked"),
+            "keyword_integration": kt_summary.get("integration") or ("configured" if serp_configured else "unconfigured"),
         })
 
     if not points:

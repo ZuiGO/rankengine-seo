@@ -94,6 +94,12 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             logger.error("Content extraction warning job=%s: %s", job_id, ext_err)
             extraction_summary = {}
 
+        try:
+            from backend.services.seo_analyzer import analyze_pages
+            await analyze_pages(job_id)
+        except Exception as act_err:
+            logger.error("Action analysis warning job=%s: %s", job_id, act_err)
+
         await db.analysis_jobs.update_one(
             {"_id": job_id},
             {"$set": {"progress_message": "Fetching external SEO insights..."}}
@@ -156,7 +162,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         try:
             from backend.services.performance_service import fetch_performance
             perf = await fetch_performance(job_id)
-            cwv_pages = perf.get("checked", 0)
+            cwv_pages = perf.get("pages_checked", perf.get("checked", 0))
         except Exception as p_err:
             logger.error("PageSpeed warning job=%s: %s", job_id, p_err)
             cwv_pages = 0
@@ -237,7 +243,9 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_user_flows": flow_count,
                     "total_backlinks": backlink_count,
                     "links_checked": link_health.get("checked", 0),
-                    "broken_links": link_health.get("broken", 0),
+                    "broken_links": link_health.get("broken_link_count", link_health.get("broken", 0)),
+                    "broken_link_count": link_health.get("broken_link_count", link_health.get("broken", 0)),
+                    "total_links_scanned": link_health.get("total_links_scanned", link_health.get("checked", 0)),
                     "health_grade": health_grade,
                     "cwv_pages": cwv_pages,
                     "duplicate_pages": duplicate_pages,

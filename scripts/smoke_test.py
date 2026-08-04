@@ -129,6 +129,25 @@ async def main(host: str, url: str):
         logs_app = await client.get("/api/logs/app")
         report("app logs removed", logs_app.status_code == 404, f"HTTP {logs_app.status_code}")
 
+        # 8e. Phase 6 consistency: fact-anchored actions + broken/CWV/keyword agreement
+        act_list = (await client.get(f"/api/actions/{job_id}")).json()
+        act_sample = next((a for a in act_list.get("actions", []) if a.get("issue_key")), None)
+        report("actions carry issue_key", bool(act_sample), f"sample={act_sample.get('issue_key') if act_sample else 'none'}")
+        report("actions carry evidence+confidence", bool(act_sample and "evidence" in act_sample and isinstance(act_sample.get("confidence"), (int, float))),
+               f"confidence={act_sample.get('confidence') if act_sample else 'none'}")
+        sh = (await client.get(f"/api/sites/{job_id}/health")).json()
+        latest = (trends.get("points") or [{}])[-1]
+        report("broken-link counts agree (health vs trends)",
+               (sh.get("metrics", {}).get("broken_links") or 0) == (latest.get("broken_link_count") or 0),
+               f"health={sh.get('metrics', {}).get('broken_links')} trends={latest.get('broken_link_count')}")
+        report("trends total_links_scanned present", latest.get("total_links_scanned") is not None, f"scanned={latest.get('total_links_scanned')}")
+        perf = (await client.get(f"/api/quality/{job_id}/performance")).json()
+        report("cwv pages_checked <= pages and > 0", 0 < perf.get("pages_checked", 0) <= perf.get("pages", 0),
+               f"pages_checked={perf.get('pages_checked')} pages={perf.get('pages')} checks={perf.get('checks')}")
+        report("cwv summary cwv_pages == pages_checked", ssum.get("cwv_pages") == perf.get("pages_checked"),
+               f"summary={ssum.get('cwv_pages')} perf={perf.get('pages_checked')}")
+        report("keyword integration field present", "keyword_integration" in latest, f"trends={latest.get('keyword_integration')}")
+
         # 8c. Spend tracking (Phase 3)
         spend = (await client.get(f"/api/spend/{job_id}")).json()
         report("spend per job", "total_requests" in spend, f"req={spend.get('total_requests')} cost=${spend.get('total_est_cost')}")

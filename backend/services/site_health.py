@@ -29,13 +29,15 @@ async def compute_site_health(job_id: str) -> dict:
 
     # Link health
     lh_counts = (lh or {}).get("counts") or (lh or {})
-    links_checked = lh_counts.get("checked", 0) if lh_counts else 0
-    broken = (
-        lh_counts.get("broken", 0)
-        + lh_counts.get("timeout", 0)
-        + lh_counts.get("error", 0)
-        + lh_counts.get("blocked", 0)
-    )
+    links_checked = lh_counts.get("checked", 0)
+    broken = lh_counts.get("broken_link_count")
+    if broken is None:
+        broken = (
+            lh_counts.get("broken", 0)
+            + lh_counts.get("timeout", 0)
+            + lh_counts.get("error", 0)
+            + lh_counts.get("blocked", 0)
+        )
     metrics["links_checked"] = links_checked
     metrics["broken_links"] = broken
     metrics["broken_link_rate"] = round(100 * broken / links_checked, 1) if links_checked else None
@@ -80,15 +82,18 @@ async def compute_site_health(job_id: str) -> dict:
             issues.append({"severity": "low", "message": f"{n - indexable} page(s) are blocked from indexing (noindex)."})
 
         perfs = await db.page_performance.find({"job_id": job_id}).to_list(length=None)
-        cwv_scores = [p.get("cwv_score") for p in perfs if p.get("cwv_score") is not None]
+        seen_pages = {}
+        for p in perfs:
+            seen_pages.setdefault(p.get("url"), p)
+        cwv_scores = [p.get("cwv_score") for p in seen_pages.values() if p.get("cwv_score") is not None]
         avg_cwv = None
         if cwv_scores:
             avg_cwv = round(sum(cwv_scores) / len(cwv_scores))
-            metrics["cwv_pages_checked"] = len(perfs)
+            metrics["cwv_pages_checked"] = len(seen_pages)
             metrics["avg_cwv_score"] = avg_cwv
-            metrics["poor_lcp_pages"] = sum(1 for p in perfs if (p.get("cwv") or {}).get("lcp", 0) > 2500)
-            metrics["poor_inp_pages"] = sum(1 for p in perfs if (p.get("cwv") or {}).get("inp", 0) > 200)
-            metrics["poor_cls_pages"] = sum(1 for p in perfs if (p.get("cwv") or {}).get("cls", 0) > 0.1)
+            metrics["poor_lcp_pages"] = sum(1 for p in seen_pages.values() if (p.get("cwv") or {}).get("lcp", 0) > 2500)
+            metrics["poor_inp_pages"] = sum(1 for p in seen_pages.values() if (p.get("cwv") or {}).get("inp", 0) > 200)
+            metrics["poor_cls_pages"] = sum(1 for p in seen_pages.values() if (p.get("cwv") or {}).get("cls", 0) > 0.1)
             if avg_cwv < 60:
                 issues.append({"severity": "high", "message": f"Poor Core Web Vitals (avg score {avg_cwv}/100) - slow LCP/INP/CLS on {metrics['poor_lcp_pages'] + metrics['poor_inp_pages'] + metrics['poor_cls_pages']} page(s)."})
             elif avg_cwv < 80:
