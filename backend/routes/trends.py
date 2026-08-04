@@ -15,6 +15,25 @@ from backend.db.mongo import get_db
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
 
+def _num(v) -> float | None:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def compute_deltas(prev: dict, cur: dict) -> dict:
+    """Period-over-period diffs for numeric series; None when a value is absent."""
+    deltas = {}
+    for key in ("health_score", "broken_link_count", "total_pages", "avg_cwv_score", "keyword_ranked"):
+        cur_v = _num(cur.get(key))
+        prev_v = _num(prev.get(key)) if prev else None
+        deltas[key] = round(cur_v - prev_v, 2) if (cur_v is not None and prev_v is not None) else None
+    return deltas
+
+
 def _domain_of(url: str) -> str:
     if not url:
         return ""
@@ -59,6 +78,13 @@ async def domain_trends(domain: str, limit: int = 20):
             "total_pages": summary.get("total_pages"),
             "keyword_ranked": kt_summary.get("ranked"),
             "keyword_integration": kt_summary.get("integration") or ("configured" if serp_configured else "unconfigured"),
+            "deltas": compute_deltas(points[-1] if points else None, {
+                "health_score": (health or {}).get("score"),
+                "broken_link_count": summary.get("broken_link_count"),
+                "total_pages": summary.get("total_pages"),
+                "avg_cwv_score": (perf or {}).get("avg_cwv_score"),
+                "keyword_ranked": kt_summary.get("ranked"),
+            }),
         })
 
     if not points:

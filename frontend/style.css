@@ -757,8 +757,6 @@ body {
 }
 
 .data-row .label { color: var(--text-secondary); }
-.data-row .value { font-weight: 500; }
-
 @keyframes slideUp {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -1073,4 +1071,19 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
   margin: 6px 0;
+}
+.chart-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.chart-card h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.chart-box {
+  height: 280px;
+  position: relative;
 }

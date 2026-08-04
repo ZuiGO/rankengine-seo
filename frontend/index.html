@@ -60,6 +60,7 @@
         <button class="tab" data-tab="links">Links</button>
         <button class="tab" data-tab="actions">SEO Actions</button>
         <button class="tab" data-tab="report">Report</button>
+        <button class="tab" data-tab="analytics">Analytics</button>
         <button class="tab" data-tab="seo-insights">SEO Insights</button>
         <button class="tab" data-tab="quality">Quality</button>
         <button class="tab" data-tab="schedules">Schedules</button>
@@ -140,7 +141,16 @@
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
+          <select id="action-severity-filter" class="filter-select">
+            <option value="">All Severity</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <button id="reject-filtered-btn" class="btn-reject" style="padding:6px 14px;font-size:13px">Reject Filtered</button>
           <button id="approve-all-btn" class="btn-approve" style="padding:6px 14px;font-size:13px">Approve All</button>
+          <button id="patch-json-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Export JSON</button>
+          <button id="patch-md-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Export Markdown</button>
           <span id="actions-count" class="count-label"></span>
         </div>
         <div id="actions-list"></div>
@@ -155,6 +165,14 @@
           <button id="refresh-report-btn" class="btn-secondary">Refresh</button>
         </div>
         <div id="report-preview" class="report-preview"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-analytics">
+        <p class="section-desc">Longitudinal charts across repeated analyses of this site.</p>
+        <div class="chart-card"><h3>Health Score</h3><div class="chart-box"><canvas id="chart-health"></canvas></div></div>
+        <div class="chart-card"><h3>Broken Links</h3><div class="chart-box"><canvas id="chart-broken"></canvas></div></div>
+        <div class="chart-card"><h3>Pages Crawled</h3><div class="chart-box"><canvas id="chart-pages"></canvas></div></div>
+        <div class="chart-card"><h3>Keyword Rankings <span class="count-label">(lower = better)</span></h3><div class="chart-box"><canvas id="chart-keywords"></canvas></div></div>
       </div>
 
       <div class="tab-content hidden" id="tab-seo-insights">
@@ -296,6 +314,7 @@
 
 <div id="toast" class="toast hidden"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

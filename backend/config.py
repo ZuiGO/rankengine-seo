@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     pagespeed_api_key: str = ""
     slack_webhook_url: str = ""
+    action_webhook_url: str = ""
+    github_token: str = ""
+    broken_link_alert_threshold: int = 5
     gemini_cost_per_million: float = 0.125
     groq_cost_per_million: float = 0.0
     dataforseo_cost_per_million: float = 0.0

@@ -84,6 +84,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "links") loadLinks(currentJobId);
       if (currentTab === "actions") loadActions(currentJobId);
       if (currentTab === "report") loadReport(currentJobId);
+      if (currentTab === "analytics") loadAnalytics(currentJobId);
       if (currentTab === "chat") initChat();
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
       if (currentTab === "quality") loadQuality(currentJobId);
@@ -316,6 +317,14 @@ async function loadTrends(jobId) {
       const scanned = p.total_links_scanned;
       return (broken ?? "—") + (scanned ? ` / ${scanned}` : "");
     };
+    const deltaCell = (p, key, inverse = false) => {
+      const d = (p.deltas && p.deltas[key]) ?? (p === points[0] ? null : undefined);
+      if (d === null || d === undefined || d === 0) return "—";
+      const good = inverse ? d < 0 : d > 0;
+      const color = good ? "#16a34a" : "#dc2626";
+      const arrow = d > 0 ? "▲" : "▼";
+      return `<span style="color:${color};font-size:12px" title="vs previous analysis">${arrow} ${d > 0 ? "+" : ""}${d}</span>`;
+    };
     const rows = points.map(p => {
       const score = p.health_score;
       const bar = score !== null && score !== undefined
@@ -325,9 +334,11 @@ async function loadTrends(jobId) {
         <td style="white-space:nowrap">${new Date(p.completed_at).toLocaleDateString()}</td>
         <td>${escapeHtml(p.health_grade || "—")}</td>
         <td>${bar} ${score !== null && score !== undefined ? score : "—"}</td>
+        <td>${deltaCell(p, "health_score")}</td>
         <td>${p.avg_cwv_score ?? "—"}</td>
         <td>${keywordCell(p)}</td>
         <td>${brokenCell(p)}</td>
+        <td>${deltaCell(p, "broken_link_count", true)}</td>
         <td>${p.total_pages ?? "—"}</td>
       </tr>`;
     }).join("");
@@ -335,12 +346,123 @@ async function loadTrends(jobId) {
       <h3>Longitudinal Trends <span class="count-label">(${points.length} analyses of ${escapeHtml(domain)})</span></h3>
       <div class="table-container">
         <table class="data-table">
-          <thead><tr><th>Date</th><th>Grade</th><th>Health Score</th><th>Avg CWV</th><th>Keywords Ranked</th><th>Broken Links</th><th>Pages</th></tr></thead>
+          <thead><tr><th>Date</th><th>Grade</th><th>Health Score</th><th>Δ Score</th><th>Avg CWV</th><th>Keywords Ranked</th><th>Broken Links</th><th>Δ Broken</th><th>Pages</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
   } catch {
     el.innerHTML = "";
+  }
+}
+
+let chartInstances = [];
+
+function destroyCharts() {
+  chartInstances.forEach(c => { try { c.destroy(); } catch (e) {} });
+  chartInstances = [];
+}
+
+function makeLineChart(canvasId, labels, datasets, yAxis = null) {
+  if (typeof Chart === "undefined") return null;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const chart = new Chart(canvas.getContext("2d"), {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: datasets.length > 1,
+          labels: { color: "#64748b", boxWidth: 12, font: { size: 11 } },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: "#64748b", maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+          grid: { color: "rgba(148,163,184,0.12)" },
+        },
+        y: yAxis || { ticks: { color: "#64748b" }, grid: { color: "rgba(148,163,184,0.12)" } },
+      },
+    },
+  });
+  chartInstances.push(chart);
+  return chart;
+}
+
+async function loadAnalytics(jobId) {
+  destroyCharts();
+  const el = document.getElementById("tab-analytics");
+  if (!el) return;
+  try {
+    if (typeof Chart === "undefined") {
+      el.innerHTML = '<p class="section-desc">Chart.js failed to load (check internet connection).</p>';
+      return;
+    }
+    Chart.defaults.color = "#64748b";
+    Chart.defaults.borderColor = "rgba(148,163,184,0.12)";
+    const summaryResp = await fetch(`${API_BASE}/analysis/${jobId}/summary`);
+    const summary = await summaryResp.json();
+    const domain = (summary.url || "").split("//").pop().split("/")[0];
+    if (!domain) return;
+    const resp = await fetch(`${API_BASE}/trends/${encodeURIComponent(domain)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const points = (data.points || []).filter(p => p.health_score !== null && p.health_score !== undefined);
+    if (points.length < 2) {
+      el.innerHTML = '<p class="section-desc">Need at least two completed analyses to chart trends.</p>';
+      return;
+    }
+    const labels = points.map(p => new Date(p.completed_at).toLocaleDateString());
+    makeLineChart("chart-health", labels, [{
+      label: "Health score",
+      data: points.map(p => p.health_score),
+      borderColor: "#16a34a", backgroundColor: "rgba(22,163,74,0.15)", fill: true, tension: 0.3,
+    }]);
+    makeLineChart("chart-broken", labels, [{
+      label: "Broken links",
+      data: points.map(p => p.broken_link_count ?? p.broken_links),
+      borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.15)", fill: true, tension: 0.3,
+    }]);
+    makeLineChart("chart-pages", labels, [{
+      label: "Pages",
+      data: points.map(p => p.total_pages),
+      borderColor: "#0ea5e9", backgroundColor: "rgba(14,165,233,0.15)", fill: true, tension: 0.3,
+    }]);
+
+    const trackResp = await fetch(`${API_BASE}/tracking/${jobId}`);
+    const track = await trackResp.json();
+    const history = (track.history || []).slice().sort((a, b) => new Date(a.checked_at) - new Date(b.checked_at));
+    const kwBox = document.getElementById("chart-keywords");
+    if (history.length >= 2 && kwBox) {
+      const kLabels = history.map(h => new Date(h.checked_at).toLocaleDateString());
+      const keywordOrder = [];
+      history.forEach(h => (h.results || []).forEach(r => {
+        if (r.keyword && !keywordOrder.includes(r.keyword)) keywordOrder.push(r.keyword);
+      }));
+      const palette = ["#6366f1", "#0ea5e9", "#f59e0b", "#ec4899", "#10b981", "#8b5cf6", "#ef4444", "#14b8a6"];
+      const datasets = keywordOrder.slice(0, 8).map((kw, i) => ({
+        label: kw.length > 24 ? kw.slice(0, 24) + "…" : kw,
+        data: history.map(h => {
+          const r = (h.results || []).find(x => x.keyword === kw);
+          return r && r.rank !== null && r.rank !== undefined ? r.rank : null;
+        }),
+        borderColor: palette[i % palette.length],
+        backgroundColor: palette[i % palette.length],
+        spanGaps: true, tension: 0.3, borderWidth: 2,
+      }));
+      makeLineChart("chart-keywords", kLabels, datasets, {
+        reverse: true,
+        ticks: { color: "#64748b" },
+        grid: { color: "rgba(148,163,184,0.12)" },
+        title: { display: true, text: "Rank (lower is better)", color: "#64748b" },
+      });
+    } else if (kwBox) {
+      kwBox.parentElement.innerHTML = '<p class="section-desc">Run Keyword Check at least twice to chart ranking trends.</p>';
+    }
+  } catch {
+    el.innerHTML = '<p class="section-desc">Analytics unavailable for this site.</p>';
   }
 }
 
@@ -709,8 +831,11 @@ document.getElementById("check-links-btn").addEventListener("click", async () =>
 
 async function loadActions(jobId) {
   const statusFilter = document.getElementById("action-status-filter").value;
-  const params = statusFilter ? `?status_filter=${statusFilter}` : "";
-  const resp = await fetch(`${API_BASE}/actions/${jobId}${params}`);
+  const severity = document.getElementById("action-severity-filter").value;
+  const params = new URLSearchParams();
+  if (statusFilter) params.set("status_filter", statusFilter);
+  if (severity) params.set("severity", severity);
+  const resp = await fetch(`${API_BASE}/actions/${jobId}?${params.toString()}`);
   const data = await resp.json();
   document.getElementById("actions-count").textContent = `${data.total} items`;
 
@@ -767,6 +892,59 @@ async function loadVersions(jobId) {
 document.getElementById("action-status-filter")?.addEventListener("change", () => {
   if (currentJobId) loadActions(currentJobId);
 });
+
+document.getElementById("action-severity-filter")?.addEventListener("change", () => {
+  if (currentJobId) loadActions(currentJobId);
+});
+
+document.getElementById("reject-filtered-btn")?.addEventListener("click", async () => {
+  if (!currentJobId) return;
+  const severity = document.getElementById("action-severity-filter").value;
+  const scope = severity ? ` (severity: ${severity})` : " (pending)";
+  if (!confirm(`Reject all pending actions${scope}? This cannot be undone per-item.`)) return;
+  const btn = document.getElementById("reject-filtered-btn");
+  btn.disabled = true;
+  btn.textContent = "Working...";
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${currentJobId}/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "rejected", status_filter: "pending", severity: severity || null }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    showToast(`Rejected ${data.updated} action(s)`);
+  } catch (err) {
+    showToast("Reject failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Reject Filtered";
+    if (currentJobId) loadActions(currentJobId);
+  }
+});
+
+async function downloadPatch(fmt) {
+  if (!currentJobId) return;
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${currentJobId}/patch?format=${fmt}`);
+    if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.statusText);
+    const text = await resp.text();
+    const blob = new Blob([text], { type: fmt === "md" ? "text/markdown" : "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `seo-patch-${currentJobId}.${fmt}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+    showToast("Patch exported");
+  } catch (err) {
+    showToast("Export failed: " + err.message);
+  }
+}
+
+document.getElementById("patch-json-btn")?.addEventListener("click", () => downloadPatch("json"));
+document.getElementById("patch-md-btn")?.addEventListener("click", () => downloadPatch("md"));
 
 document.getElementById("approve-all-btn")?.addEventListener("click", async () => {
   if (!currentJobId) return;

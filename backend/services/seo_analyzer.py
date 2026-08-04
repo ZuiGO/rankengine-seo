@@ -269,6 +269,35 @@ def run_page_checks(page: dict, ctx: dict | None = None) -> list[dict]:
             "improvement_suggestions": ["Confirm this page is intentionally excluded from indexing"],
             "evidence": {"is_indexable": False},
         })
+    sd = ctx.get("sd") or {}
+    if indexable and sd.get(p.get("url", "")) is False:
+        checks.append({
+            "issue_key": "no_structured_data",
+            "impact": "low",
+            "confidence": 0.8,
+            "identified_issues": ["Page has no structured data (schema.org) - invisible to rich results and AI answers"],
+            "improvement_suggestions": [
+                "Add JSON-LD structured data matching the page type (Product, Article, FAQ, etc.)",
+                "Keep entity names consistent across the site so generative engines can cite them",
+            ],
+            "evidence": {"has_structured_data": False, "page_type": p.get("page_type", "")},
+        })
+    corpus = ctx.get("corpus_keywords") or []
+    if corpus:
+        surface = f"{p.get('title') or ''} {p.get('meta_description') or ''}".lower()
+        matched = [kw for kw in corpus if kw.lower() in surface]
+        if not matched:
+            checks.append({
+                "issue_key": "entity_coverage_low",
+                "impact": "low",
+                "confidence": 0.6,
+                "identified_issues": ["Page title and meta description mention none of the site's core topics - hard for AI engines to cite"],
+                "improvement_suggestions": [
+                    "Align the title/meta with at least one of the site's core topics",
+                    "Add entity-linked phrases that generative engines can quote",
+                ],
+                "evidence": {"corpus_keywords": corpus[:10], "matched": 0},
+            })
     total_imgs = p.get("image_count") or 0
     missing = p.get("images_missing_alt") or 0
     if total_imgs > 0 and missing / total_imgs > 0.3:
@@ -402,16 +431,31 @@ async def analyze_pages(job_id: str) -> dict:
     job = await db.analysis_jobs.find_one({"_id": job_id})
     domain = (job or {}).get("url", "").split("//")[-1].split("/")[0]
 
-    pages = await db.pages.find({"job_id": job_id}, {"html": 0, "html_mobile": 0}).to_list(length=None)
+    pages = await db.pages.find({"job_id": job_id}, {"html_mobile": 0}).to_list(length=None)
     if not pages:
         return {"status": "error", "message": "No pages for this job"}
 
     meta_counts = {}
+    sd_map = {}
     for p in pages:
         m = (p.get("meta_description") or "").strip()
         if m:
             meta_counts[m] = meta_counts.get(m, 0) + 1
-    ctx = {"meta_counts": meta_counts}
+        if p.get("html"):
+            try:
+                from backend.services.structured_data import validate_structured_data
+                sd_map[p.get("url", "")] = validate_structured_data(
+                    p.get("url", ""), p.get("html")
+                ).get("has_structured_data", False)
+            except Exception as sd_err:
+                logger.warning("Structured data check failed page=%s: %s", p.get("url"), sd_err)
+    corpus_keywords = []
+    try:
+        from backend.services.keyword_extractor import extract_keywords_from_content
+        corpus_keywords = await extract_keywords_from_content(job_id, top_k=20)
+    except Exception as k_err:
+        logger.warning("Corpus keywords unavailable job=%s: %s", job_id, k_err)
+    ctx = {"meta_counts": meta_counts, "sd": sd_map, "corpus_keywords": corpus_keywords}
 
     weights = await _approval_weights(db)
     rank_corr = await _rank_correlation(db, domain) if domain else {}

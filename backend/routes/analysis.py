@@ -280,6 +280,22 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             grade_rank = {"A": 5, "B": 4, "C": 3, "D": 2, "F": 1}
             if prev_grade and health_grade and grade_rank.get(health_grade, 0) < grade_rank.get(prev_grade, 0):
                 drop = f"{prev_grade} → {health_grade}"
+            prev_summary = (prev or {}).get("summary") or {}
+            prev_broken = prev_summary.get("broken_link_count")
+            if prev_broken is None:
+                prev_broken = prev_summary.get("broken_links")
+            new_broken = summary.get("broken_link_count")
+            if new_broken is None:
+                new_broken = summary.get("broken_links")
+            try:
+                from backend.config import settings
+                broken_threshold = settings.broken_link_alert_threshold
+            except Exception:
+                broken_threshold = 5
+            broken_surge = None
+            if (new_broken is not None and prev_broken is not None
+                    and new_broken > prev_broken and new_broken >= broken_threshold):
+                broken_surge = f"{prev_broken} → {new_broken}"
             fields = {
                 "Site": url,
                 "Pages": summary["total_pages"],
@@ -291,6 +307,9 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             if drop:
                 fields["Health drop"] = drop
                 await send_slack("Health grade dropped", fields, color="danger")
+            elif broken_surge:
+                fields["Broken links increase"] = broken_surge
+                await send_slack("Broken links increased", fields, color="danger")
             else:
                 await send_slack("Analysis complete", fields, color="good")
         except Exception as n_err:
