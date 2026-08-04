@@ -116,6 +116,18 @@ async def main(host: str, url: str):
         report("quality geo-alignment", "off_topic_pages" in geo, f"off_topic={geo.get('off_topic_pages')} analyzed={geo.get('pages_analyzed')}")
         orph = (await client.get(f"/api/quality/{job_id}/orphans")).json()
         report("quality orphans", "orphan_pages" in orph, f"orphans={orph.get('orphan_pages')}")
+        if orph.get("orphan_pages"):
+            report("orphan link suggestions", any(p.get("suggested_link_sources") for p in orph.get("orphan_pages", [])), "")
+
+        # 8d. Phase 5 additions
+        report("summary geo_readiness key", "geo_readiness" in ssum, f"geo_status={ssum.get('geo_readiness', {}).get('status')}")
+        decay = (await client.get(f"/api/quality/{job_id}/decay?months=6")).json()
+        report("content decay endpoint", "stale_pages" in decay and "pages_with_last_modified" in decay, f"stale={decay.get('stale_pages')} with_lm={decay.get('pages_with_last_modified')}")
+        domain = job["url"].split("//")[-1].split("/")[0]
+        trends = (await client.get(f"/api/trends/{domain}")).json()
+        report("trends endpoint", trends.get("points") and len(trends.get("points", [])) > 0, f"points={len(trends.get('points', []))}")
+        logs_app = await client.get("/api/logs/app")
+        report("app logs removed", logs_app.status_code == 404, f"HTTP {logs_app.status_code}")
 
         # 8c. Spend tracking (Phase 3)
         spend = (await client.get(f"/api/spend/{job_id}")).json()

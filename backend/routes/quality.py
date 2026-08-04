@@ -66,3 +66,34 @@ async def orphans(job_id: str):
     if not doc:
         raise HTTPException(404, "Orphan detection not run for this job")
     return doc
+
+
+@router.get("/{job_id}/decay")
+async def content_decay(job_id: str, months: int = 6):
+    await _ensure_job(job_id)
+    from datetime import datetime, timedelta
+
+    db = get_db()
+    cutoff = datetime.utcnow() - timedelta(days=30 * max(1, min(months, 24)))
+    pages = await db.pages.find(
+        {"job_id": job_id, "last_modified": {"$ne": None}},
+        {"url": 1, "title": 1, "last_modified": 1},
+    ).to_list(length=None)
+    stale = []
+    for p in pages:
+        lm = p.get("last_modified")
+        if lm and lm < cutoff:
+            stale.append({
+                "page_url": p["url"],
+                "title": p.get("title", ""),
+                "last_modified": lm.isoformat(),
+                "stale_days": (datetime.utcnow() - lm).days,
+            })
+    stale.sort(key=lambda s: s["stale_days"], reverse=True)
+    return {
+        "job_id": job_id,
+        "pages_with_last_modified": len(pages),
+        "stale_pages": len(stale),
+        "stale_after_days": 30 * max(1, min(months, 24)),
+        "pages": stale,
+    }

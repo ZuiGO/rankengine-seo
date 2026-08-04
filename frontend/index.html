@@ -63,7 +63,7 @@
         <button class="tab" data-tab="seo-insights">SEO Insights</button>
         <button class="tab" data-tab="quality">Quality</button>
         <button class="tab" data-tab="schedules">Schedules</button>
-        <button class="tab" data-tab="logs">Logs & Alerts</button>
+        <button class="tab" data-tab="logs">Alerts</button>
       </nav>
 
       <div class="tab-content" id="tab-overview">
@@ -72,6 +72,7 @@
         <div class="stats-grid" id="overview-flows" style="margin-top:16px;grid-template-columns:repeat(1,1fr)"></div>
         <div id="overview-health" style="margin-top:16px"></div>
         <div id="overview-tracking" style="margin-top:16px"></div>
+        <div id="overview-trends" style="margin-top:16px"></div>
       </div>
 
       <div class="tab-content hidden" id="tab-sites">
@@ -192,6 +193,14 @@
             <button id="serp-search-btn" class="btn-secondary">Search</button>
           </div>
         </div>
+        <div id="insights-competitors" class="insights-section">
+          <h3>Competitor Gap Analysis</h3>
+          <div class="serp-search-form" style="display:flex;gap:8px">
+            <input type="text" id="competitor-input" placeholder="competitor1.com, competitor2.com" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+            <button id="competitor-gap-btn" class="btn-secondary">Analyze</button>
+          </div>
+          <div id="competitor-gap-results" class="insights-card" style="margin-top:10px"></div>
+        </div>
       </div>
       <div class="tab-content hidden" id="tab-schedules">
         <p class="section-desc">Schedule recurring crawls. Each run creates a new analysis job you can open from the Sites tab.</p>
@@ -206,6 +215,16 @@
           </select>
           <input type="number" id="schedule-max-pages" placeholder="Max pages" min="1" max="200" value="50">
           <button type="submit" class="btn-primary">Add Schedule</button>
+        </form>
+        <form id="keyword-schedule-form" class="schedule-form" style="margin-top:10px">
+          <input type="url" id="keyword-schedule-url" placeholder="Re-check keyword rankings for https://example.com" required>
+          <label class="schedule-interval-label" for="keyword-schedule-interval">Every</label>
+          <input type="number" id="keyword-schedule-interval" min="1" step="1" value="30" style="width:90px" required>
+          <select id="keyword-schedule-unit" class="filter-select" style="width:auto">
+            <option value="days" selected>days</option>
+            <option value="hours">hours</option>
+          </select>
+          <button type="submit" class="btn-secondary">Add Keyword Re-check</button>
         </form>
         <div id="schedules-list" class="schedules-list">
           <div class="insights-card">Loading schedules...</div>
@@ -240,11 +259,6 @@
           <h3>Audit Trail</h3>
           <div id="audit-list" class="table-container"></div>
         </div>
-
-        <div class="logs-section">
-          <h3>Application Logs <span id="app-log-path" style="font-size:12px;color:var(--text-secondary);font-weight:400"></span></h3>
-          <pre id="app-logs" class="log-viewer">Loading...</pre>
-        </div>
       </div>
     </div>
   </main>
@@ -255,19 +269,11 @@
     <div class="chat-panel-header">
       <span class="chat-panel-title">💬 AI Assistant</span>
       <span id="chat-context-hint" class="chat-context-hint"></span>
-      <select id="chat-section" class="chat-section-select" title="Section context">
-        <option value="overview">Overview</option>
-        <option value="pages">Pages</option>
-        <option value="content">Content Items</option>
-        <option value="links">Links & Backlinks</option>
-        <option value="actions">SEO Actions</option>
-        <option value="insights">SEO Insights</option>
-      </select>
       <button id="chat-close" class="chat-close" title="Close">✕</button>
     </div>
     <div class="chat-box" id="chat-box">
       <div class="chat-messages" id="chat-messages">
-        <div class="chat-message bot">Hi! I'm the RankEngine assistant. Ask me about SEO, or open an analyzed site and ask about it in context.</div>
+        <div class="chat-message bot">Hi! I'm the RankEngine assistant. Ask me anything about SEO, or open an analyzed site and ask about any part of it — I'll answer using the whole analysis.</div>
       </div>
       <form id="chat-form" class="chat-input-group">
         <input type="text" id="chat-input" placeholder="Ask me anything about SEO..." disabled>

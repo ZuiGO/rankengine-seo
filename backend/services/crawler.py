@@ -1,4 +1,6 @@
 import asyncio
+import email.utils
+from datetime import datetime
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -128,6 +130,14 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
 
                 page_type = classify_page_type(url, soup, title, meta_description)
 
+                last_modified = None
+                try:
+                    lm = resp.headers.get("last-modified") if resp and resp.headers else None
+                    if lm:
+                        last_modified = datetime.fromtimestamp(email.utils.parsedate_to_datetime(lm).timestamp())
+                except Exception:
+                    last_modified = None
+
                 items = detect_content_types(url, html)
 
                 downloaded_types = set()
@@ -167,6 +177,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                     "has_structured_data": has_structured_data,
                     "is_indexable": not noindex,
                     "content_types": list(downloaded_types),
+                    "last_modified": last_modified,
                     "internal_link_urls": internal_urls,
                     "external_link_urls": external_urls,
                     "html": html[:MAX_HTML_STORED],

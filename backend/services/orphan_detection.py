@@ -17,6 +17,24 @@ def _norm(url: str) -> str:
     return (url or "").rstrip("/").lower()
 
 
+async def _suggest_sources(job_id: str, page_url: str, title: str, max_sources: int = 5) -> list[str]:
+    """Best-effort: find pages similar to an orphan that could link to it."""
+    try:
+        from backend.services.vector_service import search_similar
+        query = (title or page_url or "").strip()
+        if not query:
+            return []
+        matches = await search_similar(job_id, query, limit=max_sources + 1, doc_types=["page"])
+        return [
+            m.get("source_url") or m.get("url")
+            for m in matches
+            if (m.get("source_url") or m.get("url")) and _norm(m.get("source_url") or m.get("url", "")) != _norm(page_url)
+        ][:max_sources]
+    except Exception as e:
+        logger.warning("Orphan source suggestion failed job=%s: %s", job_id, e)
+        return []
+
+
 async def detect_orphan_pages(job_id: str) -> dict:
     db = get_db()
     pages = await db.pages.find({"job_id": job_id}, {"html": 0, "html_mobile": 0}).to_list(length=None)
@@ -34,6 +52,9 @@ async def detect_orphan_pages(job_id: str) -> dict:
             continue
         if _norm(p["url"]) not in targets:
             orphans.append({"page_url": p["url"], "title": p.get("title", "")})
+
+    for o in orphans[:10]:
+        o["suggested_link_sources"] = await _suggest_sources(job_id, o["page_url"], o.get("title", ""))
 
     doc = {
         "job_id": job_id,

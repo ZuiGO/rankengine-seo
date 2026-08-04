@@ -40,15 +40,19 @@ SECTION_PROMPTS = {
         "You are discussing the EXTERNAL SEO INSIGHTS: keyword rankings, backlink counts, domain "
         "overview metrics (organic traffic), on-page analysis, and SERP positions."
     ),
-    "graph": (
-        "You are discussing the GRAPH section: knowledge graph of pages/content/relationships "
-        "(LINKS_TO, HAS_CONTENT), and user flows (entry -> browse -> action click paths)."
-    ),
     "report": (
         "You are discussing the SEO REPORT: its structure, metrics, page type breakdown, user flows, "
         "backlink sources, content versions (before/after), and action items."
     ),
 }
+
+FULL_SITE_PROMPT = (
+    "You are discussing the ENTIRE site analysis covering all sections at once: overview, pages, "
+    "content items, links & backlinks, SEO actions (impact/issues/improvements/approvals), user "
+    "flows, external SEO insights, and site health. The user does not need to pick a section - "
+    "answer their question using whichever parts of the context are relevant. If the answer is "
+    "not in the context, say so plainly."
+)
 
 GROQ_MODEL = "llama-3.1-8b-instant"
 
@@ -215,7 +219,36 @@ async def _report_context(job_id: str) -> str:
     return "\n".join(parts)
 
 
-async def _context_for_section(job_id: str, section: str) -> str:
+async def _full_site_context(job_id: str) -> str:
+    parts = ["=== OVERVIEW ===\n" + await _overview_context(job_id)]
+    parts.append("=== PAGES ===\n" + await _pages_context(job_id))
+    parts.append("=== LINKS & BACKLINKS ===\n" + await _links_context(job_id))
+    parts.append("=== SEO ACTIONS ===\n" + await _actions_context(job_id))
+    flows = await _graph_context(job_id)
+    if flows and "No user flows" not in flows:
+        parts.append("=== USER FLOWS ===\n" + flows)
+    health = await _site_health_context(job_id)
+    if health:
+        parts.append("=== SITE HEALTH ===\n" + health)
+    return "\n".join(parts)
+
+
+async def _site_health_context(job_id: str) -> str:
+    db = get_db()
+    doc = await db.site_health.find_one({"job_id": job_id})
+    if not doc:
+        return ""
+    parts = [f"Grade: {doc.get('grade')} (score {doc.get('score')})"]
+    checks = doc.get("checks") or {}
+    for name, check in list(checks.items())[:10]:
+        if isinstance(check, dict):
+            parts.append(f"- {name}: {check.get('status', '')} ({check.get('score', '')})")
+    return "\n".join(parts)
+
+
+async def _context_for_section(job_id: str, section: str | None) -> str:
+    if section is None or section == "all":
+        return await _full_site_context(job_id)
     if section in ("pages",):
         return await _pages_context(job_id)
     if section in ("links",):
@@ -229,7 +262,7 @@ async def _context_for_section(job_id: str, section: str) -> str:
     return await _overview_context(job_id)
 
 
-async def chat_with_context(job_id: str, message: str, section: str = "content") -> str:
+async def chat_with_context(job_id: str, message: str, section: str | None = None) -> str:
     db = get_db()
 
     if section == "content":
@@ -260,14 +293,14 @@ async def chat_with_context(job_id: str, message: str, section: str = "content")
 
     section_context = await _context_for_section(job_id, section)
     if section_context:
-        context_parts.append(f"=== {section.upper()} SECTION ===\n{section_context}")
+        context_parts.append(f"=== {section.upper() if section else 'FULL SITE'} ===\n{section_context}")
 
     insights_ctx = await _insights_context(job_id)
     if insights_ctx:
         context_parts.append(f"=== External SEO Insights ===\n{insights_ctx}")
 
     context = "\n---\n".join(context_parts) if context_parts else "No relevant content found."
-    system = SYSTEM_PROMPT + "\n\n" + SECTION_PROMPTS.get(section, SECTION_PROMPTS["content"])
+    system = SYSTEM_PROMPT + "\n\n" + (SECTION_PROMPTS.get(section, "") if section and section != "all" else FULL_SITE_PROMPT)
 
     if not settings.groq_api_key:
         return f"[Simulated] Found {len(results)} relevant items. Context:\n{context[:500]}..."

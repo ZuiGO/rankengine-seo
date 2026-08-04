@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 class ChatRequest(BaseModel):
     job_id: str | None = None
-    section: str = "content"
+    section: str | None = None
     message: str
 
 
@@ -24,4 +24,4 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=404, detail="Job not found")
 
     reply = await chat_with_context(req.job_id, req.message, req.section)
-    return {"reply": reply, "section": req.section}
+    return {"reply": reply, "section": req.section or "all"}

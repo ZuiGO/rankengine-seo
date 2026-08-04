@@ -84,6 +84,7 @@ async def generate_report(job_id: str):
         "content_versions": content_versions,
         "seo_action_items": action_items_list,
         "seo_insights": insights,
+        "geo_readiness": summary.get("geo_readiness"),
     }
 
     try:
@@ -271,6 +272,25 @@ th {{ background: #f9fafb; font-weight: 600; }}
                 html += f"<li>{sev.upper()}: {issue.get('message', '')}</li>"
             html += "</ul>"
         html += "</div>"
+
+    geo = summary.get("geo_readiness") or {}
+    if geo:
+        blocked = ", ".join(geo.get("blocked_ai_crawlers") or []) or "none"
+        allowed = ", ".join(geo.get("allowed_ai_crawlers") or []) or "none"
+        html += f"""
+<div class="section">
+<h2>AI Search (GEO) Readiness</h2>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Status</td><td><strong>{geo.get('status', 'unknown')}</strong>{f" ({geo.get('score', '')}/100)" if geo.get('score') is not None else ""}</td></tr>
+<tr><td>robots.txt found</td><td>{"yes" if geo.get("robots_txt_found") else "no"}</td></tr>
+<tr><td>Blocked AI crawlers</td><td>{blocked}</td></tr>
+<tr><td>Allowed AI crawlers</td><td>{allowed}</td></tr>
+<tr><td>AI agents checked</td><td>{", ".join(geo.get("ai_agents_scanned") or []) or "none"}</td></tr>
+</table>
+<p style="font-size:12px;color:var(--text-secondary)">Improves visibility in AI search (ChatGPT, Perplexity, etc.). Not required for Google AI Overviews or AI Mode.</p>
+</div>
+"""
 
     cached_insights = await db.seo_insights_cache.find_one({"job_id": job_id})
     insights = cached_insights.get("data", {}) if cached_insights else {}

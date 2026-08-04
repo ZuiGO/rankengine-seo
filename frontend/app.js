@@ -157,6 +157,7 @@ async function showResults(jobId) {
   initChat();
   loadSiteHealth(jobId);
   loadTracking(jobId);
+  loadTrends(jobId);
 
   // Switch to overview
   document.querySelector('.tab[data-tab="overview"]').click();
@@ -164,11 +165,16 @@ async function showResults(jobId) {
 
 function loadOverview(summary) {
   const stats = document.getElementById("overview-stats");
+  const geo = summary.geo_readiness || {};
+  const geoCard = geo.status
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${geo.blocked_ai_crawlers?.length ? "⛔ " + escapeHtml(geo.blocked_ai_crawlers.join(", ")) : "✅ AI crawlers OK"}</div><div class="stat-label">AI Search Readiness${geo.score !== undefined && geo.score !== null ? " (" + geo.score + "/100)" : ""}</div></div>`
+    : "";
   stats.innerHTML = `
     <div class="stat-card"><div class="stat-value">${summary.total_pages}</div><div class="stat-label">Pages Crawled</div></div>
     <div class="stat-card"><div class="stat-value">${summary.total_content_items}</div><div class="stat-label">Content Items</div></div>
     <div class="stat-card"><div class="stat-value">${summary.total_action_items}</div><div class="stat-label">SEO Action Items</div></div>
     <div class="stat-card"><div class="stat-value">${summary.summary?.total_links || 0}</div><div class="stat-label">Total Links Found</div></div>
+    ${geoCard}
   `;
 
   const breakdown = document.getElementById("content-breakdown");
@@ -281,6 +287,48 @@ async function runTrackingCheck(jobId) {
     loadTracking(jobId);
   } catch (err) {
     showToast("Keyword check failed: " + err.message);
+  }
+}
+
+async function loadTrends(jobId) {
+  const el = document.getElementById("overview-trends");
+  if (!el) return;
+  el.innerHTML = "";
+  try {
+    const summaryResp = await fetch(`${API_BASE}/analysis/${jobId}/summary`);
+    const summary = await summaryResp.json();
+    const domain = (summary.url || "").split("//").pop().split("/")[0];
+    if (!domain) return;
+    const resp = await fetch(`${API_BASE}/trends/${encodeURIComponent(domain)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const points = data.points || [];
+    if (points.length < 2) return;
+    const rows = points.map(p => {
+      const score = p.health_score;
+      const bar = score !== null && score !== undefined
+        ? `<div style="background:var(--bg-secondary);border-radius:4px;height:8px;width:120px;display:inline-block;vertical-align:middle"><div style="background:${score >= 80 ? "#16a34a" : score >= 60 ? "#d97706" : "#dc2626"};width:${score}%;height:8px;border-radius:4px"></div></div>`
+        : "";
+      return `<tr>
+        <td style="white-space:nowrap">${new Date(p.completed_at).toLocaleDateString()}</td>
+        <td>${escapeHtml(p.health_grade || "—")}</td>
+        <td>${bar} ${score !== null && score !== undefined ? score : "—"}</td>
+        <td>${p.avg_cwv_score ?? "—"}</td>
+        <td>${p.keyword_ranked ?? "—"}</td>
+        <td>${p.broken_links ?? "—"}</td>
+        <td>${p.total_pages ?? "—"}</td>
+      </tr>`;
+    }).join("");
+    el.innerHTML = `
+      <h3>Longitudinal Trends <span class="count-label">(${points.length} analyses of ${escapeHtml(domain)})</span></h3>
+      <div class="table-container">
+        <table class="data-table">
+          <thead><tr><th>Date</th><th>Grade</th><th>Health Score</th><th>Avg CWV</th><th>Keywords Ranked</th><th>Broken Links</th><th>Pages</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch {
+    el.innerHTML = "";
   }
 }
 
@@ -841,11 +889,10 @@ async function loadReport(jobId) {
 function initChat() {
   document.getElementById("chat-input").disabled = false;
   document.getElementById("chat-send").disabled = false;
-  document.getElementById("chat-section").disabled = !currentJobId;
   const hint = document.getElementById("chat-context-hint");
   if (hint) hint.textContent = currentJobId
-    ? "Asking about the currently open site. Select a section above."
-    : "Global assistant — open a site to ask about it in context.";
+    ? "Asking about the open site (all sections)."
+    : "Global assistant — open a site to ask about it in full context.";
 }
 
 initChat();
@@ -875,9 +922,9 @@ document.getElementById("chat-form").addEventListener("submit", async e => {
   input.value = "";
   messages.scrollTop = messages.scrollHeight;
 
-  const section = document.getElementById("chat-section").value;
+  const section = "";
   const payload = currentJobId
-    ? { job_id: currentJobId, section, message: msg }
+    ? { job_id: currentJobId, message: msg }
     : { message: msg };
 
   try {
@@ -959,15 +1006,17 @@ async function loadQuality(jobId) {
   const el = document.getElementById("quality-content");
   if (!el) return;
   el.innerHTML = '<div class="insights-card">Loading quality audits...</div>';
-  const [dup, sd, perf, geo, orphans, spend] = await Promise.all([
+  const [dup, sd, perf, geo, orphans, spend, summary, decay] = await Promise.all([
     clientGet(`${API_BASE}/quality/${jobId}/duplicates`),
     clientGet(`${API_BASE}/quality/${jobId}/structured-data`),
     clientGet(`${API_BASE}/quality/${jobId}/performance`),
     clientGet(`${API_BASE}/quality/${jobId}/geo-alignment`),
     clientGet(`${API_BASE}/quality/${jobId}/orphans`),
     clientGet(`${API_BASE}/spend/${jobId}`),
+    clientGet(`${API_BASE}/analysis/${jobId}/summary`),
+    clientGet(`${API_BASE}/quality/${jobId}/decay?months=6`),
   ]);
-  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans) + renderSpend(spend);
+  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, summary?.geo_readiness, decay) + renderSpend(spend);
 }
 
 function renderSpend(spend) {
@@ -996,8 +1045,19 @@ function qualitySection(title, inner) {
   return `<div class="insights-card" style="margin-bottom:14px"><h3>${title}</h3>${inner}</div>`;
 }
 
-function renderQuality(dup, sd, perf, geo, orphans) {
+function renderQuality(dup, sd, perf, geo, orphans, geoReadiness, decay) {
   let html = "";
+
+  html += qualitySection("AI Search (GEO) Readiness", geoReadiness
+    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+         <div class="insights-card"><div class="insights-label">Status</div><div class="insights-value">${escapeHtml(geoReadiness.status || "unknown")}${geoReadiness.score !== null && geoReadiness.score !== undefined ? ` (${geoReadiness.score}/100)` : ""}</div></div>
+         <div class="insights-card"><div class="insights-label">robots.txt</div><div class="insights-value">${geoReadiness.robots_txt_found ? "found" : "not found"}</div></div>
+         <div class="insights-card"><div class="insights-label">Blocked AI crawlers</div><div class="insights-value">${escapeHtml((geoReadiness.blocked_ai_crawlers || []).join(", ") || "none")}</div></div>
+         <div class="insights-card"><div class="insights-label">Allowed AI crawlers</div><div class="insights-value">${escapeHtml((geoReadiness.allowed_ai_crawlers || []).join(", ") || "none")}</div></div>
+       </div>
+       <div class="insights-label" style="margin-top:8px">Checked: ${escapeHtml((geoReadiness.ai_agents_scanned || []).join(", ") || "none")}</div>
+       <div class="insights-label" style="margin-top:4px;color:var(--text-secondary)">Improves visibility in AI search (ChatGPT, Perplexity, etc.). Not required for Google AI Overviews or AI Mode.</div>`
+    : '<div class="insights-label">Covered in Overview for this job.</div>');
 
   html += qualitySection("Duplicate Content & Canonicals", dup
     ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
@@ -1040,8 +1100,13 @@ function renderQuality(dup, sd, perf, geo, orphans) {
 
   html += qualitySection("Orphan Pages", orphans
     ? `<div class="insights-label">Pages with no internal links pointing to them: ${orphans.orphan_pages ?? 0}</div>
-       ${(orphans.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${escapeHtml(p.page_url)}</div>`).join("")}`
+       ${(orphans.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${escapeHtml(p.page_url)}${(p.suggested_link_sources || []).length ? `<div style="margin-left:12px;font-size:12px">↳ link from: ${p.suggested_link_sources.map(s => escapeHtml(s)).join(", ")}</div>` : ""}</div>`).join("")}`
     : '<div class="insights-label">Not run for this job yet.</div>');
+
+  html += qualitySection("Content Decay", decay && decay.pages_with_last_modified > 0
+    ? `<div class="insights-label">Pages with a Last-Modified header: ${decay.pages_with_last_modified} · stale (>${decay.stale_after_days} days): <strong>${decay.stale_pages}</strong></div>
+       ${(decay.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${escapeHtml(p.page_url)} — ${p.stale_days} days old</div>`).join("")}`
+    : '<div class="insights-label">Not available (site does not send Last-Modified headers, or not run).</div>');
 
   return html;
 }
@@ -1213,6 +1278,56 @@ function renderSerp(rankings, error, source) {
   }
   el.innerHTML = html;
 }
+
+document.getElementById("competitor-gap-btn")?.addEventListener("click", async () => {
+  const btn = document.getElementById("competitor-gap-btn");
+  const input = document.getElementById("competitor-input");
+  const resultsEl = document.getElementById("competitor-gap-results");
+  if (!currentJobId) return;
+  const competitors = (input.value || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!competitors.length) {
+    resultsEl.innerHTML = '<div class="insights-label">Enter at least one competitor domain.</div>';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = "Analyzing...";
+  resultsEl.innerHTML = '<div class="insights-label">Fetching competitor keyword and backlink data (DataForSEO)...</div>';
+  try {
+    const resp = await fetch(`${API_BASE}/competitors/gap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: currentJobId, competitors }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      resultsEl.innerHTML = `<div class="insights-label">Error: ${escapeHtml(data.detail || resp.status)}</div>`;
+    } else if (data.error) {
+      resultsEl.innerHTML = insightErrorHtml(data.error) + (data.hint ? `<div class="insights-card">${escapeHtml(data.hint)}</div>` : "");
+    } else {
+      resultsEl.innerHTML = data.competitors.map(c => {
+        const kwGaps = (c.keyword_gaps || []).length;
+        const blGaps = (c.backlink_gaps || []).length;
+        return `<div class="insights-card" style="margin-top:10px">
+          <h4>${escapeHtml(c.competitor)} ${c.error ? `<span class="count-label">(${escapeHtml(c.error)})</span>` : ""}</h4>
+          ${c.error ? "" : `
+          <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:8px 0">
+            <div class="insights-card"><div class="insights-label">Keyword Overlap</div><div class="insights-value">${c.keyword_overlap}</div></div>
+            <div class="insights-card"><div class="insights-label">Keyword Gaps</div><div class="insights-value">${kwGaps}</div></div>
+            <div class="insights-card"><div class="insights-label">Shared Backlink Sources</div><div class="insights-value">${c.shared_backlinks}</div></div>
+            <div class="insights-card"><div class="insights-label">Backlink Gaps</div><div class="insights-value">${blGaps}</div></div>
+          </div>
+          ${kwGaps ? `<div class="insights-label">Keywords they rank for that you don't (top 20):</div><div style="font-size:13px;margin-top:4px">${c.keyword_gaps.map(k => `• ${escapeHtml(k)}`).join(" ")}</div>` : ""}
+          ${blGaps ? `<div class="insights-label" style="margin-top:8px">Backlink sources they have that you don't (top 20):</div><div style="font-size:13px;margin-top:4px">${c.backlink_gaps.map(d => `• ${escapeHtml(d)}`).join(" ")}</div>` : ""}`}
+        </div>`;
+      }).join("");
+    }
+  } catch (err) {
+    resultsEl.innerHTML = `<div class="insights-label">Error: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Analyze";
+  }
+});
 
 document.getElementById("refresh-insights-btn")?.addEventListener("click", async () => {
   if (!currentJobId) return;
@@ -1487,7 +1602,7 @@ async function loadSchedules() {
         <div>
           <div class="schedule-domain">${escapeHtml(s.domain)}</div>
           <div class="site-url">${escapeHtml(s.url)}</div>
-          <div class="site-status status-completed" style="margin-top:6px">${s.enabled ? "Enabled" : "Disabled"}</div>
+          <div class="site-status ${s.enabled ? "status-completed" : ""}" style="margin-top:6px">${s.enabled ? "Enabled" : "Disabled"}${s.kind === "keyword_check" ? " · keyword re-check" : ""}</div>
         </div>
         <div class="schedule-meta">
           <div>Every <strong>${formatInterval(s.interval_hours)}</strong></div>
@@ -1557,6 +1672,32 @@ document.getElementById("schedule-form")?.addEventListener("submit", async e => 
   }
 });
 
+document.getElementById("keyword-schedule-form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const url = document.getElementById("keyword-schedule-url").value.trim();
+  const value = parseFloat(document.getElementById("keyword-schedule-interval").value);
+  const unit = document.getElementById("keyword-schedule-unit").value;
+  let intervalHours = unit === "days" ? value * 24 : value;
+  if (!(intervalHours >= 0.1)) intervalHours = 0.1;
+  try {
+    const resp = await fetch(`${API_BASE}/scheduler`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, interval_hours: intervalHours, kind: "keyword_check" }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast("Error: " + (data.detail || resp.status));
+      return;
+    }
+    document.getElementById("keyword-schedule-url").value = "";
+    showToast("Keyword re-check scheduled — every " + formatInterval(intervalHours));
+    loadSchedules();
+  } catch (err) {
+    showToast("Error: " + err.message);
+  }
+});
+
 function formatInterval(hours) {
   if (!hours || hours <= 0) return "—";
   if (hours < 1) return Math.round(hours * 60) + " minute" + (Math.round(hours * 60) === 1 ? "" : "s");
@@ -1571,17 +1712,14 @@ async function loadLogs() {
 
   const alertsEl = document.getElementById("alerts-list");
   const auditEl = document.getElementById("audit-list");
-  const logsEl = document.getElementById("app-logs");
 
   try {
-    const [alertsResp, auditResp, logsResp] = await Promise.all([
+    const [alertsResp, auditResp] = await Promise.all([
       fetch(`${API_BASE}/logs/alerts`),
       fetch(`${API_BASE}/logs/audit?limit=100${filter ? `&event=${encodeURIComponent(filter)}` : ""}`),
-      fetch(`${API_BASE}/logs/app?limit=100`),
     ]);
     const alerts = await alertsResp.json();
     const audit = await auditResp.json();
-    const appLogs = await logsResp.json();
 
     const failed = alerts.failed_analyses || [];
     const broken = alerts.broken_schedules || [];
@@ -1619,6 +1757,8 @@ async function loadLogs() {
           </tbody>
         </table>`;
 
+    logsEl.textContent = (appLogs.lines || []).join("\n") || "No log output yet.";
+    document.getElementById("app-log-path").textContent = appLogs.path ? `(${appLogs.path})` : "";
     logsEl.textContent = (appLogs.lines || []).join("\n") || "No log output yet.";
     document.getElementById("app-log-path").textContent = appLogs.path ? `(${appLogs.path})` : "";
   } catch (err) {

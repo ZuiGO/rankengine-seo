@@ -213,6 +213,13 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             logger.error("Site health warning job=%s: %s", job_id, h_err)
             health_grade = None
 
+        try:
+            from backend.services.geo_readiness import check_geo_readiness
+            geo_readiness = await check_geo_readiness(url)
+        except Exception as geo_err:
+            logger.error("GEO readiness warning job=%s: %s", job_id, geo_err)
+            geo_readiness = {"status": "unknown", "score": None, "robots_txt_found": False, "error": str(geo_err)[:200]}
+
         await db.analysis_jobs.update_one(
             {"_id": job_id},
             {"$set": {
@@ -238,6 +245,14 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "structured_data_valid": structured_valid,
                     "geo_off_topic_pages": geo_off_topic,
                     "orphan_pages": orphan_count,
+                    "geo_readiness": {
+                        "status": geo_readiness.get("status"),
+                        "score": geo_readiness.get("score"),
+                        "robots_txt_found": geo_readiness.get("robots_txt_found", False),
+                        "blocked_ai_crawlers": geo_readiness.get("blocked_ai_crawlers", []),
+                        "allowed_ai_crawlers": geo_readiness.get("allowed_ai_crawlers", []),
+                        "ai_agents_scanned": geo_readiness.get("ai_agents_scanned", []),
+                    },
                 },
             }}
         )
@@ -246,18 +261,30 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         try:
             from backend.services.notifications import send_slack
-            await send_slack(
-                "Analysis complete",
-                {
-                    "Site": url,
-                    "Pages": summary["total_pages"],
-                    "Content items": content_count,
-                    "Health grade": health_grade,
-                    "Broken links": link_health.get("broken", 0),
-                    "Action items": summary.get("total_action_items", 0),
-                },
-                color="good",
+            domain = url.split("//")[-1].split("/")[0]
+            prev = await db.analysis_jobs.find_one(
+                {"url": {"$regex": domain, "$options": "i"}, "status": "completed", "_id": {"$ne": job_id}},
+                {"summary": 1},
+                sort=[("completed_at", -1)],
             )
+            prev_grade = ((prev or {}).get("summary") or {}).get("health_grade")
+            drop = None
+            grade_rank = {"A": 5, "B": 4, "C": 3, "D": 2, "F": 1}
+            if prev_grade and health_grade and grade_rank.get(health_grade, 0) < grade_rank.get(prev_grade, 0):
+                drop = f"{prev_grade} → {health_grade}"
+            fields = {
+                "Site": url,
+                "Pages": summary["total_pages"],
+                "Content items": content_count,
+                "Health grade": health_grade,
+                "Broken links": link_health.get("broken", 0),
+                "Action items": summary.get("total_action_items", 0),
+            }
+            if drop:
+                fields["Health drop"] = drop
+                await send_slack("Health grade dropped", fields, color="danger")
+            else:
+                await send_slack("Analysis complete", fields, color="good")
         except Exception as n_err:
             logger.warning("Slack notification failed job=%s: %s", job_id, n_err)
 

@@ -1,37 +1,9 @@
 from datetime import datetime, timedelta
-from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from backend.db.mongo import get_db
-from backend.config import settings
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
-
-
-def _tail_file(path: str, n: int) -> list[str]:
-    p = Path(path)
-    if not p.exists():
-        return []
-    with open(p, "rb") as f:
-        f.seek(0, 2)
-        size = f.tell()
-        chunk = min(size, 64 * 1024)
-        f.seek(size - chunk)
-        data = f.read().decode("utf-8", errors="replace")
-        lines = data.splitlines()
-        return lines[-n:]
-
-
-@router.get("/app")
-async def get_app_logs(limit: int = 100, level: str | None = None):
-    if limit > 1000:
-        limit = 1000
-    log_path = str(Path(settings.log_dir) / "app.log")
-    lines = _tail_file(log_path, limit)
-    if level:
-        level = level.upper()
-        lines = [l for l in lines if f" | {level} " in l]
-    return {"lines": lines, "total": len(lines), "path": log_path}
 
 
 @router.get("/audit")
