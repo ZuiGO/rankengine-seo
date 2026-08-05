@@ -50,7 +50,7 @@ PROMPT_BY_FIELD = {
     ),
 }
 
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = settings.groq_model
 
 
 async def _build_context(item: dict) -> str:

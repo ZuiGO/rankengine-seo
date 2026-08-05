@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "rankengine123"
     groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
     serp_api_key: str = ""
     dataforseo_login: str = ""
     dataforseo_password: str = ""

@@ -54,7 +54,7 @@ FULL_SITE_PROMPT = (
     "not in the context, say so plainly."
 )
 
-GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_MODEL = settings.groq_model
 
 
 async def _insights_context(job_id: str) -> str:
