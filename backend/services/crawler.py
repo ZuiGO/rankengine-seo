@@ -79,9 +79,12 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
     crawled_pages = []
     total_internal = 0
     total_external = 0
+    unique_internal: set[str] = set()
+    unique_external: set[str] = set()
     lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(concurrency)
     downloaded_urls = set()
+    dedup_lock = asyncio.Lock()
     delay = await _robots_delay(f"{parsed.scheme}://{parsed.netloc}")
     gate = asyncio.Lock()
     logger.info("Crawl politeness job=%s delay=%.2fs", job_id, delay)
@@ -194,13 +197,21 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                 download_sem = asyncio.Semaphore(settings.download_concurrency)
 
                 async def _fetch_one(item):
-                    if item["source_url"] in downloaded_urls:
+                    source = item.get("source_url", "")
+                    if source.lower().startswith("data:"):
                         return None
-                    downloaded_urls.add(item["source_url"])
-                    async with download_sem:
-                        dl = await download_content(item["source_url"], job_id, url)
-                    if not dl:
-                        downloaded_urls.discard(item["source_url"])
+                    async with dedup_lock:
+                        if source in downloaded_urls:
+                            return None
+                        downloaded_urls.add(source)
+                    dl = None
+                    try:
+                        async with download_sem:
+                            dl = await download_content(source, job_id, url)
+                    finally:
+                        if not dl:
+                            async with dedup_lock:
+                                downloaded_urls.discard(source)
                     return (item, dl)
 
                 fetched = await asyncio.gather(*[_fetch_one(item) for item in items])
@@ -227,6 +238,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                 async with lock:
                     total_internal += len(internal_urls)
                     total_external += len(external_urls)
+                    unique_internal.update(internal_urls)
+                    unique_external.update(external_urls)
 
                 return {
                     "url": url,
@@ -350,7 +363,6 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
         except Exception as mb_err:
             logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)
 
-    total_links = total_internal + total_external
     depths = [p.get("click_depth", 0) for p in crawled_pages]
     mobile_friendly_count = 0
     mobile_friendly_cursor = db.pages.find({"job_id": job_id, "mobile_friendly": True}, {"_id": 1})
@@ -358,9 +370,12 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
         mobile_friendly_count += 1
     summary = {
         "total_pages": len(crawled_pages),
-        "total_links": total_links,
-        "total_internal_links": total_internal,
-        "total_external_links": total_external,
+        "total_links": len(unique_internal) + len(unique_external),
+        "total_internal_links": len(unique_internal),
+        "total_external_links": len(unique_external),
+        "total_link_occurrences": total_internal + total_external,
+        "total_internal_occurrences": total_internal,
+        "total_external_occurrences": total_external,
         "mobile_pages": mobile_ok,
         "mobile_friendly_pages": mobile_friendly_count,
         "avg_click_depth": round(sum(depths) / len(depths), 2) if depths else 0,

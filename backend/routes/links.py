@@ -15,11 +15,31 @@ async def get_link_summary(job_id: str):
         return {"error": "Job not found"}
 
     summary = job.get("summary") or {}
+    occurrences = summary.get("total_link_occurrences") or summary.get("total_links", 0)
     return {
         "total_links": summary.get("total_links", 0),
         "total_internal": summary.get("total_internal_links", 0),
         "total_external": summary.get("total_external_links", 0),
+        "total_link_occurrences": occurrences,
     }
+
+
+@router.get("/{job_id}/all")
+async def all_links(job_id: str, status: str | None = None, limit: int = Query(200, le=1000), offset: int = Query(0)):
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id}, {"_id": 1})
+    if not job:
+        return {"error": "Job not found"}
+    q: dict = {"job_id": job_id}
+    if status:
+        q["status"] = status
+    total = await db.link_health.count_documents(q)
+    cursor = db.link_health.find(q).sort("url", 1).skip(offset).limit(limit)
+    rows = []
+    async for r in cursor:
+        r["id"] = str(r.pop("_id"))
+        rows.append(r)
+    return {"total": total, "links": rows, "offset": offset, "limit": limit}
 
 
 @router.get("/{job_id}/backlinks")

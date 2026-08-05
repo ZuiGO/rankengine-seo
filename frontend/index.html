@@ -130,6 +130,17 @@
         </h3>
         <div id="link-health-summary" class="insights-card"></div>
         <div id="link-health-issues" class="insights-card"></div>
+        <h3 style="display:flex;align-items:center;gap:10px">All Links
+          <select id="all-links-filter" class="filter-select" style="font-size:12px;padding:4px 8px">
+            <option value="">All statuses</option>
+            <option value="ok">OK</option>
+            <option value="broken">Broken</option>
+            <option value="redirect">Redirect</option>
+            <option value="blocked">Blocked</option>
+            <option value="unreachable">Unreachable</option>
+          </select>
+        </h3>
+        <div id="all-links-card" class="insights-card"></div>
         <h3>Dummy Parallel Site</h3>
         <div id="dummy-site-card" class="insights-card"></div>
         <h3>Backlinks</h3>

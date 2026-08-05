@@ -30,28 +30,37 @@ def classify_status(status_code: int) -> str:
 async def _check_one(client: httpx.AsyncClient, url: str) -> dict:
     result = {
         "url": url,
-        "status": "error",
+        "status": "unreachable",
         "status_code": None,
         "final_url": url,
         "error": None,
         "length_chars": len(url),
         "checked_at": datetime.utcnow(),
+        "redirect_count": 0,
+        "redirect_chain": [],
     }
+    resp = None
+    err = None
     try:
         resp = await client.head(url, follow_redirects=True, timeout=REQUEST_TIMEOUT)
-        if resp.status_code in (405, 501):
+    except (httpx.TimeoutException, httpx.HTTPError) as e:
+        err = e
+    if resp is None or resp.status_code >= 400:
+        try:
             resp = await client.get(url, follow_redirects=True, timeout=REQUEST_TIMEOUT)
-        result["status_code"] = resp.status_code
-        result["final_url"] = str(resp.url)
-        result["status"] = classify_status(resp.status_code)
-        result["content_length"] = resp.headers.get("content-length")
-        result["redirect_count"] = len(resp.history) if resp.history else 0
-        result["redirect_chain"] = [str(h.url) for h in resp.history] if resp.history else []
-    except httpx.TimeoutException:
-        result["status"] = "timeout"
-        result["error"] = "Request timed out"
-    except Exception as e:
-        result["error"] = str(e)[:200]
+            err = None
+        except (httpx.TimeoutException, httpx.HTTPError) as e:
+            err = e
+    if resp is None:
+        result["error"] = str(err)[:200] if err else "Request failed"
+        result["status"] = "unreachable"
+        return result
+    result["status_code"] = resp.status_code
+    result["final_url"] = str(resp.url)
+    result["status"] = classify_status(resp.status_code)
+    result["content_length"] = resp.headers.get("content-length")
+    result["redirect_count"] = len(resp.history) if resp.history else 0
+    result["redirect_chain"] = [str(h.url) for h in resp.history] if resp.history else []
     return result
 
 
@@ -92,7 +101,7 @@ async def check_links(job_id: str) -> dict:
             try:
                 res = await outcome
             except Exception as e:
-                res = {"url": unique_urls[i], "status": "error", "error": str(e)[:200],
+                res = {"url": unique_urls[i], "status": "unreachable", "error": str(e)[:200],
                        "status_code": None, "final_url": unique_urls[i],
                        "length_chars": len(unique_urls[i]), "checked_at": datetime.utcnow(),
                        "redirect_count": 0, "redirect_chain": []}
@@ -107,12 +116,7 @@ async def check_links(job_id: str) -> dict:
     for r in results:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
 
-    broken_link_count = (
-        counts.get("broken", 0)
-        + counts.get("timeout", 0)
-        + counts.get("error", 0)
-        + counts.get("blocked", 0)
-    )
+    broken_link_count = counts.get("broken", 0)
     chain_lengths = [len(r.get("redirect_chain", [])) for r in results if r.get("redirect_count")]
     summary = {
         "checked": len(results),
@@ -121,8 +125,7 @@ async def check_links(job_id: str) -> dict:
         "redirect": counts.get("redirect", 0),
         "broken": counts.get("broken", 0),
         "blocked": counts.get("blocked", 0),
-        "timeout": counts.get("timeout", 0),
-        "error": counts.get("error", 0),
+        "unreachable": counts.get("unreachable", 0),
         "broken_link_count": broken_link_count,
         "redirected_links": sum(1 for r in results if r.get("redirect_count")),
         "max_redirect_chain": max(chain_lengths) if chain_lengths else 0,
@@ -141,7 +144,7 @@ async def get_link_health(job_id: str, limit: int = 100, offset: int = 0) -> dic
     summary = await db.link_health_summaries.find_one({"job_id": job_id})
     if not summary:
         summary = {"checked": 0, "ok": 0, "redirect": 0, "broken": 0,
-                   "blocked": 0, "timeout": 0, "error": 0, "status": "not_checked"}
+                   "blocked": 0, "unreachable": 0, "status": "not_checked"}
 
     issues = []
     cursor = (

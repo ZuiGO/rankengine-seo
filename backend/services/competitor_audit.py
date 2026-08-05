@@ -462,9 +462,11 @@ async def audit_competitors(target_job_id: str, competitors: list[str]) -> dict:
     results = []
     for comp in competitors:
         entry = await _analyze_one(target_job_id, target_url, comp)
+        update = dict(entry)
+        update["updated_at"] = datetime.utcnow()
         await db.competitor_gap_analyses.update_one(
             {"target_job_id": target_job_id, "competitor": entry["competitor"]},
-            {"$set": entry},
+            {"$set": update},
             upsert=True,
         )
         results.append(entry)

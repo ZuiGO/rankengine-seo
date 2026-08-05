@@ -240,17 +240,30 @@ async function loadExecSummary(jobId) {
           <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">${escapeHtml(it.drive)}</span>
         </div>
         <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">→ ${escapeHtml(it.next_step)}</div>
+        <details style="margin-top:8px">
+          <summary style="font-size:12px;color:var(--accent);cursor:pointer">Why it matters + how to fix</summary>
+          <div style="margin-top:8px;font-size:13px;line-height:1.5">${escapeHtml(it.explanation || "")}</div>
+          ${(it.how_to_fix || []).length ? `<ol style="margin:8px 0 0;padding-left:20px;font-size:13px;color:var(--text-secondary)">${it.how_to_fix.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ol>` : ""}
+          ${(it.evidence || []).length ? `<div style="margin-top:8px;font-size:12px"><strong style="color:var(--text-secondary)">Evidence:</strong><ul style="margin:4px 0 0;padding-left:20px;color:var(--text-secondary)">${it.evidence.map(e => `<li>${linkifyText(e, 120)}</li>`).join("")}</ul></div>` : ""}
+        </details>
       </div>`;
     const section = (title, items) => items.length ? `
       <div style="margin-bottom:12px"><strong style="font-size:13px;color:var(--text-secondary)">${title}</strong>
       ${items.map(row).join("")}</div>` : "";
+    const allSection = (s.all_issues || []).length > 5 ? `
+      <div style="margin-top:14px"><details>
+        <summary style="font-size:13px;color:var(--text-secondary);cursor:pointer">All ${s.all_issues.length} issues (full list)</summary>
+        <div style="margin-top:10px">${s.all_issues.map(row).join("")}</div>
+      </details></div>` : "";
     el.innerHTML = `
       <h3>Executive Summary <span class="count-label">(score ${s.score ?? "N/A"}${s.previous_score != null ? `, previous ${s.previous_score}` : ""} ${dirArrow} ${s.direction})</span></h3>
+      ${s.overview ? `<p style="font-size:13px;line-height:1.5;margin:8px 0 14px;color:var(--text-secondary)">${escapeHtml(s.overview)}</p>` : ""}
       ${section("Priority issues", s.top_issues || [])}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">
         <div class="insights-card" style="min-width:0">${section("Quick wins", s.quick_wins || []) || '<div style="font-size:13px;color:var(--text-secondary)">No quick wins</div>'}</div>
         <div class="insights-card" style="min-width:0">${section("Long-term work", s.long_term || []) || '<div style="font-size:13px;color:var(--text-secondary)">No long-term items</div>'}</div>
       </div>
+      ${allSection}
     `;
     const hl = document.querySelector(".tab[data-tab='overview'] .count-label");
     if (hl) hl.style.color = dirColor;
@@ -552,7 +565,7 @@ async function loadPages(jobId) {
       </tr></thead>
       <tbody>${filtered.map(p => `
         <tr>
-          <td class="page-url-cell" title="${p.url}">${p.url}</td>
+          <td class="page-url-cell" title="${p.url}">${linkify(p.url, 90)}</td>
           <td><span class="page-type-badge">${p.page_type || "other"}</span></td>
           <td>${(p.title || "-").substring(0, 50)}</td>
           <td>${p.word_count || 0}</td>
@@ -608,8 +621,8 @@ async function loadContent(jobId) {
         <tr style="cursor:pointer" onclick="showContentDetail('${c.id}')">
           <td>${typeIcons[c.content_type] || "📄"} ${escapeHtml(c.content_type)}</td>
           <td>${contentPreview(c)}</td>
-          <td class="page-url-cell" title="${escapeHtml(c.source_url)}">${escapeHtml(c.source_url)}</td>
-          <td class="page-url-cell" title="${escapeHtml(c.page_url)}">${escapeHtml(c.page_url)}</td>
+          <td class="page-url-cell" title="${escapeHtml(c.source_url)}">${linkify(c.source_url, 60)}</td>
+          <td class="page-url-cell" title="${escapeHtml(c.page_url)}">${linkify(c.page_url, 60)}</td>
           <td>${c.file_size ? formatSize(c.file_size) : "-"}</td>
           <td>${escapeHtml(c.mime_type) || "-"}</td>
         </tr>
@@ -641,7 +654,7 @@ async function showContentDetail(contentId) {
           ? `<div style="margin-bottom:12px"><img src="${c.file_url}" style="max-width:320px;max-height:240px;border-radius:8px;border:1px solid var(--border)" alt="Content preview"></div>`
           : `<div style="margin-bottom:12px"><a href="${c.file_url}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block">Open file</a></div>`) : ""}
         <div class="data-row"><span class="label">Type</span><span class="value">${c.content_type}</span></div>
-        <div class="data-row"><span class="label">Source URL</span><span class="value" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.source_url}</span></div>
+        <div class="data-row"><span class="label">Source URL</span><span class="value" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${linkify(c.source_url, 100)}</span></div>
         <div class="data-row"><span class="label">Page URL</span><span class="value" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.page_url}</span></div>
         <div class="data-row"><span class="label">File Size</span><span class="value">${c.file_size ? formatSize(c.file_size) : "-"}</span></div>
         <div class="data-row"><span class="label">MIME Type</span><span class="value">${c.mime_type || "-"}</span></div>
@@ -732,10 +745,11 @@ async function loadLinks(jobId) {
   const resp = await fetch(`${API_BASE}/links/${jobId}`);
   const data = await resp.json();
   document.getElementById("links-stats").innerHTML = `
-    <div class="stat-card"><div class="stat-value">${data.total_links}</div><div class="stat-label">Total Links</div></div>
+    <div class="stat-card"><div class="stat-value">${data.total_links}</div><div class="stat-label">Total Links (unique targets)</div></div>
     <div class="stat-card"><div class="stat-value">${data.total_internal}</div><div class="stat-label">Internal Links</div></div>
     <div class="stat-card"><div class="stat-value">${data.total_external}</div><div class="stat-label">External Links</div></div>
     <div class="stat-card"><div class="stat-value">${data.total_links ? ((data.total_internal / data.total_links) * 100).toFixed(0) : 0}%</div><div class="stat-label">Internal Ratio</div></div>
+    <div class="stat-card"><div class="stat-value">${data.total_link_occurrences ?? 0}</div><div class="stat-label">Link Occurrences</div></div>
   `;
 
   const backlinksResp = await fetch(`${API_BASE}/links/${jobId}/backlinks`);
@@ -744,7 +758,7 @@ async function loadLinks(jobId) {
     ? '<p class="section-desc">No backlink sources discovered. See SEO Insights tab to run discovery.</p>'
     : `<p class="section-desc">${blData.total} source page(s) from ${blData.referring_domains} referring domain(s)</p>
        <table class="data-table"><thead><tr><th>Source URL</th><th>Domain</th><th>Anchor</th></tr></thead>
-       <tbody>${blData.backlinks.map(b => `<tr><td class="page-url-cell" title="${b.source_url}">${b.source_url || "-"}</td><td>${b.source_domain || "-"}</td><td>${(b.anchor || "-").substring(0, 60)}</td></tr>`).join("")}</tbody></table>`;
+       <tbody>${blData.backlinks.map(b => `<tr><td class="page-url-cell" title="${b.source_url}">${linkify(b.source_url, 60)}</td><td>${b.source_domain || "-"}</td><td>${(b.anchor || "-").substring(0, 60)}</td></tr>`).join("")}</tbody></table>`;
   loadLinkHealth(jobId);
   loadDummySite(jobId);
 }
@@ -761,9 +775,10 @@ async function loadLinkHealth(jobId) {
       <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
         <div class="insights-card"><div class="insights-label">Checked</div><div class="insights-value">${s.checked ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">OK</div><div class="insights-value" style="color:var(--success)">${s.ok ?? "N/A"}</div></div>
-        <div class="insights-card"><div class="insights-label">Broken</div><div class="insights-value" style="color:var(--danger)">${s.broken ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Broken (4xx/5xx)</div><div class="insights-value" style="color:var(--danger)">${s.broken ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Redirects</div><div class="insights-value" style="color:#d97706">${s.redirect ?? "N/A"}</div></div>
-        <div class="insights-card"><div class="insights-label">Blocked/Timeout</div><div class="insights-value">${((s.blocked ?? 0) + (s.timeout ?? 0) + (s.error ?? 0))}</div></div>
+        <div class="insights-card"><div class="insights-label">Blocked (401/403)</div><div class="insights-value" style="color:#b45309">${s.blocked ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Unreachable</div><div class="insights-value">${s.unreachable ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Avg Link Length</div><div class="insights-value">${ls.avg ?? "-"} chars</div></div>
       </div>
       ${s.status === "not_checked" ? '<p class="section-desc" style="margin-top:10px">Links not checked yet for this job. Run Check or re-run analysis.</p>' : ""}
@@ -771,25 +786,70 @@ async function loadLinkHealth(jobId) {
       <div style="margin-top:12px">
         <p class="section-desc"><strong>Longest links:</strong></p>
         <ul style="margin:6px 0 0;padding-left:20px;font-size:13px;color:var(--text-secondary)">
-          ${ls.longest.map(l => `<li>${l.length} chars - <code>${escapeHtml(l.url.substring(0, 100))}</code></li>`).join("")}
+          ${ls.longest.map(l => `<li>${l.length} chars - ${linkify(l.url, 100)}</li>`).join("")}
         </ul>
       </div>` : ""}
     `;
     const issues = data.issues || [];
     issuesEl.innerHTML = issues.length === 0
       ? '<p class="section-desc">No link issues found.</p>'
-      : `<p class="section-desc">${issues.length} problematic link(s):</p>
-         <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>Length</th><th>URL</th></tr></thead>
+      : `<p class="section-desc">${issues.length} problematic unique link(s):</p>
+         <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>Length</th><th>URL</th><th>Linked From</th></tr></thead>
          <tbody>${issues.map(i => `<tr>
            <td><span class="page-type-badge" style="background:#fee2e2;color:#b91c1c">${i.status}</span></td>
            <td>${i.status_code ?? "-"}</td>
            <td>${i.length_chars ?? "-"}</td>
-           <td class="page-url-cell" title="${i.url}">${escapeHtml(i.url)}</td>
+           <td class="page-url-cell" title="${i.url}">${linkify(i.url, 70)}</td>
+           <td style="font-size:12px;color:var(--text-secondary)">${(i.pages || []).slice(0, 3).map(pg => linkify(pg, 40)).join("<br>") || "-"}</td>
          </tr>`).join("")}</tbody></table>`;
+    loadAllLinks(jobId);
   } catch (err) {
     summaryEl.innerHTML = `<p class="section-desc">Error loading link health: ${escapeHtml(err.message)}</p>`;
   }
 }
+
+let allLinksOffset = 0;
+let allLinksStatus = "";
+
+async function loadAllLinks(jobId, { reset } = {}) {
+  const el = document.getElementById("all-links-card");
+  if (!el) return;
+  if (reset) {
+    allLinksOffset = 0;
+    allLinksStatus = document.getElementById("all-links-filter")?.value || "";
+  }
+  const params = new URLSearchParams({ limit: "200", offset: String(allLinksOffset) });
+  if (allLinksStatus) params.set("status", allLinksStatus);
+  try {
+    const resp = await fetch(`${API_BASE}/links/${jobId}/all?${params}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const rows = (data.links || []).map(l => `<tr>
+      <td><span class="page-type-badge" style="background:${l.status === "ok" ? "#dcfce7" : "#fee2e2"};color:${l.status === "ok" ? "#15803d" : "#b91c1c"}">${l.status}</span></td>
+      <td>${l.status_code ?? "-"}</td>
+      <td class="page-url-cell" title="${l.url}">${linkify(l.url, 60)}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${(l.pages || []).slice(0, 2).map(pg => linkify(pg, 30)).join("<br>") || "-"}</td>
+    </tr>`).join("");
+    el.innerHTML = `
+      <p class="section-desc">${data.total} unique link target(s)${allLinksStatus ? ` (filter: ${allLinksStatus})` : ""}</p>
+      <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>URL</th><th>Linked From</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">No links for this filter</td></tr>'}</tbody></table>
+      ${allLinksOffset + (data.links || []).length < data.total
+        ? `<button id="all-links-more" class="btn-secondary" style="margin-top:10px">Load more (${data.total - allLinksOffset - (data.links || []).length} remaining)</button>`
+        : ""}
+    `;
+    document.getElementById("all-links-more")?.addEventListener("click", () => {
+      allLinksOffset += 200;
+      loadAllLinks(jobId);
+    });
+  } catch (err) {
+    el.innerHTML = `<p class="section-desc">Error loading links: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+document.getElementById("all-links-filter")?.addEventListener("change", () => {
+  if (currentJobId) loadAllLinks(currentJobId, { reset: true });
+});
 
 async function loadDummySite(jobId) {
   const el = document.getElementById("dummy-site-card");
@@ -945,7 +1005,7 @@ async function loadVersions(jobId) {
         </div>
         <div class="action-issues"><strong>Before:</strong> <span style="color:var(--danger)">${escapeHtml((v.before || "-").substring(0, 200))}</span></div>
         <div class="action-improvements"><strong>After:</strong> <span style="color:var(--success)">${escapeHtml((v.after || "Not generated (rejected)").substring(0, 200))}</span></div>
-        <div style="font-size:12px;color:var(--text-secondary);margin-top:6px">${escapeHtml(v.page_url || "")} · ${v.generated_by || ""}</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:6px">${linkify(v.page_url || "", 80)} · ${v.generated_by || ""}</div>
       </div>
     `).join("");
   } catch (err) {
@@ -1108,7 +1168,7 @@ async function loadReport(jobId) {
       ${bl.backlinks !== undefined ? `<div class="stat-card"><div class="stat-value">${bl.backlinks}</div><div class="stat-label">Backlinks</div></div>` : ""}
       ${bl.referring_domains !== undefined ? `<div class="stat-card"><div class="stat-value">${bl.referring_domains}</div><div class="stat-label">Referring Domains</div></div>` : ""}
       ${bl.rank !== undefined ? `<div class="stat-card"><div class="stat-value">${bl.rank}</div><div class="stat-label">Domain Rank</div></div>` : ""}
-      ${ov.estimated_organic_traffic !== undefined ? `<div class="stat-card"><div class="stat-value">${ov.estimated_organic_traffic}</div><div class="stat-label">Organic Traffic</div></div>` : ""}
+      ${ov.estimated_organic_traffic !== undefined && ov.estimated_organic_traffic !== null ? `<div class="stat-card"><div class="stat-value">${ov.estimated_organic_traffic}</div><div class="stat-label">Organic Traffic</div></div>` : ""}
     </div>` : ""}
     ${Object.keys(report.page_type_breakdown || {}).length ? `
     <h4 style="margin:20px 0 10px">Page Architecture (${report.total_pages} pages)</h4>
@@ -1128,7 +1188,7 @@ async function loadReport(jobId) {
           <td>${f.target_type}</td>
           <td>${f.depth} hop(s)</td>
           <td>${f.flow_count}</td>
-          <td class="page-url-cell" title="${f.target_url}">${f.target_url}</td>
+          <td class="page-url-cell" title="${f.target_url}">${linkify(f.target_url, 70)}</td>
         </tr>`).join("")}
       </tbody>
     </table>` : ""}
@@ -1422,12 +1482,12 @@ function renderQuality(dup, sd, perf, geo, orphans, geoReadiness, decay) {
 
   html += qualitySection("Orphan Pages", orphans
     ? `<div class="insights-label">Pages with no internal links pointing to them: ${orphans.orphan_pages ?? 0}</div>
-       ${(orphans.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${escapeHtml(p.page_url)}${(p.suggested_link_sources || []).length ? `<div style="margin-left:12px;font-size:12px">↳ link from: ${p.suggested_link_sources.map(s => escapeHtml(s)).join(", ")}</div>` : ""}</div>`).join("")}`
+       ${(orphans.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${linkify(p.page_url, 70)}${(p.suggested_link_sources || []).length ? `<div style="margin-left:12px;font-size:12px">↳ link from: ${p.suggested_link_sources.map(s => linkify(s, 50)).join(", ")}</div>` : ""}</div>`).join("")}`
     : '<div class="insights-label">Not run for this job yet.</div>');
 
   html += qualitySection("Content Decay", decay && decay.pages_with_last_modified > 0
     ? `<div class="insights-label">Pages with a Last-Modified header: ${decay.pages_with_last_modified} · stale (>${decay.stale_after_days} days): <strong>${decay.stale_pages}</strong></div>
-       ${(decay.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${escapeHtml(p.page_url)} — ${p.stale_days} days old</div>`).join("")}`
+       ${(decay.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${linkify(p.page_url, 70)} — ${p.stale_days} days old</div>`).join("")}`
     : '<div class="insights-label">Not available (site does not send Last-Modified headers, or not run).</div>');
 
   return html;
@@ -1655,11 +1715,7 @@ function renderCompetitorGaps(data, isSingle) {
 }
 
 function renderCompetitorStatus(rows) {
-  const resultsEl = document.getElementById("competitor-gap-results");
-  const pending = rows.filter(r => ["queued", "running"].includes(r.status));
-  if (!pending.length) return false;
-  resultsEl.innerHTML = pending.map(c => `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">${c.status === "queued" ? "Queued for full-page crawl..." : "Analyzing..."}</div></div>`).join("");
-  return true;
+  return rows.some(r => ["queued", "running"].includes(r.status));
 }
 
 async function loadCompetitors(jobId) {
@@ -1672,7 +1728,7 @@ async function loadCompetitors(jobId) {
       return;
     }
     renderCompetitorGaps(data, false);
-    if (renderCompetitorStatus(data.results)) {
+    if (data.results && renderCompetitorStatus(data.results)) {
       setTimeout(() => loadCompetitors(jobId), 4000);
     }
   } catch (err) {
@@ -1831,7 +1887,7 @@ async function loadSites() {
           <input type="checkbox" data-job="${s.job_id}" ${selectedSiteIds.has(s.job_id) ? "checked" : ""} ${s.archived ? "disabled" : ""}>
           <div>
             <div class="site-domain">${escapeHtml(s.domain)}</div>
-            <div class="site-url">${escapeHtml(s.url)}</div>
+            <div class="site-url">${linkify(s.url, 80)}</div>
             <div class="site-status status-${s.status}">${s.status}${s.health_grade ? ` · Health ${s.health_grade}` : ""}${s.archived ? " · archived" : ""}</div>
           </div>
         </label>
@@ -1992,7 +2048,7 @@ async function loadSchedules() {
       <div class="schedule-card">
         <div>
           <div class="schedule-domain">${escapeHtml(s.domain)}</div>
-          <div class="site-url">${escapeHtml(s.url)}</div>
+          <div class="site-url">${linkify(s.url, 80)}</div>
           <div class="site-status ${s.enabled ? "status-completed" : ""}" style="margin-top:6px">${s.enabled ? "Enabled" : "Disabled"}${s.kind === "keyword_check" ? " · keyword re-check" : ""}</div>
         </div>
         <div class="schedule-meta">
@@ -2170,6 +2226,21 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function linkify(url, maxLen) {
+  const u = url || "";
+  if (!u) return "-";
+  const safe = escapeHtml(u);
+  const label = maxLen && u.length > maxLen ? escapeHtml(u.substring(0, maxLen)) + "…" : safe;
+  return `<a href="${safe}" target="_blank" rel="noopener noreferrer" title="${safe}">${label}</a>`;
+}
+
+function linkifyText(text, maxLen) {
+  const raw = text || "";
+  let label = raw;
+  if (maxLen && raw.length > maxLen) label = raw.substring(0, maxLen) + "…";
+  return escapeHtml(label).replace(/(https?:\/\/[^\s<>"']+)/g, m => `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
 }
 
 const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "competitors", "quality", "schedules", "logs"]);
