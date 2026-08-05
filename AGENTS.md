@@ -10,12 +10,48 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: end of "Complete audit report" round)
+## Status (last update: end of "Complete audit report" round; competitor-gap round in progress)
 - All rounds DELIVERED. Latest commit `bf7aac9` pushed: complete-audit round
   (exec summary + sitemap/click-depth/HTTPS/redirects/mobile + E-E-A-T/extractability
   + CWV field-split + cannibalization + AI/local-SEO readiness + UI + tests).
-- pytest: 112/112 (backend/tests/, incl. new test_audit_round.py),
+- pytest: 126/126 (112 + 14 new in test_competitor_audit.py),
   smoke: 80/80 (scripts/smoke_test.py) on books.toscrape.
+- Competitor-gap round (IN PROGRESS, free tools only — replaces broken
+  DataForSEO `/api/competitors/gap`; DataForSEO endpoints 404 on plan):
+  - `services/crawler.py`: `crawl_site(..., unlimited=True, seed_sitemap=True)`
+    — full-site crawl: BFS queue drain + XML sitemap seed, safety ceiling
+    `settings.competitor_crawl_max_pages` (5000); progress divides by
+    `progress_denom` (no div-by-zero).
+  - `config.py`: `competitor_crawl_max_pages=5000`,
+    `competitor_psi_all_pages=True` (PSI on every crawled page).
+  - `services/serp_api.py`: `search_keyword_full(keyword)` — feature extraction
+    (answer_box, faq, knowledge_graph, top_stories, images, reviews, ai_overview)
+    + `organic_domains`; spend-tracked.
+  - `services/competitor_audit.py`: `audit_competitors(target_job_id, competitors)`
+    — per competitor: ephemeral analysis_jobs doc (flagged `competitor_job`,
+    excluded from Sites list) → unlimited sitemap-seeded crawl → analyze_pages /
+    check_links / compute_site_health / fetch_performance(every page) /
+    audit_structured_data / keyword extract → 8-gap diff vs stored target
+    baseline (keyword, content, backlink, technical, schema, on-page, UX,
+    SERP-features; SERP API with crawl-only fallback when key absent) →
+    upsert into `competitor_gap_analyses` keyed (target_job_id, competitor) →
+    ephemeral job + its collections deleted.
+  - Routes `routes/competitors.py`: `POST /api/competitors/{job_id}/analyze`
+    (queues `competitor_audit` worker task; `/gap` kept as alias),
+    `GET /api/competitors/{job_id}` (list w/ status),
+    `GET /api/competitors/{job_id}/{competitor}` (detail). Docs strip `_id`.
+  - Worker: `competitor_audit` task in worker.py + `run_competitor_pipeline`
+    in routes/analysis.py (marks stragglers error on failure).
+  - `routes/sites.py`: hard-delete cascades `competitor_gap_analyses` +
+    target-linked rows + ephemeral competitor jobs; `list_sites` excludes
+    `competitor_job` docs.
+  - Frontend: new Competitors tab (index.html + app.js) — analyze form,
+    4s polling while queued/running, per-competitor cards (gap stat grid,
+    keyword/content/backlink/schema/SERP-feature lists, technical/UX delta
+    grids); old DataForSEO widget removed from SEO Insights; tab registered
+    in VALID_TABS + switchTab loaders.
+  - Live-checked: analyze enqueue → worker crawl running; list endpoint OK;
+    sites list unaffected by ephemeral job.
 - Complete-audit round (offline heuristics only; no new paid APIs):
   - `GET /api/exec/{job_id}` + `POST /api/exec/{job_id}` — impact-ranked exec
     summary: top_issues/quick_wins/long_term, per-issue effort+next_step

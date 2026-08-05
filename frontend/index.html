@@ -64,6 +64,7 @@
         <button class="tab" data-tab="report">Report</button>
         <button class="tab" data-tab="analytics">Analytics</button>
         <button class="tab" data-tab="seo-insights">SEO Insights</button>
+        <button class="tab" data-tab="competitors">Competitors</button>
         <button class="tab" data-tab="quality">Quality</button>
         <button class="tab" data-tab="schedules">Schedules</button>
         <button class="tab" data-tab="logs">Alerts</button>
@@ -218,14 +219,17 @@
             <button id="serp-search-btn" class="btn-secondary">Search</button>
           </div>
         </div>
-        <div id="insights-competitors" class="insights-section">
-          <h3>Competitor Gap Analysis</h3>
-          <div class="serp-search-form" style="display:flex;gap:8px">
+      </div>
+      <div class="tab-content hidden" id="tab-competitors">
+        <p class="section-desc">Crawl every page of a competitor and diff 8 gap dimensions against this site: keyword, content, backlink, technical, schema, on-page, UX, and SERP features.</p>
+        <div class="insights-controls">
+          <form id="competitor-form" class="serp-search-form" style="display:flex;gap:8px;flex:1">
             <input type="text" id="competitor-input" placeholder="competitor1.com, competitor2.com" style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
-            <button id="competitor-gap-btn" class="btn-secondary">Analyze</button>
-          </div>
-          <div id="competitor-gap-results" class="insights-card" style="margin-top:10px"></div>
+            <button type="submit" id="competitor-gap-btn" class="btn-secondary">Analyze</button>
+          </form>
+          <button id="competitor-refresh-btn" class="btn-secondary">Refresh</button>
         </div>
+        <div id="competitor-gap-results" style="margin-top:12px"></div>
       </div>
       <div class="tab-content hidden" id="tab-schedules">
         <p class="section-desc">Schedule recurring crawls. Each run creates a new analysis job you can open from the Sites tab.</p>

@@ -101,6 +101,7 @@ async def compare_changes(job_id: str):
 async def list_sites(include_archived: bool = Query(False)):
     db = get_db()
     query = {} if include_archived else {"deleted": {"$ne": True}}
+    query["competitor_job"] = {"$ne": True}
     cursor = db.analysis_jobs.find(query).sort("created_at", -1)
     jobs = await cursor.to_list(length=200)
     sites = []
@@ -158,10 +159,21 @@ async def hard_delete_site(job_id: str):
         "page_performance", "page_performance_summaries", "user_flows",
         "dummy_sites", "site_comparisons", "keyword_tracking",
         "keyword_tracking_summaries", "audit_logs", "api_usage", "embeddings",
+        "competitor_gap_analyses",
     ]
     deleted = {}
     for coll in collections:
         deleted[coll] = (await db[coll].delete_many({"job_id": job_id})).deleted_count
+    for coll in collections:
+        deleted[f"{coll}(target)"] = (await db[coll].delete_many({"target_job_id": job_id})).deleted_count
+    comp_jobs = await db.analysis_jobs.find({"target_job_id": job_id}).to_list(length=1000)
+    for cj in comp_jobs:
+        for coll in collections:
+            try:
+                await db[coll].delete_many({"job_id": cj["_id"]})
+            except Exception:
+                pass
+    deleted["competitor_jobs"] = len(comp_jobs)
     deleted["analysis_jobs"] = (await db.analysis_jobs.delete_one({"_id": job_id})).deleted_count
     await db.crawl_schedules.update_many(
         {}, {"$pull": {"history": {"job_id": job_id}}},

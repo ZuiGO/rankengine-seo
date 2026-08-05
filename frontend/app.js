@@ -93,6 +93,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "analytics") loadAnalytics(currentJobId);
       if (currentTab === "chat") initChat();
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
+      if (currentTab === "competitors") loadCompetitors(currentJobId);
       if (currentTab === "quality") loadQuality(currentJobId);
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
@@ -1600,7 +1601,87 @@ function renderSerp(rankings, error, source) {
   el.innerHTML = html;
 }
 
-document.getElementById("competitor-gap-btn")?.addEventListener("click", async () => {
+function renderCompetitorGaps(data, isSingle) {
+  const resultsEl = document.getElementById("competitor-gap-results");
+  if (!data || !data.results || !data.results.length) {
+    resultsEl.innerHTML = '<div class="insights-card">No competitor analyses yet. Enter competitor domains and click Analyze.</div>';
+    return;
+  }
+  resultsEl.innerHTML = data.results.map(c => {
+    const status = c.status || "queued";
+    if (status === "queued") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Queued for full-page crawl...</div></div>`;
+    if (status === "running") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div></div>`;
+    if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div></div>`;
+
+    const kwGaps = (c.keyword_gap && c.keyword_gap.gaps || []).length;
+    const contentGaps = c.content_gap ? c.content_gap.missing_count : 0;
+    const blGaps = (c.backlink_gap && c.backlink_gap.gaps || []).length;
+    const schemaGaps = (c.schema_gap && c.schema_gap.missing_from_target || []).length;
+    const featureGaps = Object.keys(c.serp_features_gap && c.serp_features_gap.comp_only || {}).length;
+
+    const gapStats = [
+      ["Keyword", kwGaps], ["Content", contentGaps], ["Backlink", blGaps],
+      ["Schema", schemaGaps], ["SERP Features", featureGaps],
+    ].map(([label, n]) => `<div class="insights-card"><div class="insights-label">${label} Gaps</div><div class="insights-value">${n}</div></div>`).join("");
+
+    const tech = c.technical_gap || {};
+    const techRows = Object.entries(tech).filter(([k]) => k !== "sitemap").map(([k, v]) => {
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
+      const d = v && v.delta !== undefined ? ` (Δ ${escapeHtml(String(v.delta))})` : "";
+      return `<div class="insights-card" style="font-size:13px"><strong>${escapeHtml(label)}</strong>${d}<div style="opacity:.8">Target: ${escapeHtml(String(v.target))} | Competitor: ${escapeHtml(String(v.competitor))}</div></div>`;
+    }).join("");
+
+    const ux = c.ux_gap || {};
+    const uxRows = Object.entries(ux).map(([k, v]) => {
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
+      const d = v && v.delta !== undefined ? ` (Δ ${escapeHtml(String(v.delta))})` : "";
+      return `<div class="insights-card" style="font-size:13px"><strong>${escapeHtml(label)}</strong>${d}<div style="opacity:.8">Target: ${escapeHtml(String(v.target))} | Competitor: ${escapeHtml(String(v.competitor))}</div></div>`;
+    }).join("");
+
+    return `<div class="insights-card" style="margin-top:10px">
+      <h4 style="display:flex;justify-content:space-between;align-items:center">${escapeHtml(c.competitor)}
+        <span class="count-label">${escapeHtml(c.pages_crawled || 0)} pages crawled</span></h4>
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:8px 0">${gapStats}</div>
+      ${kwGaps ? `<div class="insights-label">Keywords they rank for that you don't:</div><div style="font-size:13px;margin-top:4px">${c.keyword_gap.gaps.slice(0, 15).map(k => `• ${escapeHtml(k)}`).join(" ")}</div>` : ""}
+      ${contentGaps ? `<div class="insights-label" style="margin-top:8px">Content they have that you don't (top ${Math.min(contentGaps, 10)}):</div><div style="font-size:13px;margin-top:4px">${c.content_gap.missing.slice(0, 10).map(m => `• <a href="${escapeHtml(m.url)}" target="_blank" rel="noopener">${escapeHtml(m.title)}</a>`).join("<br>")}</div>` : ""}
+      ${blGaps ? `<div class="insights-label" style="margin-top:8px">Backlink sources they have that you don't (top 20):</div><div style="font-size:13px;margin-top:4px">${c.backlink_gap.gaps.map(d => `• ${escapeHtml(d)}`).join(" ")}</div>` : ""}
+      ${schemaGaps ? `<div class="insights-label" style="margin-top:8px">Schema types on their pages missing from yours:</div><div style="font-size:13px;margin-top:4px">${c.schema_gap.missing_from_target.map(t => `• ${escapeHtml(t)}`).join(" ")}</div>` : ""}
+      ${featureGaps ? `<div class="insights-label" style="margin-top:8px">SERP features they appear in that you don't:</div><div style="font-size:13px;margin-top:4px">${Object.entries(c.serp_features_gap.comp_only).map(([kw, feats]) => `${escapeHtml(kw)} → ${escapeHtml(feats.join(", "))}`).join("<br>")}</div>` : ""}
+      <div class="insights-label" style="margin-top:10px">Technical / On-page / UX deltas (competitor − target)</div>
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:8px 0">${techRows}</div>
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:8px 0">${uxRows}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderCompetitorStatus(rows) {
+  const resultsEl = document.getElementById("competitor-gap-results");
+  const pending = rows.filter(r => ["queued", "running"].includes(r.status));
+  if (!pending.length) return false;
+  resultsEl.innerHTML = pending.map(c => `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">${c.status === "queued" ? "Queued for full-page crawl..." : "Analyzing..."}</div></div>`).join("");
+  return true;
+}
+
+async function loadCompetitors(jobId) {
+  const resultsEl = document.getElementById("competitor-gap-results");
+  try {
+    const resp = await fetch(`${API_BASE}/competitors/${jobId}`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      resultsEl.innerHTML = `<div class="insights-error">Error: ${escapeHtml(data.detail || resp.status)}</div>`;
+      return;
+    }
+    renderCompetitorGaps(data, false);
+    if (renderCompetitorStatus(data.results)) {
+      setTimeout(() => loadCompetitors(jobId), 4000);
+    }
+  } catch (err) {
+    resultsEl.innerHTML = `<div class="insights-error">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+document.getElementById("competitor-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
   const btn = document.getElementById("competitor-gap-btn");
   const input = document.getElementById("competitor-input");
   const resultsEl = document.getElementById("competitor-gap-results");
@@ -1612,9 +1693,9 @@ document.getElementById("competitor-gap-btn")?.addEventListener("click", async (
   }
   btn.disabled = true;
   btn.textContent = "Analyzing...";
-  resultsEl.innerHTML = '<div class="insights-label">Fetching competitor keyword and backlink data (DataForSEO)...</div>';
+  resultsEl.innerHTML = '<div class="insights-label">Crawling every page of each competitor (free tools: Playwright crawl, PSI, SERP API)...</div>';
   try {
-    const resp = await fetch(`${API_BASE}/competitors/gap`, {
+    const resp = await fetch(`${API_BASE}/competitors/${currentJobId}/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ job_id: currentJobId, competitors }),
@@ -1622,25 +1703,9 @@ document.getElementById("competitor-gap-btn")?.addEventListener("click", async (
     const data = await resp.json();
     if (!resp.ok) {
       resultsEl.innerHTML = `<div class="insights-label">Error: ${escapeHtml(data.detail || resp.status)}</div>`;
-    } else if (data.error) {
-      resultsEl.innerHTML = insightErrorHtml(data.error) + (data.hint ? `<div class="insights-card">${escapeHtml(data.hint)}</div>` : "");
     } else {
-      resultsEl.innerHTML = data.competitors.map(c => {
-        const kwGaps = (c.keyword_gaps || []).length;
-        const blGaps = (c.backlink_gaps || []).length;
-        return `<div class="insights-card" style="margin-top:10px">
-          <h4>${escapeHtml(c.competitor)} ${c.error ? `<span class="count-label">(${escapeHtml(c.error)})</span>` : ""}</h4>
-          ${c.error ? "" : `
-          <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:8px 0">
-            <div class="insights-card"><div class="insights-label">Keyword Overlap</div><div class="insights-value">${c.keyword_overlap}</div></div>
-            <div class="insights-card"><div class="insights-label">Keyword Gaps</div><div class="insights-value">${kwGaps}</div></div>
-            <div class="insights-card"><div class="insights-label">Shared Backlink Sources</div><div class="insights-value">${c.shared_backlinks}</div></div>
-            <div class="insights-card"><div class="insights-label">Backlink Gaps</div><div class="insights-value">${blGaps}</div></div>
-          </div>
-          ${kwGaps ? `<div class="insights-label">Keywords they rank for that you don't (top 20):</div><div style="font-size:13px;margin-top:4px">${c.keyword_gaps.map(k => `• ${escapeHtml(k)}`).join(" ")}</div>` : ""}
-          ${blGaps ? `<div class="insights-label" style="margin-top:8px">Backlink sources they have that you don't (top 20):</div><div style="font-size:13px;margin-top:4px">${c.backlink_gaps.map(d => `• ${escapeHtml(d)}`).join(" ")}</div>` : ""}`}
-        </div>`;
-      }).join("");
+      showToast("Competitor analysis queued");
+      loadCompetitors(currentJobId);
     }
   } catch (err) {
     resultsEl.innerHTML = `<div class="insights-label">Error: ${escapeHtml(err.message)}</div>`;
@@ -1648,6 +1713,10 @@ document.getElementById("competitor-gap-btn")?.addEventListener("click", async (
     btn.disabled = false;
     btn.textContent = "Analyze";
   }
+});
+
+document.getElementById("competitor-refresh-btn")?.addEventListener("click", () => {
+  if (currentJobId) loadCompetitors(currentJobId);
 });
 
 document.getElementById("refresh-insights-btn")?.addEventListener("click", async () => {
@@ -2103,7 +2172,7 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "quality", "schedules", "logs"]);
+const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "competitors", "quality", "schedules", "logs"]);
 
 function parseHash() {
   const m = window.location.hash.match(/^#job\/([a-zA-Z0-9-]+)(?:\/([a-z-]+))?/);

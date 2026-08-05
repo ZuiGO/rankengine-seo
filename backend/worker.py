@@ -32,8 +32,13 @@ async def keyword_check(ctx, job_id: str):
     await check_keywords(job_id)
 
 
+async def competitor_audit(ctx, target_job_id: str, competitors: list[str]):
+    from backend.routes.analysis import run_competitor_pipeline
+    await run_competitor_pipeline(target_job_id, competitors)
+
+
 class WorkerSettings:
-    functions = [analyze_job, approve_all_batch, keyword_check]
+    functions = [analyze_job, approve_all_batch, keyword_check, competitor_audit]
     redis_settings = redis_settings()
     on_startup = startup
     on_shutdown = shutdown

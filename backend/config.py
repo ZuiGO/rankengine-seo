@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     download_concurrency: int = 6
     psi_concurrency: int = 5
     extract_workers: int = 4
+    competitor_crawl_max_pages: int = 5000
+    competitor_psi_all_pages: bool = True
     log_level: str = "INFO"
     log_dir: str = "logs"
 

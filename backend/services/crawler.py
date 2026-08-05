@@ -57,11 +57,21 @@ async def _goto_polite(page, url: str, gate: asyncio.Lock, delay: float, timeout
     return resp
 
 
-async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurrency: int = 5):
+async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None, concurrency: int = 5, seed_sitemap: bool = False, unlimited: bool = False):
     db = get_db()
     target_url = normalize_url(target_url) or target_url
     parsed = urlparse(target_url)
     base_domain = parsed.netloc.lower()
+
+    if unlimited:
+        ceiling = settings.competitor_crawl_max_pages
+        progress_denom = ceiling
+    elif max_pages is None:
+        ceiling = settings.crawl_max_pages
+        progress_denom = settings.crawl_max_pages
+    else:
+        ceiling = max_pages
+        progress_denom = max_pages
 
     visited = set()
     queue = [target_url]
@@ -76,11 +86,38 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
     gate = asyncio.Lock()
     logger.info("Crawl politeness job=%s delay=%.2fs", job_id, delay)
 
+    if seed_sitemap:
+        try:
+            from backend.services.sitemap import _robots_sitemap_urls, _fetch, _parse_sitemap_urls
+            candidates = await _robots_sitemap_urls(f"{parsed.scheme}://{parsed.netloc}")
+            candidates.append(f"{parsed.scheme}://{parsed.netloc}/sitemap.xml")
+            for cand in candidates:
+                text = await _fetch(cand)
+                if not text:
+                    continue
+                urls = await _parse_sitemap_urls(text)
+                if not urls:
+                    continue
+                for u in urls:
+                    norm = normalize_url(u)
+                    if not norm:
+                        continue
+                    if urlparse(norm).netloc.lower() != base_domain:
+                        continue
+                    if norm not in visited and norm not in depth_map:
+                        depth_map.setdefault(norm, depth_map.get(target_url, 0) + 1)
+                        if norm not in queue:
+                            queue.append(norm)
+                logger.info("Sitemap seed job=%s added=%s", job_id, len(urls))
+                break
+        except Exception as e:
+            logger.warning("Sitemap seeding failed job=%s: %s", job_id, e)
+
     async def update_progress(crawled: int, msg: str):
         await db.analysis_jobs.update_one(
             {"_id": job_id},
             {"$set": {
-                "progress": int((crawled / max_pages) * 100),
+                "progress": int((crawled / progress_denom) * 100) if progress_denom else 0,
                 "progress_message": msg,
             }}
         )
@@ -224,8 +261,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
         browser = await pw.chromium.launch(headless=True)
 
         crawled = 0
-        while queue and crawled < max_pages:
-            batch_size = min(concurrency, max_pages - crawled)
+        while queue and crawled < ceiling:
+            batch_size = min(concurrency, ceiling - crawled)
             batch = queue[:batch_size]
             queue[:] = queue[concurrency:]
 

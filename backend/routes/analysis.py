@@ -57,6 +57,21 @@ async def start_analysis(req: AnalyzeRequest):
     return {"job_id": job_id, "status": "queued", "url": url, "max_pages": req.max_pages}
 
 
+async def run_competitor_pipeline(target_job_id: str, competitors: list[str]):
+    from backend.services.competitor_audit import audit_competitors
+
+    db = get_db()
+    logger.info("Competitor audit started target=%s competitors=%s", target_job_id, competitors)
+    try:
+        await audit_competitors(target_job_id, competitors)
+    except Exception as e:
+        logger.error("Competitor audit failed target=%s: %s", target_job_id, e)
+        await db.competitor_gap_analyses.update_many(
+            {"target_job_id": target_job_id, "status": {"$in": ["queued", "running"]}},
+            {"$set": {"status": "error", "errors": [str(e)]}},
+        )
+
+
 async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
     db = get_db()
     logger.info("Analysis started job=%s url=%s max_pages=%s", job_id, url, max_pages)
