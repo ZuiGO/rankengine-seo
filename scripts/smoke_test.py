@@ -65,6 +65,24 @@ async def main(host: str, url: str):
         report("summary phase-1 keys", all(k in ssum for k in ("cwv_pages", "duplicate_pages", "canonical_issues", "structured_data_valid", "geo_off_topic_pages", "orphan_pages")),
                f"cwv={ssum.get('cwv_pages')} dup={ssum.get('duplicate_pages')} canon={ssum.get('canonical_issues')} sd={ssum.get('structured_data_valid')} geo={ssum.get('geo_off_topic_pages')} orphans={ssum.get('orphan_pages')}")
 
+        # 2a. Executive summary + new audit endpoints (complete-audit round)
+        exec_sum = (await client.get(f"/api/exec/{job_id}")).json()
+        report("exec summary present", "top_issues" in exec_sum and "quick_wins" in exec_sum and "score" in exec_sum,
+               f"score={exec_sum.get('score')} grade={exec_sum.get('grade')} direction={exec_sum.get('direction')} top={len(exec_sum.get('top_issues') or [])}")
+        sitemap = (await client.get(f"/api/quality/{job_id}/sitemap")).json()
+        report("sitemap audit", "sitemap_found" in sitemap and "url_count" in sitemap,
+               f"found={sitemap.get('sitemap_found')} valid={sitemap.get('sitemap_valid')} urls={sitemap.get('url_count')}")
+        ai_vis = (await client.get(f"/api/quality/{job_id}/ai-visibility")).json()
+        report("ai visibility", "score" in ai_vis and "blocked_ai_agents" in ai_vis,
+               f"score={ai_vis.get('score')} blocked={ai_vis.get('blocked_ai_agents')}")
+        local_seo = (await client.get(f"/api/quality/{job_id}/local-seo")).json()
+        report("local seo", "score" in local_seo and "local_business_schema" in local_seo,
+               f"score={local_seo.get('score')} nap={local_seo.get('nap_schema_present')}")
+        can = (await client.get(f"/api/quality/{job_id}/cannibalization")).json()
+        report("cannibalization check", "groups" in can, f"groups={can.get('groups')} kw={can.get('cannibalized_keywords')[:2]}")
+        report("new summary keys", "sitemap" in ssum and "ai_visibility" in ssum and "local_seo" in ssum,
+               f"sitemap={bool(ssum.get('sitemap'))} ai={bool(ssum.get('ai_visibility'))} local={bool(ssum.get('local_seo'))} cannib_groups={ssum.get('cannibalization_groups')}")
+
         # 3. Pages
         pages = (await client.get(f"/api/pages/{job_id}?limit=500")).json()
         report("pages endpoint", pages.get("total", 0) > 0, f"total={pages.get('total')}")
@@ -95,7 +113,8 @@ async def main(host: str, url: str):
         # 7. Actions + approve
         actions = (await client.get(f"/api/actions/{job_id}")).json()
         report("actions endpoint", actions.get("total", 0) > 0, f"total={actions.get('total')}")
-        action_id = actions["actions"][0]["id"]
+        applyable = [a for a in actions.get("actions", []) if a.get("content_type") in ("image", "text", "pdf", "doc", "video", "audio")]
+        action_id = (applyable or actions["actions"])[0]["id"]
         approv = (await client.post(f"/api/actions/{action_id}/approve", json={"status": "approved"})).json()
         version = approv.get("version") or {}
         report("action approve + version", bool(version), f"field={version.get('field')} qa={version.get('qa')}")

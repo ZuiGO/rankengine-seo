@@ -144,7 +144,7 @@ class ApproveRequest(BaseModel):
 
 
 @router.get("/{job_id}")
-async def list_actions(job_id: str, status_filter: str | None = None, severity: str | None = None):
+async def list_actions(job_id: str, status_filter: str | None = None, severity: str | None = None, sort: str | None = None):
     db = get_db()
     query = {"job_id": job_id}
     if status_filter:
@@ -152,7 +152,10 @@ async def list_actions(job_id: str, status_filter: str | None = None, severity: 
     if severity:
         query["impact_on_ranking"] = severity
 
-    cursor = db.action_items.find(query).sort("content_type", 1)
+    sort_spec = ("content_type", 1)
+    if sort == "impact":
+        sort_spec = ("impact_on_ranking", 1)
+    cursor = db.action_items.find(query).sort(*sort_spec)
     items = await cursor.to_list(length=1000)
     for item in items:
         item["id"] = str(item.pop("_id"))

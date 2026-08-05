@@ -68,6 +68,50 @@ async def orphans(job_id: str):
     return doc
 
 
+@router.get("/{job_id}/sitemap")
+async def sitemap(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.sitemap_audits.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "Sitemap audit not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.get("/{job_id}/ai-visibility")
+async def ai_visibility(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.ai_visibility_summaries.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "AI visibility check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.get("/{job_id}/local-seo")
+async def local_seo(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.local_seo_summaries.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "Local SEO check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.get("/{job_id}/cannibalization")
+async def cannibalization(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.cannibalization_summaries.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "Cannibalization check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
 @router.get("/{job_id}/decay")
 async def content_decay(job_id: str, months: int = 6):
     await _ensure_job(job_id)

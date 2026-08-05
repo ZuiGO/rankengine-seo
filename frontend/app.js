@@ -162,6 +162,7 @@ async function showResults(jobId, opts = {}) {
   loadLinks(jobId);
   loadReport(jobId);
   initChat();
+  loadExecSummary(jobId);
   loadSiteHealth(jobId);
   loadTracking(jobId);
   loadTrends(jobId);
@@ -178,12 +179,24 @@ function loadOverview(summary) {
   const geoCard = geo.status
     ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${geo.blocked_ai_crawlers?.length ? "⛔ " + escapeHtml(geo.blocked_ai_crawlers.join(", ")) : "✅ AI crawlers OK"}</div><div class="stat-label">AI Search Readiness${geo.score !== undefined && geo.score !== null ? " (" + geo.score + "/100)" : ""}</div></div>`
     : "";
+  const ai = summary.ai_visibility || {};
+  const aiCard = ai.score !== undefined && ai.score !== null
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${ai.score}/100</div><div class="stat-label">AI Visibility${ai.blocked_ai_agents?.length ? " ⛔ blocked" : ""}${ai.llms_txt_present ? " · llms.txt" : ""}</div></div>`
+    : "";
+  const local = summary.local_seo || {};
+  const localCard = local.score !== undefined && local.score !== null
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${local.score}/100</div><div class="stat-label">Local SEO${local.local_business_schema ? " ✅" : ""}</div></div>`
+    : "";
+  const cannib = summary.cannibalization_groups || 0;
+  const cannibCard = cannib
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${cannib}</div><div class="stat-label">Cannibalized Keywords</div></div>`
+    : "";
   stats.innerHTML = `
     <div class="stat-card"><div class="stat-value">${summary.total_pages}</div><div class="stat-label">Pages Crawled</div></div>
     <div class="stat-card"><div class="stat-value">${summary.total_content_items}</div><div class="stat-label">Content Items</div></div>
     <div class="stat-card"><div class="stat-value">${summary.total_action_items}</div><div class="stat-label">SEO Action Items</div></div>
     <div class="stat-card"><div class="stat-value">${summary.summary?.total_links || 0}</div><div class="stat-label">Total Links Found</div></div>
-    ${geoCard}
+    ${geoCard}${aiCard}${localCard}${cannibCard}
   `;
 
   const breakdown = document.getElementById("content-breakdown");
@@ -202,6 +215,46 @@ function loadOverview(summary) {
     flows.innerHTML = `
       <div class="stat-card"><div class="stat-value">${summary.total_user_flows || 0}</div><div class="stat-label">User Flows Identified</div></div>
     `;
+  }
+}
+
+async function loadExecSummary(jobId) {
+  const el = document.getElementById("overview-exec");
+  if (!el) return;
+  try {
+    const resp = await fetch(`${API_BASE}/exec/${jobId}`);
+    if (!resp.ok) {
+      el.innerHTML = "";
+      return;
+    }
+    const s = await resp.json();
+    const dirColor = s.direction === "improved" ? "#16a34a" : s.direction === "declined" ? "#dc2626" : "#6b7280";
+    const dirArrow = s.direction === "improved" ? "▲" : s.direction === "declined" ? "▼" : "■";
+    const badge = it => `<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:${it.impact === "high" ? "#fee2e2" : it.impact === "medium" ? "#fef3c7" : "#dcfce7"};color:${it.impact === "high" ? "#b91c1c" : it.impact === "medium" ? "#b45309" : "#15803d"}">${it.impact}</span>`;
+    const effortBadge = it => `<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#e0e7ff;color:#4338ca">${it.effort} effort</span>`;
+    const row = it => `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <strong>${escapeHtml(it.title)}</strong> ${badge(it)} ${effortBadge(it)}
+          <span style="margin-left:auto;color:var(--text-secondary);font-size:12px">${escapeHtml(it.drive)}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">→ ${escapeHtml(it.next_step)}</div>
+      </div>`;
+    const section = (title, items) => items.length ? `
+      <div style="margin-bottom:12px"><strong style="font-size:13px;color:var(--text-secondary)">${title}</strong>
+      ${items.map(row).join("")}</div>` : "";
+    el.innerHTML = `
+      <h3>Executive Summary <span class="count-label">(score ${s.score ?? "N/A"}${s.previous_score != null ? `, previous ${s.previous_score}` : ""} ${dirArrow} ${s.direction})</span></h3>
+      ${section("Priority issues", s.top_issues || [])}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">
+        <div class="insights-card" style="min-width:0">${section("Quick wins", s.quick_wins || []) || '<div style="font-size:13px;color:var(--text-secondary)">No quick wins</div>'}</div>
+        <div class="insights-card" style="min-width:0">${section("Long-term work", s.long_term || []) || '<div style="font-size:13px;color:var(--text-secondary)">No long-term items</div>'}</div>
+      </div>
+    `;
+    const hl = document.querySelector(".tab[data-tab='overview'] .count-label");
+    if (hl) hl.style.color = dirColor;
+  } catch (err) {
+    el.innerHTML = "";
   }
 }
 
@@ -840,9 +893,11 @@ document.getElementById("check-links-btn").addEventListener("click", async () =>
 async function loadActions(jobId) {
   const statusFilter = document.getElementById("action-status-filter").value;
   const severity = document.getElementById("action-severity-filter").value;
+  const sort = document.getElementById("action-sort-filter").value;
   const params = new URLSearchParams();
   if (statusFilter) params.set("status_filter", statusFilter);
   if (severity) params.set("severity", severity);
+  if (sort) params.set("sort", sort);
   const resp = await fetch(`${API_BASE}/actions/${jobId}?${params.toString()}`);
   const data = await resp.json();
   document.getElementById("actions-count").textContent = `${data.total} items`;
@@ -902,6 +957,10 @@ document.getElementById("action-status-filter")?.addEventListener("change", () =
 });
 
 document.getElementById("action-severity-filter")?.addEventListener("change", () => {
+  if (currentJobId) loadActions(currentJobId);
+});
+
+document.getElementById("action-sort-filter")?.addEventListener("change", () => {
   if (currentJobId) loadActions(currentJobId);
 });
 
@@ -1081,6 +1140,70 @@ async function loadReport(jobId) {
     `).join("")}
     ${report.seo_action_items.length > 10 ? `<p style="margin-top:10px;font-size:13px;color:var(--text-secondary)">...and ${report.seo_action_items.length - 10} more items</p>` : ""}
   `;
+  loadReportExtras(jobId, preview);
+}
+
+async function loadReportExtras(jobId, preview) {
+  const kv = (label, value) => `<div class="stat-card"><div class="stat-value" style="font-size:14px">${value}</div><div class="stat-label">${label}</div></div>`;
+  try {
+    const sm = await fetch(`${API_BASE}/quality/${jobId}/sitemap`);
+    if (sm.ok) {
+      const d = await sm.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">Sitemap</h4>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+          ${kv("Found", d.sitemap_found ? "✅" : "❌")}
+          ${kv("Valid", d.sitemap_valid ? "✅" : "❌")}
+          ${kv("URLs", d.url_count ?? "N/A")}
+          ${kv("Uncrawled URLs", d.uncrawled_urls_count ?? 0)}
+        </div>
+        ${d.uncrawled_urls?.length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Sample: ${d.uncrawled_urls.slice(0, 5).map(escapeHtml).join(", ")}</p>` : ""}`);
+    }
+  } catch (_) {}
+  try {
+    const ai = await fetch(`${API_BASE}/quality/${jobId}/ai-visibility`);
+    if (ai.ok) {
+      const d = await ai.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">AI-Search Visibility</h4>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+          ${kv("Score", (d.score ?? "N/A") + "/100")}
+          ${kv("llms.txt", d.llms_txt_present ? "✅" : "❌")}
+          ${kv("Blocked AI agents", d.blocked_ai_agents?.length ? d.blocked_ai_agents.join(", ") : "none")}
+          ${kv("Pages w/ structured data", d.structured_data_pages + "/" + d.total_pages)}
+        </div>`);
+    }
+  } catch (_) {}
+  try {
+    const lo = await fetch(`${API_BASE}/quality/${jobId}/local-seo`);
+    if (lo.ok) {
+      const d = await lo.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">Local SEO Readiness</h4>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+          ${kv("Score", (d.score ?? "N/A") + "/100")}
+          ${kv("LocalBusiness schema", d.local_business_schema ? "✅" : "❌")}
+          ${kv("NAP schema", d.nap_schema_present ? "✅" : "❌")}
+          ${kv("Contact page", d.contact_page_present ? "✅" : "❌")}
+        </div>`);
+    }
+  } catch (_) {}
+  try {
+    const ca = await fetch(`${API_BASE}/quality/${jobId}/cannibalization`);
+    if (ca.ok) {
+      const d = await ca.json();
+      if (d.groups) {
+        preview.insertAdjacentHTML("beforeend", `
+          <h4 style="margin:20px 0 10px">Keyword Cannibalization (${d.groups} keyword groups)</h4>
+          <table class="data-table">
+            <thead><tr><th>Keyword</th><th>Competing Pages</th></tr></thead>
+            <tbody>${d.cannibalized_keywords.slice(0, 10).map(kw => `
+              <tr><td>${escapeHtml(kw)}</td><td>${d.affected_pages || "N/A"}</td></tr>`).join("")}
+            </tbody>
+          </table>`);
+      }
+    }
+  } catch (_) {}
 }
 
 // Chat

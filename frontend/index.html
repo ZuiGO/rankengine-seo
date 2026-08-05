@@ -73,6 +73,7 @@
         <div class="stats-grid" id="overview-stats"></div>
         <div class="content-breakdown" id="content-breakdown"></div>
         <div class="stats-grid" id="overview-flows" style="margin-top:16px;grid-template-columns:repeat(1,1fr)"></div>
+        <div id="overview-exec" style="margin-top:16px"></div>
         <div id="overview-health" style="margin-top:16px"></div>
         <div id="overview-tracking" style="margin-top:16px"></div>
         <div id="overview-trends" style="margin-top:16px"></div>
@@ -148,6 +149,10 @@
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
+          </select>
+          <select id="action-sort-filter" class="filter-select">
+            <option value="">Sort: Type</option>
+            <option value="impact">Sort: Impact</option>
           </select>
           <button id="reject-filtered-btn" class="btn-reject" style="padding:6px 14px;font-size:13px">Reject Filtered</button>
           <button id="approve-all-btn" class="btn-approve" style="padding:6px 14px;font-size:13px">Approve All</button>

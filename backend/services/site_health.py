@@ -108,6 +108,14 @@ async def compute_site_health(job_id: str) -> dict:
         score -= min(10, round(2 * metrics["thin_pages"]))
         if cwv_scores:
             score -= round(15 * (100 - avg_cwv) / 100)
+        https_pages = sum(1 for p in pages if p.get("https_entry"))
+        metrics["https_entry_pages"] = https_pages
+        score -= n - https_pages
+        deep_count = sum(1 for p in pages if (p.get("click_depth") or 0) > 3)
+        metrics["deep_click_depth_pages"] = deep_count
+        mobile_friendly = sum(1 for p in pages if p.get("mobile_friendly", True))
+        metrics["mobile_friendly_pages"] = mobile_friendly
+        score -= round(2 * (n - mobile_friendly))
         score = max(0, min(100, score))
 
     pending = await db.action_items.count_documents({"job_id": job_id, "status": "pending"})
@@ -145,6 +153,60 @@ async def compute_site_health(job_id: str) -> dict:
         metrics["orphan_pages"] = orphans.get("orphan_pages", 0)
         if orphans.get("orphan_pages", 0) > 0:
             issues.append({"severity": "medium", "message": f"{orphans.get('orphan_pages')} page(s) have no internal links pointing to them (orphans)."})
+
+    sitemap_audit = await db.sitemap_audits.find_one({"job_id": job_id})
+    if sitemap_audit:
+        metrics["sitemap_found"] = sitemap_audit.get("sitemap_found", False)
+        metrics["sitemap_valid"] = sitemap_audit.get("sitemap_valid", False)
+        metrics["sitemap_uncrawled"] = sitemap_audit.get("uncrawled_urls_count", 0)
+        if not sitemap_audit.get("sitemap_found", False):
+            issues.append({"severity": "low", "message": "No XML sitemap found."})
+        elif not sitemap_audit.get("sitemap_valid", False):
+            issues.append({"severity": "medium", "message": "Sitemap found but could not be parsed."})
+        if sitemap_audit.get("uncrawled_urls_count", 0) > 0:
+            issues.append({"severity": "low", "message": f"{sitemap_audit.get('uncrawled_urls_count')} sitemap URL(s) were never crawled."})
+
+    if n:
+        deep = sum(1 for p in pages if (p.get("click_depth") or 0) > 3)
+        metrics["deep_click_depth_pages"] = deep
+        if deep > 0:
+            issues.append({"severity": "low", "message": f"{deep} page(s) are more than 3 clicks from the homepage (deep click depth)."})
+        redirected = sum(1 for p in pages if (p.get("redirect_count") or 0) >= 3)
+        metrics["long_redirect_chain_pages"] = redirected
+        if redirected > 0:
+            issues.append({"severity": "medium", "message": f"{redirected} page(s) are reached through 3+ hop redirect chains."})
+        if https_pages != n:
+            issues.append({"severity": "medium", "message": f"{n - https_pages} page(s) are linked over non-HTTPS entries (mixed content / host drift)."})
+        if mobile_friendly < n:
+            issues.append({"severity": "low", "message": f"{n - mobile_friendly} page(s) are missing a mobile viewport / zoom fix."})
+        lh_redirected = (lh or {}).get("redirected_links")
+        if lh_redirected:
+            metrics["redirected_links"] = lh_redirected
+            metrics["max_redirect_chain"] = (lh or {}).get("max_redirect_chain", 0)
+            if (lh or {}).get("max_redirect_chain", 0) >= 3:
+                issues.append({"severity": "low", "message": f"{lh_redirected} links redirect; longest chain is {lh.get('max_redirect_chain')} hops."})
+
+    ai = await db.ai_visibility_summaries.find_one({"job_id": job_id})
+    if ai:
+        metrics["ai_visibility_score"] = ai.get("score")
+        metrics["ai_blocked_agents"] = ai.get("blocked_ai_agents", [])
+        if ai.get("blocked_ai_agents"):
+            issues.append({"severity": "high", "message": f"robots.txt blocks AI crawlers: {', '.join(ai['blocked_ai_agents'][:4])} — the site is invisible to AI search."})
+        if not ai.get("llms_txt_present"):
+            issues.append({"severity": "low", "message": "No llms.txt present for LLM consumers."})
+
+    local = await db.local_seo_summaries.find_one({"job_id": job_id})
+    if local:
+        metrics["local_seo_score"] = local.get("score")
+        if local.get("score", 0) < 60:
+            missing = ", ".join(local.get("checks", [])[:3])
+            issues.append({"severity": "low", "message": f"Local-SEO signals weak ({local.get('score')}/100): {missing}"})
+
+    can = await db.cannibalization_summaries.find_one({"job_id": job_id})
+    if can:
+        metrics["cannibalization_groups"] = can.get("groups", 0)
+        if can.get("groups", 0) > 0:
+            issues.append({"severity": "high", "message": f"{can.get('groups')} keyword(s) are targeted by {can.get('affected_pages')} competing page(s) (cannibalization)."})
 
     health = {
         "job_id": job_id,

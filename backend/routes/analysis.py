@@ -141,6 +141,21 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             from backend.services.geo_readiness import check_geo_readiness
             return await check_geo_readiness(url)
 
+        async def _sitemap():
+            await _progress("Auditing sitemap...")
+            from backend.services.sitemap import audit_sitemap
+            return await audit_sitemap(job_id, url)
+
+        async def _ai_visibility():
+            await _progress("Checking AI-search visibility...")
+            from backend.services.ai_visibility import check_ai_visibility
+            return await check_ai_visibility(job_id, url)
+
+        async def _local_seo():
+            await _progress("Checking local-SEO readiness...")
+            from backend.services.local_seo import check_local_seo
+            return await check_local_seo(job_id)
+
         async def _orphans():
             await _progress("Checking industry alignment and orphan pages...")
             from backend.services.orphan_detection import detect_orphan_pages
@@ -156,6 +171,9 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             _stage("duplicate", _duplicate, fallback={}),
             _stage("structured", _structured, fallback={}),
             _stage("geo_readiness", _geo_readiness, fallback={"status": "unknown", "score": None, "robots_txt_found": False, "error": "geo readiness stage failed"}),
+            _stage("sitemap", _sitemap, fallback={}),
+            _stage("ai_visibility", _ai_visibility, fallback={}),
+            _stage("local_seo", _local_seo, fallback={}),
             _stage("orphans", _orphans, fallback={}),
         ]))
 
@@ -172,6 +190,9 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         structured_valid = sd.get("valid", 0)
         geo_readiness = w1["geo_readiness"]
         orphan_count = w1["orphans"].get("orphan_pages", 0)
+        sitemap_audit = w1["sitemap"]
+        ai_visibility = w1["ai_visibility"]
+        local_seo = w1["local_seo"]
 
         async def _action_analysis():
             from backend.services.seo_analyzer import analyze_pages
@@ -181,9 +202,15 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             from backend.services.geo_alignment import audit_geo_alignment
             return await audit_geo_alignment(job_id)
 
+        async def _cannibalization():
+            await _progress("Checking keyword cannibalization...")
+            from backend.services.cannibalization import detect_cannibalization
+            return await detect_cannibalization(job_id)
+
         w2 = dict(await asyncio.gather(*[
             _stage("action_analysis", _action_analysis, fallback=None),
             _stage("geo_alignment", _geo_alignment, fallback={}),
+            _stage("cannibalization", _cannibalization, fallback={}),
             _stage("vectors", _vectors, fallback=0),
         ]))
         vector_count = w2["vectors"]
@@ -196,6 +223,12 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         health = (await _stage("site_health", _health, fallback={}))[1]
         health_grade = health.get("grade")
+
+        try:
+            from backend.services.exec_summary import compute_exec_summary
+            await compute_exec_summary(job_id)
+        except Exception as exec_err:
+            logger.warning("Exec summary failed job=%s: %s", job_id, exec_err)
 
         await db.analysis_jobs.update_one(
             {"_id": job_id},
@@ -224,6 +257,26 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "structured_data_valid": structured_valid,
                     "geo_off_topic_pages": geo_off_topic,
                     "orphan_pages": orphan_count,
+                    "ai_visibility": {
+                        "score": ai_visibility.get("score"),
+                        "blocked_ai_agents": ai_visibility.get("blocked_ai_agents", []),
+                        "llms_txt_present": ai_visibility.get("llms_txt_present", False),
+                        "sitemap_valid": ai_visibility.get("sitemap_valid", False),
+                    },
+                    "local_seo": {
+                        "score": local_seo.get("score"),
+                        "local_business_schema": local_seo.get("local_business_schema", False),
+                        "nap_schema_present": local_seo.get("nap_schema_present", False),
+                        "contact_page_present": local_seo.get("contact_page_present", False),
+                    },
+                    "cannibalization_groups": w2.get("cannibalization", {}).get("groups", 0),
+                    "sitemap": {
+                        "found": sitemap_audit.get("sitemap_found", False),
+                        "valid": sitemap_audit.get("sitemap_valid", False),
+                        "count": sitemap_audit.get("sitemap_count", 0),
+                        "url_count": sitemap_audit.get("url_count", 0),
+                        "uncrawled_urls_count": sitemap_audit.get("uncrawled_urls_count", 0),
+                    },
                     "geo_readiness": {
                         "status": geo_readiness.get("status"),
                         "score": geo_readiness.get("score"),

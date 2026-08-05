@@ -45,6 +45,8 @@ async def _check_one(client: httpx.AsyncClient, url: str) -> dict:
         result["final_url"] = str(resp.url)
         result["status"] = classify_status(resp.status_code)
         result["content_length"] = resp.headers.get("content-length")
+        result["redirect_count"] = len(resp.history) if resp.history else 0
+        result["redirect_chain"] = [str(h.url) for h in resp.history] if resp.history else []
     except httpx.TimeoutException:
         result["status"] = "timeout"
         result["error"] = "Request timed out"
@@ -92,7 +94,8 @@ async def check_links(job_id: str) -> dict:
             except Exception as e:
                 res = {"url": unique_urls[i], "status": "error", "error": str(e)[:200],
                        "status_code": None, "final_url": unique_urls[i],
-                       "length_chars": len(unique_urls[i]), "checked_at": datetime.utcnow()}
+                       "length_chars": len(unique_urls[i]), "checked_at": datetime.utcnow(),
+                       "redirect_count": 0, "redirect_chain": []}
             res["job_id"] = job_id
             res["pages"] = sorted(page_map.get(res["url"], []))
             results.append(res)
@@ -110,6 +113,7 @@ async def check_links(job_id: str) -> dict:
         + counts.get("error", 0)
         + counts.get("blocked", 0)
     )
+    chain_lengths = [len(r.get("redirect_chain", [])) for r in results if r.get("redirect_count")]
     summary = {
         "checked": len(results),
         "total_links_scanned": len(results),
@@ -120,6 +124,8 @@ async def check_links(job_id: str) -> dict:
         "timeout": counts.get("timeout", 0),
         "error": counts.get("error", 0),
         "broken_link_count": broken_link_count,
+        "redirected_links": sum(1 for r in results if r.get("redirect_count")),
+        "max_redirect_chain": max(chain_lengths) if chain_lengths else 0,
     }
     await db.link_health_summaries.update_one(
         {"job_id": job_id},

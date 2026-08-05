@@ -65,6 +65,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
 
     visited = set()
     queue = [target_url]
+    depth_map = {target_url: 0}
     crawled_pages = []
     total_internal = 0
     total_external = 0
@@ -101,6 +102,12 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                 await page.close()
 
                 soup = BeautifulSoup(html, "lxml")
+                redirect_count = 0
+                if resp is not None:
+                    req = resp.request
+                    while req and req.redirected_from:
+                        redirect_count += 1
+                        req = req.redirected_from
 
                 title_tag = soup.find("title")
                 title = title_tag.get_text(strip=True) if title_tag else ""
@@ -186,6 +193,9 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
 
                 return {
                     "url": url,
+                    "click_depth": depth_map.get(url, 0),
+                    "redirect_count": redirect_count,
+                    "https_entry": url.lower().startswith("https"),
                     "title": title,
                     "meta_description": meta_description,
                     "page_type": page_type,
@@ -237,12 +247,15 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                     crawled_pages.append(result)
 
                     new_urls = []
+                    parent_depth = depth_map.get(result["url"], 0)
                     for link in result.get("internal_link_urls", []):
                         clean = normalize_url(link)
                         if not clean:
                             continue
                         if clean not in visited and clean not in queue:
                             new_urls.append(clean)
+                            if clean not in depth_map:
+                                depth_map[clean] = parent_depth + 1
                     queue.extend(new_urls)
 
                     page_for_db = dict(result)
@@ -278,12 +291,16 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
                         mhtml = await page.content()
                         await page.close()
                         status = resp.status if resp is not None else None
+                        soup = BeautifulSoup(mhtml, "lxml")
+                        viewport = soup.find("meta", attrs={"name": "viewport"})
+                        mobile_friendly = viewport is not None and viewport.get("content", "").lower().strip() != ""
                         await db.pages.update_one(
                             {"job_id": job_id, "url": url},
                             {"$set": {
                                 "html_mobile": mhtml[:MAX_HTML_STORED],
                                 "mobile_status_code": status,
                                 "viewport": "mobile",
+                                "mobile_friendly": mobile_friendly,
                             }},
                         )
                         async with mobile_lock:
@@ -297,12 +314,22 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int = 50, concurre
             logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)
 
     total_links = total_internal + total_external
+    depths = [p.get("click_depth", 0) for p in crawled_pages]
+    mobile_friendly_count = 0
+    mobile_friendly_cursor = db.pages.find({"job_id": job_id, "mobile_friendly": True}, {"_id": 1})
+    async for _ in mobile_friendly_cursor:
+        mobile_friendly_count += 1
     summary = {
         "total_pages": len(crawled_pages),
         "total_links": total_links,
         "total_internal_links": total_internal,
         "total_external_links": total_external,
         "mobile_pages": mobile_ok,
+        "mobile_friendly_pages": mobile_friendly_count,
+        "avg_click_depth": round(sum(depths) / len(depths), 2) if depths else 0,
+        "max_click_depth": max(depths) if depths else 0,
+        "https_pages": sum(1 for p in crawled_pages if p.get("https_entry")),
+        "redirected_pages": sum(1 for p in crawled_pages if p.get("redirect_count")),
     }
 
     return summary

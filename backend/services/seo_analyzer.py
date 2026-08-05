@@ -309,6 +309,35 @@ def run_page_checks(page: dict, ctx: dict | None = None) -> list[dict]:
             "improvement_suggestions": ["Add descriptive alt text to every image (see image-level actions)"],
             "evidence": {"images_missing_alt": missing, "image_count": total_imgs},
         })
+    eaat_map = ctx.get("eaat") or {}
+    eaat_sigs = eaat_map.get(p.get("url", "")) or {}
+    if indexable and "eaat" in ctx and eaat_sigs.get("missing_signals") and word_count >= THIN_WORDS:
+        checks.append({
+            "issue_key": "eaat_signals_missing",
+            "impact": "medium",
+            "confidence": 0.7,
+            "identified_issues": [
+                f"No E-E-A-T signals detected: {', '.join(eaat_sigs.get('missing_signals')[:4])}"
+            ],
+            "improvement_suggestions": [
+                "Add author bylines with credentials and links to author pages",
+                "Add About/Contact pages and citations or sources",
+                "Include a last-updated date to signal freshness",
+            ],
+            "evidence": {"present": eaat_sigs.get("present") or [], "missing": eaat_sigs.get("missing_signals") or []},
+        })
+    if indexable and "extractable" in ctx and not (ctx.get("extractable") or {}).get(p.get("url", "")) and word_count >= THIN_WORDS:
+        checks.append({
+            "issue_key": "no_extractable_format",
+            "impact": "low",
+            "confidence": 0.6,
+            "identified_issues": ["No FAQ/list/table/definition formatting - hard for AI engines to quote in answers"],
+            "improvement_suggestions": [
+                "Add an FAQ section or bulleted lists answering direct queries",
+                "Use tables and definition lists so answers can be extracted verbatim",
+            ],
+            "evidence": {"extractable_format": False},
+        })
     return checks
 
 
@@ -455,7 +484,24 @@ async def analyze_pages(job_id: str) -> dict:
         corpus_keywords = await extract_keywords_from_content(job_id, top_k=20)
     except Exception as k_err:
         logger.warning("Corpus keywords unavailable job=%s: %s", job_id, k_err)
-    ctx = {"meta_counts": meta_counts, "sd": sd_map, "corpus_keywords": corpus_keywords}
+
+    eaat_map = {}
+    extractable_map = {}
+    try:
+        from backend.services.content_signals import compute_page_signals
+        for p in pages:
+            signals = compute_page_signals(p.get("html") or "")
+            eaat_map[p.get("url", "")] = signals
+            extractable_map[p.get("url", "")] = signals.get("extractable_format", False)
+    except Exception as sig_err:
+        logger.warning("Page signals unavailable job=%s: %s", job_id, sig_err)
+    ctx = {
+        "meta_counts": meta_counts,
+        "sd": sd_map,
+        "corpus_keywords": corpus_keywords,
+        "eaat": eaat_map,
+        "extractable": extractable_map,
+    }
 
     weights = await _approval_weights(db)
     rank_corr = await _rank_correlation(db, domain) if domain else {}
