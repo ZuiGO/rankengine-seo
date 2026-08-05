@@ -11,7 +11,7 @@ MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
 ## Status (last update: end of "Complete audit report" round)
-- All rounds DELIVERED. Latest commit (TBD) pushed: complete-audit round
+- All rounds DELIVERED. Latest commit `bf7aac9` pushed: complete-audit round
   (exec summary + sitemap/click-depth/HTTPS/redirects/mobile + E-E-A-T/extractability
   + CWV field-split + cannibalization + AI/local-SEO readiness + UI + tests).
 - pytest: 112/112 (backend/tests/, incl. new test_audit_round.py),
