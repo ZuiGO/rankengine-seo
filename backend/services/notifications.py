@@ -65,7 +65,7 @@ async def create_github_pr(domain: str, changes: list[dict]) -> dict | None:
         for c in changes[:20]
     )
     payload = {
-        "title": f"[ZuiGO.ai] SEO patch for {domain} ({len(changes)} actions)",
+        "title": f"[ZuiGO Engine] SEO patch for {domain} ({len(changes)} actions)",
         "head": f"rankengine/{domain}",
         "base": "main",
         "body": body or "See attached patch for details.",

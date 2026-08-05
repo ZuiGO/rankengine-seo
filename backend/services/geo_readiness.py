@@ -23,7 +23,7 @@ AI_AGENTS = [
     ("Bytespider", "ByteDance"),
 ]
 
-USER_AGENT = "ZuiGO.aiBot/1.0 (+https://zuigo.ai)"
+USER_AGENT = "ZuiGO-EngineBot/1.0 (+https://zuigo.ai)"
 
 
 def _parse_robots(text: str) -> dict:

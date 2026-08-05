@@ -32,7 +32,7 @@ async def check_ai_visibility(job_id: str, target_url: str) -> dict:
         parsed = target_url.split("//")[-1].split("/")[0]
         origin = "https://" + parsed
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-            resp = await client.get(origin + "/robots.txt", headers={"User-Agent": "ZuiGO.ai/1.0 ai-visibility"})
+            resp = await client.get(origin + "/robots.txt", headers={"User-Agent": "ZuiGO-Engine/1.0 ai-visibility"})
         if resp.status_code == 200:
             robots_txt = resp.text
     except Exception as e:

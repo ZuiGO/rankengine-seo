@@ -1,4 +1,4 @@
-"""End-to-end smoke test for the ZuiGO.ai SEO Analysis Engine API.
+"""End-to-end smoke test for the ZuiGO Engine SEO Analysis API.
 
 Usage:
     .venv/bin/python scripts/smoke_test.py [--url https://example.com] [--host http://localhost:8001]
@@ -227,7 +227,7 @@ async def main(host: str, url: str):
         # 15. Chat (site context + global)
         chat = (await client.post("/api/chat", json={"job_id": job_id, "section": "overview", "message": "Summarize this analysis in one sentence."})).json()
         report("chat reply", bool(chat.get("reply")) and not chat.get("reply", "").startswith("Error"), (chat.get("reply") or "")[:80])
-        gchat = (await client.post("/api/chat", json={"message": "What is ZuiGO.ai?"})).json()
+        gchat = (await client.post("/api/chat", json={"message": "What is ZuiGO Engine?"})).json()
         report("global chat reply", bool(gchat.get("reply")) and not gchat.get("reply", "").startswith("Error"), (gchat.get("reply") or "")[:80])
 
         # 16. Schedules
@@ -267,7 +267,7 @@ async def main(host: str, url: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="ZuiGO.ai SEO Analysis Engine API smoke test")
+    parser = argparse.ArgumentParser(description="ZuiGO Engine SEO Analysis API smoke test")
     parser.add_argument("--host", default="http://localhost:8001")
     parser.add_argument("--url", default="https://books.toscrape.com")
     args = parser.parse_args()

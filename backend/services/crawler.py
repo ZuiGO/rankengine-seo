@@ -20,7 +20,7 @@ from backend.services.url_normalizer import normalize_url
 logger = get_logger("crawler")
 
 MAX_HTML_STORED = 300_000
-USER_AGENT = "ZuiGO.ai/1.0 (+https://zuigo.ai)"
+USER_AGENT = "ZuiGO-Engine/1.0 (+https://zuigo.ai)"
 
 
 async def _robots_delay(origin: str) -> float:

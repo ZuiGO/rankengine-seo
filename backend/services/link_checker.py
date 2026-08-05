@@ -12,7 +12,7 @@ logger = get_logger("link_checker")
 
 CHECK_CONCURRENCY = 10
 REQUEST_TIMEOUT = 12
-USER_AGENT = "ZuiGO.ai/1.0 link-checker (+https://zuigo.ai)"
+USER_AGENT = "ZuiGO-Engine/1.0 link-checker (+https://zuigo.ai)"
 
 
 def classify_status(status_code: int) -> str:

@@ -15,7 +15,7 @@ logger = get_logger("sitemap")
 
 TIMEOUT = 15
 MAX_SITEMAP_BYTES = 2_000_000
-USER_AGENT = "ZuiGO.ai/1.0 sitemap-audit (+https://zuigo.ai)"
+USER_AGENT = "ZuiGO-Engine/1.0 sitemap-audit (+https://zuigo.ai)"
 
 SITEMAP_LOCATIONS = ("/sitemap.xml", "/sitemap_index.xml", "/sitemap-index.xml")
 

@@ -124,7 +124,7 @@ class TestLlmsTxt:
             {"url": "https://example.com/about/", "title": "About Us"},
         ]
         text = build_llms_txt(pages, "https://example.com")
-        assert text.startswith("# ZuiGO.ai Mirror")
+        assert text.startswith("# ZuiGO Engine Mirror")
         assert "example.com" in text
         assert "About Us" in text
         assert "Example homepage" in text

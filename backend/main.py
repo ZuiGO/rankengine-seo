@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutdown")
 
 
-app = FastAPI(title="ZuiGO.ai SEO Analysis Engine", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="ZuiGO Engine SEO Analysis", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
