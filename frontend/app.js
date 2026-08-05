@@ -1510,12 +1510,146 @@ async function loadSeoInsights(jobId) {
     renderDomainOverview(data.overview, data.overview_error, data.overview_source);
     renderOnpage(data.onpage, data.onpage_error, data.onpage_source);
     renderSerp(data.serp_rankings || [], data.serp_error, data.serp_source);
+    renderGscData(data.gsc, data.gsc_error);
+    loadGsc(jobId);
   } catch (err) {
     errDiv.textContent = "Error loading insights: " + err.message;
     errDiv.classList.remove("hidden");
   }
   loadBacklinkSources(jobId);
 }
+
+async function loadGsc(jobId) {
+  const badge = document.getElementById("gsc-status-badge");
+  const connectEl = document.getElementById("gsc-connect");
+  const dataEl = document.getElementById("gsc-data");
+  try {
+    const resp = await fetch(`${API_BASE}/gsc/status/${jobId}`);
+    const status = resp.ok ? await resp.json() : { connected: false, configured: false };
+    if (badge) {
+      badge.innerHTML = status && status.connected
+        ? `<span class="count-label" style="color:#16a34a">Connected${status.property ? " · " + escapeHtml(status.property) : ""}</span>`
+        : "";
+    }
+    const refreshBtn = document.getElementById("gsc-refresh-btn");
+    const disconnectBtn = document.getElementById("gsc-disconnect-btn");
+    if (refreshBtn) refreshBtn.classList.toggle("hidden", !(status && status.connected));
+    if (disconnectBtn) disconnectBtn.classList.toggle("hidden", !(status && status.connected));
+    if (connectEl) {
+      if (status && status.connected) {
+        connectEl.innerHTML = "";
+      } else if (status && status.configured === false) {
+        connectEl.innerHTML = `<div class="service-error">
+          <div class="service-error-title">Google Search Console not configured</div>
+          <div class="service-error-msg">Add GSC_CLIENT_ID and GSC_CLIENT_SECRET (Google Cloud OAuth client with the Search Console API enabled) to .env and restart the server, then Connect.</div>
+        </div>`;
+      } else {
+        connectEl.innerHTML = `<p class="section-desc" style="margin-bottom:8px">Connect Google Search Console to pull real organic clicks, impressions and top queries for this domain (the domain must be a verified Search Console property).</p>
+          <button id="gsc-connect-btn" class="btn-secondary">Connect GSC</button>`;
+      }
+    }
+    if (window.location.hash.includes("gsc=connected")) {
+      showToast("Google Search Console connected");
+      history.replaceState(null, "", location.pathname + location.search + "#job/" + jobId + "/seo-insights");
+    }
+  } catch (err) {
+    if (connectEl) connectEl.innerHTML = `<p class="section-desc">Error checking GSC status: ${escapeHtml(err.message)}</p>`;
+  }
+  if (!dataEl || dataEl.textContent.trim() === "") {
+    renderGscData(null, null);
+  }
+}
+
+function renderGscData(gsc, error) {
+  const el = document.getElementById("gsc-data");
+  if (!el) return;
+  let html = "";
+  if (error) html += serviceErrorHtml("Google Search Console", error);
+  if (gsc) {
+    html += `<p class="source-note">Source: Google Search Console (${escapeHtml(gsc.property || "property")}) — last ${escapeHtml(String(gsc.days || 28))} days</p>`;
+    html += `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+      <div class="insights-card"><div class="insights-label">Clicks</div><div class="insights-value">${gsc.clicks ?? "N/A"}</div></div>
+      <div class="insights-card"><div class="insights-label">Impressions</div><div class="insights-value">${gsc.impressions ?? "N/A"}</div></div>
+      <div class="insights-card"><div class="insights-label">CTR</div><div class="insights-value">${gsc.ctr != null ? (gsc.ctr * 100).toFixed(2) + "%" : "N/A"}</div></div>
+      <div class="insights-card"><div class="insights-label">Avg Position</div><div class="insights-value">${gsc.position ?? "N/A"}</div></div>
+    </div>`;
+    const qs = gsc.queries || [];
+    const ps = gsc.pages || [];
+    if (qs.length) {
+      html += `<h4 style="margin:14px 0 6px">Top Queries</h4><div style="overflow-x:auto">
+        <table class="data-table"><thead><tr><th>Query</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Position</th></tr></thead>
+        <tbody>${qs.map(q => `<tr>
+          <td>${escapeHtml(q.query)}</td>
+          <td>${q.clicks}</td><td>${q.impressions}</td>
+          <td>${q.ctr != null ? (q.ctr * 100).toFixed(1) + "%" : "-"}</td>
+          <td>${q.position ?? "-"}</td>
+        </tr>`).join("")}</tbody></table></div>`;
+    }
+    if (ps.length) {
+      html += `<h4 style="margin:14px 0 6px">Top Pages</h4><div style="overflow-x:auto">
+        <table class="data-table"><thead><tr><th>Page</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Position</th></tr></thead>
+        <tbody>${ps.map(p => `<tr>
+          <td class="page-url-cell" title="${escapeHtml(p.page)}">${linkify(p.page, 70)}</td>
+          <td>${p.clicks}</td><td>${p.impressions}</td>
+          <td>${p.ctr != null ? (p.ctr * 100).toFixed(1) + "%" : "-"}</td>
+          <td>${p.position ?? "-"}</td>
+        </tr>`).join("")}</tbody></table></div>`;
+    }
+  } else if (!error) {
+    html = '<div class="insights-card">No Search Console data yet. Connect GSC above, then click Refresh Data.</div>';
+  }
+  el.innerHTML = html;
+}
+
+document.getElementById("gsc-connect")?.addEventListener("click", async (e) => {
+  if (e.target.id !== "gsc-connect-btn") return;
+  try {
+    const resp = await fetch(`${API_BASE}/gsc/auth/${currentJobId}`);
+    const data = await resp.json();
+    if (data.auth_url) {
+      window.location.href = data.auth_url;
+    } else {
+      showToast("GSC not configured: " + (data.hint || "missing OAuth client"));
+    }
+  } catch (err) {
+    showToast("GSC connect failed: " + err.message);
+  }
+});
+
+document.getElementById("gsc-refresh-btn")?.addEventListener("click", async () => {
+  const el = document.getElementById("gsc-data");
+  el.innerHTML = '<p class="section-desc">Fetching Search Console data...</p>';
+  try {
+    const resp = await fetch(`${API_BASE}/gsc/${currentJobId}/fetch`, { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) {
+      el.innerHTML = serviceErrorHtml("Google Search Console", data.detail || `HTTP ${resp.status}`);
+      return;
+    }
+    renderGscData(data, null);
+    loadSeoInsights(currentJobId);
+    showToast("GSC data refreshed");
+  } catch (err) {
+    el.innerHTML = `<p class="section-desc">Error: ${escapeHtml(err.message)}</p>`;
+  }
+});
+
+document.getElementById("gsc-disconnect-btn")?.addEventListener("click", async () => {
+  try {
+    const resp = await fetch(`${API_BASE}/gsc/${currentJobId}`, { method: "DELETE" });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      showToast("GSC disconnect failed: " + (data.detail || resp.status));
+      return;
+    }
+    renderGscData(null, null);
+    loadGsc(currentJobId);
+    loadSeoInsights(currentJobId);
+    showToast("Google Search Console disconnected");
+  } catch (err) {
+    showToast("GSC disconnect failed: " + err.message);
+  }
+});
 
 async function loadBacklinkSources(jobId) {
   const el = document.getElementById("backlink-sources-list");

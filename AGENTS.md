@@ -10,8 +10,50 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: end of "honest metrics + link accuracy" round)
-- All rounds DELIVERED. Latest commits `81cd3a5` + `814f4af` pushed:
+## Status (last update: end of GSC connect round)
+- All rounds DELIVERED. Latest commits pushed:
+  - GSC credential-connect round (pending commit): user-connected Google
+    Search Console → real organic_traffic (clicks) when the domain is a
+    verified Search Console property; otherwise organic traffic stays N/A.
+    - config.py: `gsc_client_id`, `gsc_client_secret`,
+      `gsc_redirect_uri=http://localhost:8001/api/gsc/callback`.
+    - `services/gsc.py` (httpx only): `build_auth_url(job_id)` (scope
+      `webmasters.readonly`, `access_type=offline&prompt=consent`, state =
+      job_id), `exchange_code` (stores `gsc_credentials` keyed by domain,
+      rejects missing refresh_token), auto token refresh, `list_sites`,
+      `_analytics_query` (28d, query+page dims), `_match_property`
+      (sc-domain > https://www > https > http, trailing-slash tolerant),
+      `fetch_gsc` (totals + top 25 queries/pages), `gsc_status`,
+      `disconnect`. No GSC keys in .env yet -> `configured()` False.
+    - `routes/gsc.py` prefix `/api/gsc`: `GET /auth/{job_id}` (auth_url or
+      config-missing hint), `GET /callback` (exchange -> redirect
+      `/#job/{job_id}/seo-insights?gsc=connected`), `GET /status/{job_id}`,
+      `POST /{job_id}/fetch` (fetch + merge into cache via
+      `merge_gsc_into_insights`, skips when no cache doc), `DELETE
+      /{job_id}` (drop creds + strip gsc from cached insights). Router
+      registered in main.py.
+    - `fetch_all_insights` (dataforseo.py): best-effort GSC block —
+      `insights["gsc"]` + `gsc_error`; when connected, overview
+      `estimated_organic_traffic=clicks`, `organic_keywords_count=distinct
+      queries`, source gsc. `merge_gsc_into_insights(db, job_id, domain,
+      gsc_data, cache_version)` reusable for POST /fetch.
+    - seo_insights.py `CACHE_VERSION` 2 -> 3 (forces one refetch).
+    - Frontend: SEO Insights tab GSC section (index.html) — status badge,
+      Connect/Refresh Data/Disconnect buttons, connect card w/ config-missing
+      hint, 4 stat cards (Clicks/Impressions/CTR/Avg position), Top Queries +
+      Top Pages tables; app.js `loadGsc(jobId)` (status + `?gsc=connected`
+      toast via history.replaceState), `renderGscData(gsc, error)`, handlers.
+    - pytest 152/152 (137 + 15 new in test_gsc.py: auth URL params,
+      configured flag, property matching incl. trailing slash, token
+      exchange + refresh_token guard, analytics parsing, cache-merge
+      override + skip-when-no-cache, status). Live-verified:
+      `/api/gsc/auth/{job}` -> configured:false hint, `/api/gsc/status/{job}`
+      -> connected:false, insights payload has `gsc:null` + `gsc_error:null`
+      (graceful when not connected).
+    - ONE-TIME USER SETUP still required: Google Cloud Console -> enable
+      Search Console API -> create OAuth client (Desktop app) -> put
+      GSC_CLIENT_ID / GSC_CLIENT_SECRET in .env -> verify the analyzed
+      domain as a Search Console property -> restart server -> Connect GSC.
   - `814f4af` — LLM model switched to `openai/gpt-oss-120b` (Groq; new
     `settings.groq_model`, env-overridable via `GROQ_MODEL`). Chat +
     change-applier both use it; live chat verified.
@@ -199,9 +241,9 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
-- GSC credential connect (OAuth flow drafted in prior session, NOT implemented):
-  user-connected Google Search Console → real organic_traffic (clicks) where
-  the domain is verified; otherwise organic traffic stays N/A.
+- GSC: user completes one-time Google Cloud OAuth client setup (above) then
+  end-to-end connect test; DataForSEO full re-test once account stability/
+  fraud-pause lift confirmed ("we will do test later").
 - Competitor-audit speed items (approved, not implemented): PSI sampling cap,
   no mobile browser pass for competitors, no asset downloads, content-hash page
   dedup, parallel competitor audits, SERP budget trim.

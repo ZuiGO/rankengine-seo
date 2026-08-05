@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 from typing import Optional
 import httpx
 
@@ -184,6 +185,28 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["onpage_source"] = "local" if insights["onpage"] else "none"
 
     try:
+        from backend.services.gsc import fetch_gsc
+        gsc_data = await fetch_gsc(domain)
+        if gsc_data:
+            insights["gsc"] = gsc_data
+            insights["gsc_error"] = None
+            ov = dict(insights.get("overview") or {})
+            ov.update({
+                "estimated_organic_traffic": gsc_data.get("clicks"),
+                "organic_keywords_count": len(gsc_data.get("queries") or []),
+                "source": "gsc",
+            })
+            insights["overview"] = ov
+            insights["overview_source"] = "gsc"
+            insights["overview_error"] = None
+        else:
+            insights["gsc"] = None
+            insights["gsc_error"] = None
+    except Exception as e:
+        insights["gsc"] = None
+        insights["gsc_error"] = str(e)
+
+    try:
         from backend.services.serp_api import run_serp_rankings
         insights["serp_rankings"], failed = await run_serp_rankings(domain, job_id)
         insights["serp_source"] = "serp"
@@ -196,3 +219,28 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["serp_error"] = str(e)
 
     return insights
+
+
+async def merge_gsc_into_insights(db, job_id: str, domain: str, gsc_data: dict, cache_version: int) -> bool:
+    """Merge a fresh GSC snapshot into the stored insights cache without refetching other sections."""
+    cached = await db.seo_insights_cache.find_one({"job_id": job_id})
+    if not cached:
+        return False
+    data = dict(cached.get("data") or {})
+    data["gsc"] = gsc_data
+    data["gsc_error"] = None
+    ov = dict(data.get("overview") or {})
+    ov.update({
+        "estimated_organic_traffic": gsc_data.get("clicks"),
+        "organic_keywords_count": len(gsc_data.get("queries") or []),
+        "source": "gsc",
+    })
+    data["overview"] = ov
+    data["overview_source"] = "gsc"
+    data["overview_error"] = None
+    await db.seo_insights_cache.update_one(
+        {"job_id": job_id},
+        {"$set": {"job_id": job_id, "data": data, "fetched_at": datetime.utcnow(), "v": cache_version}},
+        upsert=True,
+    )
+    return True
