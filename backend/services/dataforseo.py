@@ -77,7 +77,7 @@ async def _post(endpoint: str, payload: list) -> dict:
                 f"{BASE_URL}/v3/{endpoint}/live",
                 headers=_auth_header(),
                 json=payload,
-                timeout=30,
+                timeout=90,
             )
     except ServiceError:
         raise
@@ -91,12 +91,15 @@ async def _post(endpoint: str, payload: list) -> dict:
 
 async def domain_keywords(domain: str, limit: int = 20) -> list[dict]:
     data = await _post("keywords_data/google/keywords_for_site", [{
-        "domain": domain,
+        "target": domain,
         "limit": limit,
         "location_name": "United States",
         "language_name": "English",
     }])
-    return data["tasks"][0]["result"][0].get("items", [])
+    result = data["tasks"][0]["result"][0]
+    if isinstance(result, list):
+        return result
+    return result.get("items", [])
 
 
 async def backlink_summary(target: str) -> Optional[dict]:
@@ -120,7 +123,7 @@ async def onpage_summary(url: str) -> Optional[dict]:
 
 
 async def domain_overview(domain: str) -> Optional[dict]:
-    data = await _post("domain_analytics/google/overview", [{"domain": domain}])
+    data = await _post("domain_analytics/google/overview", [{"target": domain}])
     return data["tasks"][0]["result"][0]
 
 
@@ -141,7 +144,10 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
     insights = {"domain": domain}
 
     try:
-        insights["keywords"] = await domain_keywords(domain)
+        kws = await domain_keywords(domain)
+        if not kws:
+            raise ServiceError(SERVICE, "no keyword data returned for this domain")
+        insights["keywords"] = kws
         insights["keywords_source"] = "dataforseo"
         insights["keywords_error"] = None
     except Exception as e:
