@@ -20,17 +20,23 @@ async def local_onpage(job_id: str) -> dict | None:
     indexable = sum(1 for p in pages if p.get("is_indexable", True))
     with_title = sum(1 for p in pages if p.get("title"))
     with_meta = sum(1 for p in pages if p.get("meta_description"))
+    meta_evaluated = sum(1 for p in pages if p.get("meta_description") is not None)
     with_h1 = sum(1 for p in pages if (p.get("h1_count") or 0) > 0)
+    h1_evaluated = sum(1 for p in pages if p.get("h1_count") is not None)
     images_total = sum(p.get("image_count") or 0 for p in pages)
     images_missing_alt = sum(p.get("images_missing_alt") or 0 for p in pages)
-    avg_words = round(sum(p.get("word_count") or 0 for p in pages) / n)
-    avg_title = round(sum(len(p.get("title") or "") for p in pages) / n)
+    word_counts = [p.get("word_count") for p in pages if p.get("word_count") is not None]
+    title_lens = [len(p.get("title") or "") for p in pages if p.get("title")]
+    avg_words = round(sum(word_counts) / len(word_counts)) if word_counts else None
+    avg_title = round(sum(title_lens) / len(title_lens)) if title_lens else None
 
     score = 100
     if images_total:
         score -= round(60 * images_missing_alt / images_total)
-    score -= round(15 * (n - with_meta) / n)
-    score -= round(10 * (n - with_h1) / n)
+    if meta_evaluated:
+        score -= round(15 * (meta_evaluated - with_meta) / meta_evaluated)
+    if h1_evaluated:
+        score -= round(10 * (h1_evaluated - with_h1) / h1_evaluated)
     score -= round(5 * (n - indexable) / n)
     score = max(0, min(100, score))
 
@@ -41,6 +47,8 @@ async def local_onpage(job_id: str) -> dict | None:
         "pages_with_title": with_title,
         "pages_with_meta_description": with_meta,
         "pages_with_h1": with_h1,
+        "pages_evaluated_meta": meta_evaluated,
+        "pages_evaluated_h1": h1_evaluated,
         "images_total": images_total,
         "images_missing_alt": images_missing_alt,
         "avg_word_count": avg_words,

@@ -69,6 +69,18 @@ def _lab_metrics(lr: dict) -> dict:
     return out
 
 
+def _classify_source(field: dict, cwv: dict) -> str:
+    field_keys = set(k for k in CWV_WEIGHTS if field.get(k) is not None)
+    missing = set(k for k in CWV_WEIGHTS if cwv.get(k) is None)
+    if len(field_keys) == len(CWV_WEIGHTS):
+        return "field"
+    if field_keys and not missing:
+        return "mixed"
+    if not field_keys:
+        return "lab"
+    return "partial"
+
+
 def _cwv_score(cwv: dict) -> int:
     values = []
     for key, weight in CWV_WEIGHTS.items():
@@ -119,11 +131,13 @@ async def fetch_page_performance(url: str, strategy: str = "mobile") -> dict:
     field = _field_metrics(data)
     lab = _lab_metrics(data.get("lighthouseResult") or {})
     cwv = {k: (field.get(k) if field.get(k) is not None else lab.get(k)) for k in CWV_WEIGHTS}
+    source = _classify_source(field, cwv)
     return {
         "url": url,
         "strategy": strategy,
         "cwv": cwv,
         "cwv_score": _cwv_score(cwv),
+        "cwv_source": source,
         "field": field,
         "lab": lab,
         "lighthouse_score": (data.get("lighthouseResult") or {}).get("categories", {}).get("performance", {}).get("score"),
@@ -205,6 +219,10 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
         "failed": len(errors),
         "errors": errors[:10],
         "avg_cwv_score": round(sum(page_scores) / len(page_scores), 1) if page_scores else None,
+        "cwv_sources": {
+            src: sum(1 for r in results if r.get("strategy") == "mobile" and r.get("cwv_source") == src)
+            for src in ("field", "lab", "mixed", "partial")
+        },
         "field_pages": len(field_pages),
         "lab_only_pages": len(lab_pages),
         "field_avg": {

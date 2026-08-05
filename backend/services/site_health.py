@@ -31,7 +31,9 @@ async def compute_site_health(job_id: str) -> dict:
     lh_counts = (lh or {}).get("counts") or (lh or {})
     links_checked = lh_counts.get("checked", 0)
     broken = lh_counts.get("broken_link_count")
+    legacy = False
     if broken is None:
+        legacy = True
         broken = (
             lh_counts.get("broken", 0)
             + lh_counts.get("timeout", 0)
@@ -40,30 +42,40 @@ async def compute_site_health(job_id: str) -> dict:
         )
     metrics["links_checked"] = links_checked
     metrics["broken_links"] = broken
+    if legacy:
+        metrics["broken_links_legacy_bucket"] = True
     metrics["broken_link_rate"] = round(100 * broken / links_checked, 1) if links_checked else None
     if metrics["broken_link_rate"] is not None:
+        label = "broken or unreachable" if legacy else "broken"
         if metrics["broken_link_rate"] > 10:
-            issues.append({"severity": "high", "message": f"{broken} of {links_checked} links are broken or unreachable ({metrics['broken_link_rate']}%)."})
+            issues.append({"severity": "high", "message": f"{broken} of {links_checked} links are {label} ({metrics['broken_link_rate']}%)."})
         elif metrics["broken_link_rate"] > 2:
-            issues.append({"severity": "medium", "message": f"{broken} broken links found ({metrics['broken_link_rate']}%)."})
+            issues.append({"severity": "medium", "message": f"{broken} {label} links found ({metrics['broken_link_rate']}%)."})
 
     if not n:
         score = 0
     else:
+        evaluated = lambda key: [p for p in pages if p.get(key) is not None]
         with_meta = sum(1 for p in pages if p.get("meta_description"))
+        meta_evaluated = len(evaluated("meta_description"))
         with_h1 = sum(1 for p in pages if (p.get("h1_count") or 0) > 0)
+        h1_evaluated = len(evaluated("h1_count"))
         indexable = sum(1 for p in pages if p.get("is_indexable", True))
-        thin = sum(1 for p in pages if (p.get("word_count") or 0) < 200)
+        thin = sum(1 for p in pages if p.get("word_count") is not None and p["word_count"] < 200)
+        thin_evaluated = len(evaluated("word_count"))
         images_total = sum(p.get("image_count") or 0 for p in pages)
         images_missing_alt = sum(p.get("images_missing_alt") or 0 for p in pages)
 
         metrics["pages_with_meta_description"] = with_meta
-        metrics["meta_description_coverage"] = round(100 * with_meta / n)
+        metrics["pages_evaluated_meta"] = meta_evaluated
+        metrics["meta_description_coverage"] = round(100 * with_meta / meta_evaluated) if meta_evaluated else None
         metrics["pages_with_h1"] = with_h1
-        metrics["h1_coverage"] = round(100 * with_h1 / n)
+        metrics["pages_evaluated_h1"] = h1_evaluated
+        metrics["h1_coverage"] = round(100 * with_h1 / h1_evaluated) if h1_evaluated else None
         metrics["indexable_pages"] = indexable
         metrics["indexable_rate"] = round(100 * indexable / n)
         metrics["thin_pages"] = thin
+        metrics["pages_evaluated_word_count"] = thin_evaluated
         metrics["images_total"] = images_total
         metrics["images_missing_alt"] = images_missing_alt
         metrics["alt_text_coverage"] = round(100 * (images_total - images_missing_alt) / images_total) if images_total else None
@@ -72,9 +84,9 @@ async def compute_site_health(job_id: str) -> dict:
             issues.append({"severity": "high", "message": f"{images_missing_alt} of {images_total} images are missing alt text ({metrics['alt_text_coverage']}% coverage)."})
         elif metrics["alt_text_coverage"] is not None and metrics["alt_text_coverage"] < 90:
             issues.append({"severity": "medium", "message": f"{images_missing_alt} images are missing alt text."})
-        if metrics["meta_description_coverage"] < 70:
+        if metrics["meta_description_coverage"] is not None and metrics["meta_description_coverage"] < 70:
             issues.append({"severity": "medium", "message": f"Only {metrics['meta_description_coverage']}% of pages have a meta description."})
-        if metrics["h1_coverage"] < 80:
+        if metrics["h1_coverage"] is not None and metrics["h1_coverage"] < 80:
             issues.append({"severity": "medium", "message": f"Only {metrics['h1_coverage']}% of pages have an H1 heading."})
         if metrics["thin_pages"] > 0:
             issues.append({"severity": "medium", "message": f"{metrics['thin_pages']} page(s) have fewer than 200 words (thin content)."})
@@ -102,9 +114,12 @@ async def compute_site_health(job_id: str) -> dict:
         score = 100
         if metrics["broken_link_rate"] is not None:
             score -= min(30, round(3 * metrics["broken_link_rate"]))
-        score -= round(15 * (100 - metrics["alt_text_coverage"] if metrics["alt_text_coverage"] is not None else 100) / 100)
-        score -= round(10 * (100 - metrics["meta_description_coverage"]) / 100)
-        score -= round(5 * (100 - metrics["h1_coverage"]) / 100)
+        if metrics["alt_text_coverage"] is not None:
+            score -= round(15 * (100 - metrics["alt_text_coverage"]) / 100)
+        if metrics["meta_description_coverage"] is not None:
+            score -= round(10 * (100 - metrics["meta_description_coverage"]) / 100)
+        if metrics["h1_coverage"] is not None:
+            score -= round(5 * (100 - metrics["h1_coverage"]) / 100)
         score -= min(10, round(2 * metrics["thin_pages"]))
         if cwv_scores:
             score -= round(15 * (100 - avg_cwv) / 100)
@@ -113,9 +128,11 @@ async def compute_site_health(job_id: str) -> dict:
         score -= n - https_pages
         deep_count = sum(1 for p in pages if (p.get("click_depth") or 0) > 3)
         metrics["deep_click_depth_pages"] = deep_count
-        mobile_friendly = sum(1 for p in pages if p.get("mobile_friendly", True))
+        mobile_friendly = sum(1 for p in pages if p.get("mobile_friendly") is True)
+        mobile_evaluated = sum(1 for p in pages if p.get("mobile_friendly") is not None)
         metrics["mobile_friendly_pages"] = mobile_friendly
-        score -= round(2 * (n - mobile_friendly))
+        metrics["mobile_friendly_evaluated"] = mobile_evaluated
+        score -= round(2 * (mobile_evaluated - mobile_friendly))
         score = max(0, min(100, score))
 
     pending = await db.action_items.count_documents({"job_id": job_id, "status": "pending"})
@@ -177,8 +194,8 @@ async def compute_site_health(job_id: str) -> dict:
             issues.append({"severity": "medium", "message": f"{redirected} page(s) are reached through 3+ hop redirect chains."})
         if https_pages != n:
             issues.append({"severity": "medium", "message": f"{n - https_pages} page(s) are linked over non-HTTPS entries (mixed content / host drift)."})
-        if mobile_friendly < n:
-            issues.append({"severity": "low", "message": f"{n - mobile_friendly} page(s) are missing a mobile viewport / zoom fix."})
+        if mobile_evaluated > 0 and mobile_friendly < mobile_evaluated:
+            issues.append({"severity": "low", "message": f"{mobile_evaluated - mobile_friendly} of {mobile_evaluated} evaluated page(s) are missing a mobile viewport / zoom fix."})
         lh_redirected = (lh or {}).get("redirected_links")
         if lh_redirected:
             metrics["redirected_links"] = lh_redirected
