@@ -29,7 +29,6 @@ async def close_pool():
         await _pool.aclose()
         _pool = None
 
-
 async def enqueue(job_name: str, *args, **kwargs) -> bool:
     """Queue a job. Returns False when the queue is unavailable (caller may fall back)."""
     try:

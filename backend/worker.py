@@ -43,6 +43,6 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = 3
-    job_timeout = 3600
+    job_timeout = 14400
     keep_result = 60
     keep_result_failed = 3600
