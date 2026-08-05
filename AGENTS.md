@@ -10,8 +10,39 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: truthfulness audit + professional report template + UI polish)
+## Status (last update: SaaS UI — landing page, dark mode, animations)
 - All rounds DELIVERED. Latest commits pushed:
+  - SaaS UI round (working tree): professional SaaS front door + app polish.
+    - `landing.html` (NEW) served at `/` — marketing page (brand nav, animated
+      hero with orbs + staggered reveals, live-analysis mock card with
+      count-up metrics, 6 feature cards, 3-step how-it-works, CTA band,
+      footer). `landing.js` (NEW): theme toggle, IntersectionObserver scroll
+      reveal, rAF count-up, `prefers-reduced-motion` respected.
+    - App moved to `/app` (main.py routes: `/` -> landing.html, `/app` ->
+      index.html). Deep links `/#job/<id>/<tab>` auto-redirect to
+      `/app#job/...` from a tiny inline script in landing.html.
+    - `index.html`: brand lockup (inline SVG mark + gradient wordmark, no
+      dependency on logo.png anymore), header theme-toggle (sun/moon icon),
+      tabs grouped into 3 clusters (Audit / SEO+Report / Platform) with
+      hairline `.tab-divider` separators and 14 inline SVG icons; inline
+      <head> script pre-applies saved theme to avoid FOUC.
+    - `app.js`: `initTheme` (persists `zui-theme` in localStorage, system
+      default), `countAnimate`/`applyCounts` (one-shot per element via
+      `_counting` flag — poll-safe, 900ms ease-out), `skeletonHTML`,
+      `emptyState` helpers; overview stat cards now count up on open.
+    - `style.css`: tokenized full palette (surfaces, chips, status badges,
+      alerts, toasts, tables) + `[data-theme="dark"]` override block
+      (persisted + system-aware); shimmer `.skeleton` loaders baked into
+      main tab containers (overview/sites/pages/content/actions/report),
+      replaced by first render (poll-safe); landing components; button
+      variants (.btn-ghost/-sm/-lg); `prefers-reduced-motion` global
+      kill-switch; `color-mix` avoided (explicit border tokens).
+    - Verified: pytest 168/168; Playwright — landing title/6 features/4+
+      count-ups, scroll reveals fire (9 .in), deep-link `/` -> `/app`
+      redirect on reload, 14 tabs + 14 icons, 28 overview stat cards with
+      count-up values, theme toggle flips computed bg and persists
+      (light <-> dark), tab navigation OK, zero console errors.
+  - `d98d845` — Professional report template + frontend UI polish.
   - `cb3a1e1` — Truthfulness audit: no fabricated deductions or counts.
   - `bd3bef7` — Rebrand to "ZuiGO Engine" (title, header, chat, mirror, notifications, user-agents, README, smoke).
   - `ad1af55` — GSC self-serve: DB-backed operator settings (no .env for users).
@@ -204,13 +235,12 @@ MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
   `~/Library/LaunchAgents/`). Logs: `/tmp/rankengine.log`, `/tmp/arq.log`.
 - Smoke: use bash tool timeout (no `timeout` cmd on macOS); ~15-25 min;
   full run just passed 74/74 on books.toscrape.
-- Rebrand: user-facing strings are "ZuiGO.ai SEO Analysis Engine" (FastAPI
-  title, index.html header/title/chat greeting, chat system prompt, PR titles,
-  llms.txt brand, USER_AGENT strings, test_patch assertion, smoke gchat
+- Rebrand: user-facing strings are "ZuiGO Engine" (FastAPI title,
+  index.html/landing.html header/title/chat greeting, chat system prompt, PR
+  titles, llms.txt brand, USER_AGENT strings, test_patch assertion, smoke gchat
   question). Internal ids kept: launchd labels `com.zuigo.rankengine-*`, db name
-  `rankengine`, repo path/remote, neo4j password. Logo: header shows
-  `static/logo.png` with text fallback (`#logo-fallback`) — user supplies the
-  logo file later; until then the fallback renders.
+  `rankengine`, repo path/remote, neo4j password. Logo is an inline SVG brand
+  mark (no logo.png needed).
 - Refresh bug FIXED: app.js persists state in URL hash `#job/<jobId>[/<tab>]`
   via `history.replaceState` (form submit, tab clicks, `openSite`, New Analysis
   clears it). `restoreFromHash()` on DOMContentLoaded/hashchange reopens the
@@ -281,6 +311,13 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
+- The app lives at `/app` (index.html); `/` serves the marketing landing page
+  (landing.html). Deep links `/#job/<id>` redirect to `/app#job/<id>`.
+- Theme toggle: header `#theme-toggle` (app) / `#theme-toggle-landing`
+  (landing), persists `zui-theme` in localStorage; `[data-theme="dark"]`
+  overrides the token palette in style.css.
+- Brand logomark is inline SVG in both pages — no logo.png dependency
+  (old `#app-logo`/`#logo-fallback` markup removed).
 - GSC: user completes one-time Google Cloud OAuth client setup (Web app + in-app
   Settings tab) then end-to-end connect test on the live job; DataForSEO full
   re-test once account stability/fraud-pause lift confirmed ("we will do test
@@ -294,8 +331,6 @@ curl -s localhost:8001/api/health
 - Re-enable Neo4j graph module or wire ranking insights from Chroma.
 - Add backend validation for `crawl_schedules` duplicate domains / interval caps.
 - Webhook delivery retries/dedup; patch format versioned consumers.
-- Receive the real logo file for `frontend/static/logo.png` (currently text
-  fallback "ZuiGO.ai" shows until it exists).
 - Exec summary quick_wins currently uses effort+impact heuristics; could rank
   with actual approval-rate learning (`action_feedback`) per issue_key.
 - Sitemap audit parses sitemapindex nesting; news/video/image sitemaps ignored.

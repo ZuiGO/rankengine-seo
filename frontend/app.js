@@ -3,6 +3,65 @@ let currentJobId = null;
 let pollInterval = null;
 let currentTab = "overview";
 
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("zui-theme", theme); } catch (e) {}
+}
+
+function initTheme() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  });
+}
+// Applied on parse; the inline <head> snippet pre-applies the saved theme to avoid a flash.
+initTheme();
+
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function countAnimate(el) {
+  if (el._counting) return;
+  el._counting = true;
+  const target = parseFloat(el.dataset.count) || 0;
+  const decimals = parseInt(el.dataset.decimals || "0", 10);
+  const suffix = el.dataset.suffix || "";
+  if (reducedMotion) {
+    el.textContent = target.toFixed(decimals) + suffix;
+    return;
+  }
+  const start = performance.now();
+  const duration = 900;
+  function frame(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = (target * eased).toFixed(decimals) + suffix;
+    if (t < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+function applyCounts(root) {
+  root.querySelectorAll("[data-count]").forEach(countAnimate);
+}
+
+function skeletonHTML(kind, count) {
+  const rows = [];
+  for (let i = 0; i < (count || 3); i++) rows.push('<div class="skeleton-row"></div>');
+  return '<div class="skeleton skeleton-' + (kind || "card") + '">' + rows.join("") + "</div>";
+}
+
+function emptyState(title, msg, ctaHtml) {
+  return (
+    '<div class="empty-state"><div class="empty-state-icon">' +
+    "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"M21 21l-4.3-4.3\"/></svg></div>" +
+    (title ? "<h4>" + title + "</h4>" : "") +
+    (msg ? "<p>" + msg + "</p>" : "") +
+    (ctaHtml || "") +
+    "</div>"
+  );
+}
+
 // DOM refs
 const form = document.getElementById("analyze-form");
 const urlInput = document.getElementById("url-input");
@@ -251,12 +310,13 @@ function loadOverview(summary) {
     ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${cannib}</div><div class="stat-label">Cannibalized Keywords</div></div>`
     : "";
   stats.innerHTML = `
-    <div class="stat-card"><div class="stat-value">${summary.total_pages}</div><div class="stat-label">Pages Crawled</div></div>
-    <div class="stat-card"><div class="stat-value">${summary.total_content_items}</div><div class="stat-label">Content Items</div></div>
-    <div class="stat-card"><div class="stat-value">${summary.total_action_items}</div><div class="stat-label">SEO Action Items</div></div>
-    <div class="stat-card"><div class="stat-value">${summary.summary?.total_links || 0}</div><div class="stat-label">Total Links Found</div></div>
+    <div class="stat-card"><div class="stat-value" data-count="${summary.total_pages}">0</div><div class="stat-label">Pages Crawled</div></div>
+    <div class="stat-card"><div class="stat-value" data-count="${summary.total_content_items}">0</div><div class="stat-label">Content Items</div></div>
+    <div class="stat-card"><div class="stat-value" data-count="${summary.total_action_items}">0</div><div class="stat-label">SEO Action Items</div></div>
+    <div class="stat-card"><div class="stat-value" data-count="${summary.summary?.total_links || 0}">0</div><div class="stat-label">Total Links Found</div></div>
     ${geoCard}${aiCard}${localCard}${cannibCard}
   `;
+  applyCounts(stats);
 
   const breakdown = document.getElementById("content-breakdown");
   const types = summary.content_breakdown || {};

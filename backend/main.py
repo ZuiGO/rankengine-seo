@@ -143,4 +143,9 @@ async def health():
 
 @app.get("/")
 async def index():
+    return FileResponse(FRONTEND_DIR / "landing.html")
+
+
+@app.get("/app")
+async def app_index():
     return FileResponse(FRONTEND_DIR / "index.html")

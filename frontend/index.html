@@ -4,15 +4,41 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZuiGO Engine — SEO Analysis</title>
+<meta name="description" content="ZuiGO Engine — crawl, audit, and fix SEO across your whole site.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 26'%3E%3Crect x='1' y='1' width='24' height='24' rx='7' fill='%236366f1'/%3E%3Cpath d='M8 17V9l5 6 5-6v8' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('zui-theme');
+    if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.dataset.theme = 'dark';
+    }
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <div id="app">
   <header class="header">
-    <img id="app-logo" class="app-logo" src="/static/logo.png" alt="ZuiGO Engine"
-         onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='inline'">
-    <div class="logo" id="logo-fallback" style="display:none">ZuiGO Engine</div>
-    <div class="header-sub">SEO Analysis Engine</div>
+    <a class="brand-lockup" href="/" title="Back to the ZuiGO Engine landing page">
+      <svg class="brand-mark" width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+        <defs><linearGradient id="gmark-app" x1="0" y1="0" x2="26" y2="26"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs>
+        <rect x="1" y="1" width="24" height="24" rx="7" fill="url(#gmark-app)"/>
+        <path d="M8 17V9l5 6 5-6v8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="brand-lockup-text">ZuiGO <b>Engine</b></span>
+    </a>
+    <div class="header-sub">SEO Analysis Platform</div>
+    <div class="header-spacer"></div>
+    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle dark mode">
+      <svg class="icon icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/>
+      </svg>
+      <svg class="icon icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+    </button>
   </header>
 
   <main class="main">
@@ -54,25 +80,69 @@
         <button id="new-analysis-btn" class="btn-secondary">New Analysis</button>
       </div>
 
-      <nav class="tabs" id="tabs">
-        <button class="tab" data-tab="sites">Sites</button>
-        <button class="tab active" data-tab="overview">Overview</button>
-        <button class="tab" data-tab="pages">Pages</button>
-        <button class="tab" data-tab="content">Content</button>
-        <button class="tab" data-tab="links">Links</button>
-        <button class="tab" data-tab="actions">SEO Actions</button>
-        <button class="tab" data-tab="report">Report</button>
-        <button class="tab" data-tab="analytics">Analytics</button>
-        <button class="tab" data-tab="seo-insights">SEO Insights</button>
-        <button class="tab" data-tab="competitors">Competitors</button>
-        <button class="tab" data-tab="quality">Quality</button>
-        <button class="tab" data-tab="schedules">Schedules</button>
-        <button class="tab" data-tab="logs">Alerts</button>
-        <button class="tab" data-tab="settings">Settings</button>
+      <nav class="tabs" id="tabs" aria-label="Dashboard sections">
+        <button class="tab active" data-tab="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M12 12l8-5M12 12l-8-5M12 12v9"/></svg>
+          <span>Overview</span>
+        </button>
+        <button class="tab" data-tab="sites">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+          <span>Sites</span>
+        </button>
+        <button class="tab" data-tab="pages">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/></svg>
+          <span>Pages</span>
+        </button>
+        <button class="tab" data-tab="content">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+          <span>Content</span>
+        </button>
+        <button class="tab" data-tab="links">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 1 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 1 0 6 6l1-1"/></svg>
+          <span>Links</span>
+        </button>
+        <button class="tab" data-tab="actions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/></svg>
+          <span>SEO Actions</span>
+        </button>
+        <span class="tab-divider" role="separator"></span>
+        <button class="tab" data-tab="report">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg>
+          <span>Report</span>
+        </button>
+        <button class="tab" data-tab="analytics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4M4 20h16"/><rect x="7" y="11" width="3" height="6" rx="0.5"/><rect x="12" y="7" width="3" height="10" rx="0.5"/><rect x="17" y="13" width="3" height="4" rx="0.5"/></svg>
+          <span>Analytics</span>
+        </button>
+        <button class="tab" data-tab="seo-insights">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <span>SEO Insights</span>
+        </button>
+        <button class="tab" data-tab="competitors">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5"/><circle cx="16.5" cy="9" r="2.6"/><path d="M15.5 14.6c2.4.2 4.3 1.5 4.9 3.9"/></svg>
+          <span>Competitors</span>
+        </button>
+        <button class="tab" data-tab="quality">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span>Quality</span>
+        </button>
+        <span class="tab-divider" role="separator"></span>
+        <button class="tab" data-tab="schedules">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
+          <span>Schedules</span>
+        </button>
+        <button class="tab" data-tab="logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg>
+          <span>Alerts</span>
+        </button>
+        <button class="tab" data-tab="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          <span>Settings</span>
+        </button>
       </nav>
 
       <div class="tab-content" id="tab-overview">
-        <div class="stats-grid" id="overview-stats"></div>
+        <div class="stats-grid" id="overview-stats"><div class="skeleton skeleton-card skeleton-sm"></div><div class="skeleton skeleton-card skeleton-sm"></div><div class="skeleton skeleton-card skeleton-sm"></div><div class="skeleton skeleton-card skeleton-sm"></div></div>
         <div class="content-breakdown" id="content-breakdown"></div>
         <div class="stats-grid" id="overview-flows" style="margin-top:16px;grid-template-columns:repeat(1,1fr)"></div>
         <div id="overview-exec" style="margin-top:16px"></div>
@@ -91,7 +161,7 @@
           </label>
           <span id="sites-count" class="count-label"></span>
         </div>
-        <div id="sites-grid" class="sites-grid"></div>
+        <div id="sites-grid" class="sites-grid"><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>
         <div id="sites-comparison" class="hidden" style="margin-top:24px">
           <h3>Comparison</h3>
           <div id="comparison-table" class="table-container"></div>
@@ -104,7 +174,7 @@
           <input type="text" id="pages-search" placeholder="Search pages..." class="search-input">
           <span id="pages-count" class="count-label"></span>
         </div>
-        <div class="table-container" id="pages-table"></div>
+        <div class="table-container" id="pages-table"><div class="skeleton skeleton-table"></div></div>
       </div>
 
       <div class="tab-content hidden" id="tab-content">
@@ -121,7 +191,7 @@
           </select>
           <span id="content-count" class="count-label"></span>
         </div>
-        <div class="table-container" id="content-table"></div>
+        <div class="table-container" id="content-table"><div class="skeleton skeleton-table"></div></div>
       </div>
 
       <div class="tab-content hidden" id="tab-links">
@@ -173,7 +243,7 @@
           <button id="patch-md-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Export Markdown</button>
           <span id="actions-count" class="count-label"></span>
         </div>
-        <div id="actions-list"></div>
+        <div id="actions-list"><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>
         <h3 style="margin:24px 0 10px">Before / After Changes</h3>
         <div id="versions-list"></div>
       </div>
@@ -184,7 +254,7 @@
           <a id="report-pdf-link" class="btn-secondary" target="_blank">Download PDF</a>
           <button id="refresh-report-btn" class="btn-secondary">Refresh</button>
         </div>
-        <div id="report-preview" class="report-preview"></div>
+        <div id="report-preview" class="report-preview"><div class="skeleton skeleton-report"></div></div>
       </div>
 
       <div class="tab-content hidden" id="tab-analytics">

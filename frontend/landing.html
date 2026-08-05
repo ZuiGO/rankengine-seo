@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZuiGO Engine — AI-Powered SEO Analysis for Modern Teams</title>
+<meta name="description" content="Crawl every page, audit content quality, catch broken links and AI-visibility risks, and ship machine-applicable SEO fixes — all from one dashboard.">
+<link rel="stylesheet" href="/static/style.css">
+<script>
+(function () {
+  var h = location.hash;
+  if (h && h.indexOf('#job') === 0) { location.replace('/app' + h); }
+  try {
+    var t = localStorage.getItem('zui-theme');
+    if (t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.dataset.theme = 'dark';
+    }
+  } catch (e) {}
+})();
+</script>
+</head>
+<body class="landing-body">
+
+<nav class="landing-nav">
+  <a class="brand-lockup" href="/">
+    <svg class="brand-mark" width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+      <defs><linearGradient id="gmark" x1="0" y1="0" x2="26" y2="26"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs>
+      <rect x="1" y="1" width="24" height="24" rx="7" fill="url(#gmark)"/>
+      <path d="M8 17V9l5 6 5-6v8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span class="brand-lockup-text">ZuiGO <b>Engine</b></span>
+  </a>
+  <div class="landing-nav-links">
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+  </div>
+  <div class="landing-nav-actions">
+    <button id="theme-toggle-landing" class="icon-btn" type="button" aria-label="Toggle dark mode">
+      <svg class="icon icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/>
+      </svg>
+      <svg class="icon icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+    </button>
+    <a class="btn-primary btn-sm" href="/app">Open the analyzer</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="hero-orb orb-a"></div>
+  <div class="hero-orb orb-b"></div>
+  <div class="hero-inner">
+    <p class="hero-eyebrow reveal">AI-POWERED SEO AUDIT PLATFORM</p>
+    <h1 class="hero-title reveal" style="animation-delay:.05s">An audit that <span class="grad">finds the truth</span> about your site — and fixes it.</h1>
+    <p class="hero-sub reveal" style="animation-delay:.1s">ZuiGO Engine crawls every page, scores Core Web Vitals, surfaces content gaps and AI-visibility risks, and turns every finding into a measurable, tracked improvement.</p>
+    <div class="hero-cta reveal" style="animation-delay:.15s">
+      <a class="btn-primary btn-lg" href="/app">Launch the analyzer</a>
+      <a class="btn-ghost" href="#features">See what it covers</a>
+    </div>
+  </div>
+</header>
+
+<section class="hero-mock" aria-label="Live analysis example">
+  <div class="mock-card">
+    <div class="mock-head">
+      <span class="mock-domain">fluidcontrols.com</span>
+      <span class="mock-badge">Grade C</span>
+    </div>
+    <div class="mock-grid">
+      <div class="mock-stat">
+        <span class="mock-value" data-count="79" data-suffix="/100">0/100</span>
+        <span class="mock-label">Health score</span>
+      </div>
+      <div class="mock-stat">
+        <span class="mock-value" data-count="148">0</span>
+        <span class="mock-label">Pages analyzed</span>
+      </div>
+      <div class="mock-stat">
+        <span class="mock-value" data-count="56" data-suffix="/100">0/100</span>
+        <span class="mock-label">Core Web Vitals</span>
+      </div>
+      <div class="mock-stat">
+        <span class="mock-value" data-count="12" data-suffix=" issues">0</span>
+        <span class="mock-label">Actionable findings</span>
+      </div>
+    </div>
+    <div class="mock-bar-track"><div class="mock-bar"></div></div>
+    <div class="mock-tags">
+      <span>AI crawlers visible</span>
+      <span>0 broken links</span>
+      <span>alt text 93%</span>
+    </div>
+  </div>
+</section>
+
+<section id="features" class="section-wrap">
+  <div class="section-head reveal">
+    <h2 class="section-title-landing">One platform, the whole SEO stack</h2>
+    <p class="section-sub-landing">Every number in the app is measured against the site you crawled — nothing estimated, nothing fabricated.</p>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card reveal">
+      <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <h3>Full-site crawling</h3>
+      <p>BFS crawl seeded by XML sitemaps, politeness-throttled, with a mobile pass and click-depth tracking.</p>
+    </div>
+    <div class="feature-card reveal" style="animation-delay:.05s">
+      <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h7"/></svg>
+      <h3>Content auditing</h3>
+      <p>Thin content, meta, H1s, alt text, structured data, E-E-A-T signals and near-duplicate detection.</p>
+    </div>
+    <div class="feature-card reveal" style="animation-delay:.1s">
+      <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 6-8 3 4"/></svg>
+      <h3>Core Web Vitals</h3>
+      <p>CrUX field data fused with Lighthouse lab data, clearly labeled so you always know the source.</p>
+    </div>
+    <div class="feature-card reveal">
+      <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l4 2 -4 2M12 6h8M4 11l4 2-4 2M12 13h8M4 18l4 2-4 2M12 20h8"/></svg>
+      <h3>AI-visibility insights</h3>
+      <p>Robots-blocked AI agents, llms.txt presence, and generative-search readiness scoring.</p>
+    </div>
+    <div class="feature-card reveal" style="animation-delay:.05s">
+      <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8"/></svg>
+      <h3>Machine-applicable fixes</h3>
+      <p>Every issue becomes an action with evidence and a patch — approve, preview, and version the change.</p>
+    </div>
+    <div class="feature-card reveal" style="animation-delay:.1s">
+      <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v14H4zM8 8h8M8 12h5"/></svg>
+      <h3>Before / after reports</h3>
+      <p>Branded HTML and PDF reports with an exec summary, findings, and a methodology you can audit.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="section-wrap alt">
+  <div class="section-head reveal">
+    <h2 class="section-title-landing">How it works</h2>
+    <p class="section-sub-landing">From a raw URL to an actionable plan in a single journey.</p>
+  </div>
+  <div class="how-grid">
+    <div class="how-step reveal">
+      <div class="how-num">1</div>
+      <h3>Analyze</h3>
+      <p>Paste a URL. The engine crawls, extracts, and scores every page and link in waves.</p>
+    </div>
+    <div class="how-step reveal" style="animation-delay:.08s">
+      <div class="how-num">2</div>
+      <h3>Decide</h3>
+      <p>Approve or reject each SEO action. Approved changes are generated and versioned.</p>
+    </div>
+    <div class="how-step reveal" style="animation-delay:.16s">
+      <div class="how-num">3</div>
+      <h3>Measure</h3>
+      <p>Re-crawl to see the delta in a before/after report and longitudinal analytics.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band reveal">
+  <div class="cta-head">
+    <h2>Ready to see your site's true audit?</h2>
+    <p>Open the analyzer and run your first crawl in minutes.</p>
+  </div>
+  <a class="btn-primary btn-lg" href="/app">Launch the analyzer</a>
+</section>
+
+<footer class="landing-footer">
+  <div class="landing-footer-inner">
+    <span>ZuiGO Engine — AI search visibility for the modern web.</span>
+    <a href="/app">App</a>
+    <a href="/">Landing</a>
+  </div>
+</footer>
+
+<script src="/static/landing.js"></script>
+</body>
+</html>
