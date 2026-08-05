@@ -98,12 +98,70 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
       if (currentTab === "logs") loadLogs();
-    } else if (["sites", "schedules", "logs"].includes(currentTab)) {
+    } else if (["sites", "schedules", "logs", "settings"].includes(currentTab)) {
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
       if (currentTab === "logs") loadLogs();
+      if (currentTab === "settings") loadSettings();
     }
   });
+});
+
+async function loadSettings() {
+  const clientId = document.getElementById("gsc-client-id");
+  const redirectUri = document.getElementById("gsc-redirect-uri");
+  const status = document.getElementById("gsc-settings-status");
+  const hint = document.getElementById("gsc-settings-hint");
+  const current = document.getElementById("gsc-redirect-current");
+  if (hint) hint.style.display = "none";
+  try {
+    const resp = await fetch(`${API_BASE}/settings/gsc`);
+    const s = resp.ok ? await resp.json() : {};
+    if (clientId) clientId.placeholder = s.client_id_set ? s.client_id + " (saved)" : clientId.placeholder;
+    if (redirectUri) {
+      redirectUri.placeholder = s.redirect_uri || `${location.protocol}//${location.host}/api/gsc/callback`;
+      if (current) current.textContent = s.redirect_uri ? `Current: ${s.redirect_uri}` : "";
+    }
+    if (status) status.textContent = s.client_id_set ? "Configured" : "Not configured yet";
+  } catch (err) {
+    if (status) status.textContent = "Settings unavailable: " + err.message;
+  }
+}
+
+document.getElementById("gsc-settings-save")?.addEventListener("click", async () => {
+  const clientId = document.getElementById("gsc-client-id");
+  const secret = document.getElementById("gsc-client-secret");
+  const redirectUri = document.getElementById("gsc-redirect-uri");
+  const status = document.getElementById("gsc-settings-status");
+  const hint = document.getElementById("gsc-settings-hint");
+  try {
+    const resp = await fetch(`${API_BASE}/settings/gsc`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId ? clientId.value.trim() : "",
+        client_secret: secret ? secret.value.trim() : "",
+        redirect_uri: redirectUri ? redirectUri.value.trim() : "",
+      }),
+    });
+    const s = await resp.json();
+    if (!resp.ok) throw new Error(s.detail || resp.status);
+    if (hint) {
+      hint.textContent = "Saved. This redirect URI must be registered in your Google Cloud OAuth client: " +
+        (s.redirect_uri || `${location.protocol}//${location.host}/api/gsc/callback`);
+      hint.style.display = "block";
+    }
+    if (clientId) clientId.value = "";
+    if (secret) secret.value = "";
+    if (status) status.textContent = "Configured";
+    showToast("GSC settings saved");
+    loadSettings();
+  } catch (err) {
+    if (hint) {
+      hint.textContent = "Failed to save: " + err.message;
+      hint.style.display = "block";
+    }
+  }
 });
 
 // Polling
@@ -2377,7 +2435,7 @@ function linkifyText(text, maxLen) {
   return escapeHtml(label).replace(/(https?:\/\/[^\s<>"']+)/g, m => `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
 }
 
-const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "competitors", "quality", "schedules", "logs"]);
+const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "competitors", "quality", "schedules", "logs", "settings"]);
 
 function parseHash() {
   const m = window.location.hash.match(/^#job\/([a-zA-Z0-9-]+)(?:\/([a-z-]+))?/);

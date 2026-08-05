@@ -45,6 +45,7 @@ class FakeDb:
             "analysis_jobs": {},
             "gsc_credentials": {},
             "seo_insights_cache": {},
+            "app_settings": {},
         }
 
     def __getattr__(self, name):
@@ -61,10 +62,8 @@ def fake_db(monkeypatch):
 
 
 class TestAuthUrl:
-    def test_build_auth_url_includes_required_params(self, monkeypatch):
-        monkeypatch.setattr(settings, "gsc_client_id", "client-123")
-        monkeypatch.setattr(settings, "gsc_redirect_uri", "http://localhost:8001/api/gsc/callback")
-        url = gsc.build_auth_url("job-abc")
+    def test_build_auth_url_includes_required_params(self):
+        url = gsc._build_auth_url("job-abc", "client-123", "https://host/api/gsc/callback")
         assert "client_id=client-123" in url
         assert "redirect_uri=" in url
         assert "response_type=code" in url
@@ -73,8 +72,25 @@ class TestAuthUrl:
         assert "state=job-abc" in url
         assert url.startswith(gsc.AUTH_URL)
 
-    def test_configured_false_without_client_id(self):
-        assert not gsc.configured()
+    def test_redirect_uri_derived_from_request_host(self):
+        class FakeRequest:
+            url = type("U", (), {"scheme": "https", "netloc": "seo.example.com"})()
+
+        assert gsc._redirect_uri_for(FakeRequest()) == "https://seo.example.com/api/gsc/callback"
+
+    @pytest.mark.asyncio
+    async def test_configured_uses_db_settings_first(self, fake_db, monkeypatch):
+        monkeypatch.setattr(settings, "gsc_client_id", "")
+        monkeypatch.setattr(settings, "gsc_client_secret", "")
+        assert not await gsc.configured()
+        fake_db._stores["app_settings"]["gsc"] = {"key": "gsc", "client_id": "db-client", "client_secret": "db-secret"}
+        assert await gsc.configured()
+
+    @pytest.mark.asyncio
+    async def test_configured_falls_back_to_env(self, fake_db, monkeypatch):
+        monkeypatch.setattr(settings, "gsc_client_id", "env-client")
+        monkeypatch.setattr(settings, "gsc_client_secret", "env-secret")
+        assert await gsc.configured()
 
 
 class TestPropertyMatch:
@@ -195,3 +211,36 @@ class TestInsightsMerge:
     async def test_status_reports_disconnected(self, fake_db):
         status = await gsc.gsc_status("example.com")
         assert status["connected"] is False
+
+
+@pytest.mark.asyncio
+class TestSettingsRoute:
+    async def test_get_masks_values(self, fake_db, monkeypatch):
+        from backend.routes import app_settings as settings_route
+
+        monkeypatch.setattr(settings_route, "get_db", lambda: fake_db)
+        fake_db._stores["app_settings"]["gsc"] = {
+            "key": "gsc",
+            "client_id": "1234567890-client",
+            "client_secret": "super-secret",
+            "redirect_uri": "https://host/api/gsc/callback",
+        }
+        out = await settings_route.read_gsc_settings()
+        assert out["client_id_set"] is True
+        assert out["client_secret_set"] is True
+        assert "super-secret" not in out["client_id"]
+        assert out["redirect_uri"] == "https://host/api/gsc/callback"
+
+    async def test_put_stores_and_masks(self, fake_db, monkeypatch):
+        from backend.routes import app_settings as settings_route
+
+        monkeypatch.setattr(settings_route, "get_db", lambda: fake_db)
+        req = settings_route.GscSettingsRequest(
+            client_id="client-1", client_secret="secret-1", redirect_uri="https://h/api/gsc/callback"
+        )
+        out = await settings_route.write_gsc_settings(req)
+        assert out["client_id_set"] is True
+        assert "secret-1" not in out["client_id"]
+        stored = fake_db._stores["app_settings"]["gsc"]
+        assert stored["client_secret"] == "secret-1"
+        assert stored["client_id"] == "client-1"

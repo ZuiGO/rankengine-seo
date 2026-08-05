@@ -1,9 +1,10 @@
 """Google Search Console integration: OAuth2 connect + Search Analytics data.
 
-One-time setup (user): create a Google Cloud OAuth client (Desktop app),
-enable the Search Console API, and put GSC_CLIENT_ID / GSC_CLIENT_SECRET in
-.env (redirect URI defaults to http://localhost:8001/api/gsc/callback).
-The analyzed domain must be a verified property in Search Console.
+One-time setup (operator): create a Google Cloud OAuth client (Web app),
+enable the Search Console API, and save the client id/secret in the app
+Settings page (stored in MongoDB `app_settings`; GSC_CLIENT_ID /
+GSC_CLIENT_SECRET in .env act as fallback). The analyzed domain must be a
+verified property in Search Console.
 """
 
 from datetime import datetime, timedelta
@@ -24,14 +25,26 @@ SITES_URL = "https://www.googleapis.com/webmasters/v3/sites"
 SEARCH_ANALYTICS_URL = "https://www.googleapis.com/webmasters/v3/sites/{site}/searchAnalytics/query"
 
 
-def configured() -> bool:
-    return bool(settings.gsc_client_id and settings.gsc_client_secret)
+async def get_gsc_config() -> dict:
+    """GSC OAuth config: MongoDB app_settings first, .env as fallback."""
+    db = get_db()
+    doc = await db.app_settings.find_one({"key": "gsc"}) or {}
+    return {
+        "client_id": doc.get("client_id") or settings.gsc_client_id,
+        "client_secret": doc.get("client_secret") or settings.gsc_client_secret,
+        "redirect_uri": doc.get("redirect_uri") or settings.gsc_redirect_uri,
+    }
 
 
-def build_auth_url(job_id: str) -> str:
+async def configured() -> bool:
+    cfg = await get_gsc_config()
+    return bool(cfg["client_id"] and cfg["client_secret"])
+
+
+def _build_auth_url(job_id: str, client_id: str, redirect_uri: str) -> str:
     params = {
-        "client_id": settings.gsc_client_id,
-        "redirect_uri": settings.gsc_redirect_uri,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": SCOPE,
         "access_type": "offline",
@@ -39,6 +52,13 @@ def build_auth_url(job_id: str) -> str:
         "state": job_id,
     }
     return f"{AUTH_URL}?{urlencode(params)}"
+
+
+def _redirect_uri_for(request) -> str:
+    """Redirect URI for the current request: configured value, else derived
+    from the request host (https://<host>/api/gsc/callback)."""
+    base = f"{request.url.scheme}://{request.url.netloc}"
+    return f"{base}/api/gsc/callback"
 
 
 def _domain_from_url(url: str) -> str:
@@ -83,17 +103,18 @@ async def _token_post(payload: dict) -> dict:
     return resp.json()
 
 
-async def exchange_code(code: str, job_id: str) -> dict:
+async def exchange_code(code: str, job_id: str, redirect_uri: str | None = None) -> dict:
     db = get_db()
     job = await db.analysis_jobs.find_one({"_id": job_id})
     if not job:
         raise RuntimeError("Job not found")
     domain = _domain_from_url(job.get("url", ""))
+    cfg = await get_gsc_config()
     data = await _token_post({
         "code": code,
-        "client_id": settings.gsc_client_id,
-        "client_secret": settings.gsc_client_secret,
-        "redirect_uri": settings.gsc_redirect_uri,
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "redirect_uri": redirect_uri or cfg["redirect_uri"],
         "grant_type": "authorization_code",
     })
     if not data.get("refresh_token"):
@@ -115,9 +136,10 @@ async def _valid_access_token(domain: str) -> str | None:
     if expires and expires > datetime.utcnow() + timedelta(minutes=5):
         return creds.get("access_token")
     try:
+        cfg = await get_gsc_config()
         data = await _token_post({
-            "client_id": settings.gsc_client_id,
-            "client_secret": settings.gsc_client_secret,
+            "client_id": cfg["client_id"],
+            "client_secret": cfg["client_secret"],
             "refresh_token": creds.get("refresh_token"),
             "grant_type": "refresh_token",
         })
@@ -210,11 +232,12 @@ async def fetch_gsc(domain: str, days: int = 28) -> dict | None:
 
 async def gsc_status(domain: str) -> dict:
     creds = await _get_credentials(domain)
+    cfg_ok = await configured()
     if not creds:
-        return {"connected": False, "configured": configured(), "domain": domain, "property": None}
+        return {"connected": False, "configured": cfg_ok, "domain": domain, "property": None}
     return {
         "connected": True,
-        "configured": configured(),
+        "configured": cfg_ok,
         "domain": domain,
         "property": creds.get("property"),
         "token_expires_at": creds.get("expires_at"),

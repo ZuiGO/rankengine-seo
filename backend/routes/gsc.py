@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from backend.db.mongo import get_db
@@ -17,29 +17,45 @@ def _domain_from_url(url: str) -> str:
     return url
 
 
+async def _cfg_or_raise() -> dict:
+    cfg = await gsc.get_gsc_config()
+    if not (cfg["client_id"] and cfg["client_secret"]):
+        raise HTTPException(
+            status_code=503,
+            detail="Google Search Console is not configured. Open Settings to add the OAuth client id and secret.",
+        )
+    return cfg
+
+
 @router.get("/auth/{job_id}")
-async def auth_url(job_id: str):
+async def auth_url(job_id: str, request: Request):
     db = get_db()
     job = await db.analysis_jobs.find_one({"_id": job_id})
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if not gsc.configured():
+    if not await gsc.configured():
         return {
             "auth_url": None,
             "configured": False,
-            "hint": "GSC_CLIENT_ID / GSC_CLIENT_SECRET not configured in .env",
+            "hint": "GSC not configured: open the Settings tab and save the Google OAuth client id and secret",
         }
-    return {"auth_url": gsc.build_auth_url(job_id), "configured": True}
+    cfg = await gsc.get_gsc_config()
+    redirect_uri = cfg["redirect_uri"] or gsc._redirect_uri_for(request)
+    return {"auth_url": gsc._build_auth_url(job_id, cfg["client_id"], redirect_uri), "configured": True}
 
 
 @router.get("/callback")
-async def callback(code: str, state: str | None = None, error: str | None = None):
+async def callback(code: str, state: str | None = None, error: str | None = None, request: Request = None):
     if error:
         raise HTTPException(status_code=400, detail=f"GSC authorization failed: {error}")
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state")
     try:
-        result = await gsc.exchange_code(code, state)
+        cfg = await gsc.get_gsc_config()
+        redirect_uri = cfg["redirect_uri"] or gsc._redirect_uri_for(request)
+        result = await gsc.exchange_code(code, state, redirect_uri=redirect_uri)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Token exchange failed: {e}") from e
     return RedirectResponse(f"/#job/{state}/seo-insights?gsc=connected")
