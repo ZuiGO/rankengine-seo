@@ -10,9 +10,12 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: end of GSC connect round)
+## Status (last update: truthfulness audit + professional report template + UI polish)
 - All rounds DELIVERED. Latest commits pushed:
-  - GSC credential-connect round (pending commit): user-connected Google
+  - `cb3a1e1` — Truthfulness audit: no fabricated deductions or counts.
+  - `bd3bef7` — Rebrand to "ZuiGO Engine" (title, header, chat, mirror, notifications, user-agents, README, smoke).
+  - `ad1af55` — GSC self-serve: DB-backed operator settings (no .env for users).
+  - `28d063c` — GSC credential-connect round: user-connected Google
     Search Console → real organic_traffic (clicks) when the domain is a
     verified Search Console property; otherwise organic traffic stays N/A.
     - config.py: `gsc_client_id`, `gsc_client_secret`,
@@ -50,10 +53,47 @@ MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
       `/api/gsc/auth/{job}` -> configured:false hint, `/api/gsc/status/{job}`
       -> connected:false, insights payload has `gsc:null` + `gsc_error:null`
       (graceful when not connected).
-    - ONE-TIME USER SETUP still required: Google Cloud Console -> enable
-      Search Console API -> create OAuth client (Desktop app) -> put
-      GSC_CLIENT_ID / GSC_CLIENT_SECRET in .env -> verify the analyzed
-      domain as a Search Console property -> restart server -> Connect GSC.
+- ONE-TIME USER SETUP still required: Google Cloud Console -> enable
+      Search Console API -> create OAuth client (**Web application**) -> paste
+      Client ID / Client Secret into the in-app Settings tab (Settings ->
+      Google Search Console; stored in Mongo `app_settings` key `gsc`, `.env`
+      is only a fallback) -> add the redirect URI shown on the Settings page
+      (`https://<host>/api/gsc/callback`) to the client's authorized redirects
+      -> verify the analyzed domain as a Search Console property. End users
+      connect per-domain on the SEO Insights tab (Connect GSC); tokens land in
+      `gsc_credentials` keyed by domain.
+  - GSC self-serve round (`ad1af55`): `routes/app_settings.py` GET/PUT
+    `/api/settings/gsc` (masked reads; named app_settings.py to avoid
+    `config.settings` shadowing); `services/gsc.py` reads `get_gsc_config()`
+    (DB first, .env fallback), `configured()` is async now, auth/callback
+    derive `_redirect_uri_for(request)` from request host; frontend Settings
+    tab (fields + save/status/hint) in index.html + `loadSettings`/handler in
+    app.js; `VALID_TABS` includes `settings`.
+  - Rebrand round (`bd3bef7`): "ZuiGO Engine" user-facing strings + user-agents
+    `ZuiGO-Engine/1.0` / `ZuiGO-EngineBot/1.0`; idempotent test_patch assertion.
+  - Truthfulness round (`cb3a1e1`): site_health.py evaluated-only denominators
+    (`pages_evaluated_*`, `mobile_friendly_evaluated`), alt-deduction only when
+    images exist, thin = word_count < 200, legacy link buckets explicitly
+    labeled `broken_links_legacy_bucket` ("broken or unreachable"), CWV
+    per-page `cwv_source` (field/lab/mixed/partial) + summary `cwv_sources`,
+    local_insights evaluated-only; `backend/tests/test_truthfulness.py` (12).
+  - Professional report template (working tree, NOT committed yet): replaced
+    `_report_html` in `backend/routes/reports.py` with branded builder
+    (`_esc`, `_sev_badge`, `_kpi`, `_REPORT_CSS`) emitting cover w/ grade
+    block, 12-KPI grid, exec summary (narrative + direction/previous score),
+    severity-sorted Findings (evidence + how-to-fix), Quick Wins +
+    Long-Term recommendations, Methodology table, Content/Page-type
+    breakdowns, Backlinks/Domain/GSC insights, User Flows, Action Items,
+    Content Versions, footer. `import html as _html_esc` at module top.
+    Verified live: `/api/reports/{job}` HTML (200), `/pdf` renders 8-page A4,
+    168/168 pytest.
+  - Frontend polish round (working tree, NOT committed yet): rewrote
+    `frontend/style.css` (all existing selectors preserved) — refined
+    indigo/violet design system, gradient accent header + brand titles,
+    soft shadows + hover lift on cards/buttons, tab active pill, shimmer
+    progress bar, custom scrollbars, focus-visible rings, smooth tab fade.
+    Verified via Playwright headless: 14 tabs, 28 overview stat cards, no
+    console/JS errors (only 404 = placeholder logo.png, falls back to text).
   - `814f4af` — LLM model switched to `openai/gpt-oss-120b` (Groq; new
     `settings.groq_model`, env-overridable via `GROQ_MODEL`). Chat +
     change-applier both use it; live chat verified.
@@ -241,9 +281,10 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
-- GSC: user completes one-time Google Cloud OAuth client setup (above) then
-  end-to-end connect test; DataForSEO full re-test once account stability/
-  fraud-pause lift confirmed ("we will do test later").
+- GSC: user completes one-time Google Cloud OAuth client setup (Web app + in-app
+  Settings tab) then end-to-end connect test on the live job; DataForSEO full
+  re-test once account stability/fraud-pause lift confirmed ("we will do test
+  later").
 - Competitor-audit speed items (approved, not implemented): PSI sampling cap,
   no mobile browser pass for competitors, no asset downloads, content-hash page
   dedup, parallel competitor audits, SERP budget trim.
