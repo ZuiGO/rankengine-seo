@@ -10,12 +10,42 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: end of "Complete audit report" round; competitor-gap round in progress)
-- All rounds DELIVERED. Latest commit `bf7aac9` pushed: complete-audit round
-  (exec summary + sitemap/click-depth/HTTPS/redirects/mobile + E-E-A-T/extractability
-  + CWV field-split + cannibalization + AI/local-SEO readiness + UI + tests).
-- pytest: 126/126 (112 + 14 new in test_competitor_audit.py),
-  smoke: 80/80 (scripts/smoke_test.py) on books.toscrape.
+## Status (last update: end of "honest metrics + link accuracy" round)
+- All rounds DELIVERED. Latest commits `81cd3a5` + `814f4af` pushed:
+  - `814f4af` — LLM model switched to `openai/gpt-oss-120b` (Groq; new
+    `settings.groq_model`, env-overridable via `GROQ_MODEL`). Chat +
+    change-applier both use it; live chat verified.
+  - `81cd3a5` — honest link/content metrics round:
+    - link_checker: `_check_one` retries once (GET fallback for HEAD
+      timeout/error/403/405/501/5xx); status buckets now
+      ok/redirect/broken/blocked/unreachable; `broken_link_count` = true
+      4xx/5xx only (blocked/unreachable no longer lumped in); per-link
+      `pages` (source pages) stored; summary has `unreachable` count
+      (old `timeout`/`error` fields dropped).
+    - crawler: summary `total_links` = UNIQUE targets
+      (`unique_internal`+`unique_external` sets), new
+      `total_link_occurrences`/`total_internal_occurrences`/
+      `total_external_occurrences` (old occurrence counts);
+      content dedup atomic (`dedup_lock`), `data:` URI items skipped
+      (kills the 68x svg-placeholder duplicates).
+    - routes/links.py: response gains `total_link_occurrences`
+      (falls back to total_links for pre-change jobs); new
+      `GET /api/links/{job_id}/all?status=&limit=&offset=` (sorted,
+      status-filterable, includes source pages).
+    - exec_summary: per-issue `explanation` + `how_to_fix` steps +
+      `evidence` (top-5 resolver per issue_key over link_health /
+      page_performance / pages / orphan_pages / sitemap_audits /
+      duplicate_content), `all_issues` (full sorted list), narrative
+      `overview` string; `_narrative()` + `_evidence_for()` helpers.
+    - frontend: `linkify()`/`linkifyText()` helpers applied to every URL
+      cell (pages, content, backlinks, link-health issues+longest,
+      content versions, user flows, orphans, stale pages, sites list);
+      Links tab: unique label, Link Occurrences card, Blocked/Unreachable
+      cards, "Linked From" column, new All Links section with status
+      filter + load-more; exec summary: overview line + `<details>`
+      per issue (why/how/evidence) + collapsible all-issues list;
+      report organic-traffic card no longer renders literal null.
+- pytest: 137/137 (126 + 11 new in test_link_accuracy.py).
 - Competitor-gap round (IN PROGRESS, free tools only — replaces broken
   DataForSEO `/api/competitors/gap`; DataForSEO endpoints 404 on plan):
   - `services/crawler.py`: `crawl_site(..., unlimited=True, seed_sitemap=True)`
@@ -169,6 +199,12 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
+- GSC credential connect (OAuth flow drafted in prior session, NOT implemented):
+  user-connected Google Search Console → real organic_traffic (clicks) where
+  the domain is verified; otherwise organic traffic stays N/A.
+- Competitor-audit speed items (approved, not implemented): PSI sampling cap,
+  no mobile browser pass for competitors, no asset downloads, content-hash page
+  dedup, parallel competitor audits, SERP budget trim.
 - Long-term rank/build history is stored; optional richer longitudinal charts
   (Chart.js already wired for trends; could add more series).
 - Calibrate site-health scoring / add per-metric weight explanations.
