@@ -1475,30 +1475,56 @@ function serviceErrorHtml(service, message, hint) {
   </div>`;
 }
 
+function insightErrorKind(msg) {
+  const m = String(msg || "");
+  if (/402|40200|credits|fund|payment|quota/i.test(m)) return { kind: "credits", title: "DataForSEO unavailable (no credits)" };
+  if (/\b404\b|not enabled|not on .*plan|not present/i.test(m)) return { kind: "disabled", title: "DataForSEO endpoint not enabled on this plan" };
+  if (/\b429\b|rate.paused|rate.limit/i.test(m)) return { kind: "rate", title: "Data service temporarily rate-limited" };
+  if (/\b(500|502|503|504)\b|\btemporarily issue/i.test(m)) return { kind: "retry", title: "Data service temporarily unavailable" };
+  if (/keyword check(s)? failed/i.test(m)) return { kind: "partial", title: "Some keyword checks failed" };
+  return { kind: "other", title: "External data source unavailable" };
+}
+
+function insightWarningHtml(error) {
+  const k = insightErrorKind(error);
+  return `<div class="source-note" style="color:var(--warning, #b45309)">
+    <strong>${escapeHtml(k.title)}</strong> — showing fallback data instead.
+    <details style="display:inline-block;margin-left:6px"><summary>details</summary><div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(String(error || ""))}</div></details>
+  </div>`;
+}
+
 function insightErrorHtml(error) {
-  const msg = String(error || "");
-  if (/402|credits|fund|payment|quota/i.test(msg)) {
+  const k = insightErrorKind(error);
+  if (k.kind === "credits") {
     return `<div class="service-error" style="background:#fffbeb;border-color:#fde68a">
       <div class="service-error-title" style="color:#92400e">DataForSEO unavailable (no credits)</div>
-      <div class="service-error-msg" style="color:#78350f">Showing data from local crawl analysis instead. Add credits to DataForSEO for live keyword, backlink and domain data.</div>
+      <div class="service-error-msg" style="color:#78350f">This data couldn't be fetched and no local fallback is available. Add credits to DataForSEO to enable live keyword, backlink and domain data.</div>
     </div>`;
   }
-  return serviceErrorHtml("External service", msg);
+  return serviceErrorHtml(k.title, String(error || "Unknown error"));
 }
 
 function sourceLabel(source) {
-  const map = { dataforseo: "DataForSEO", serp: "SERP API", local: "local crawl data", none: "not available" };
+  const map = { dataforseo: "DataForSEO", "dataforseo-labs": "DataForSEO Labs", gsc: "Google Search Console", serp: "SERP API", local: "local crawl data", none: "not available" };
   return map[source] || source || "not available";
 }
 
 function renderInsightSection(el, { data, error, source, emptyText, render }) {
   let html = "";
-  if (error) html += insightErrorHtml(error);
-  if (data && render) {
+  if (error) {
+    if (data && render) {
+      html += `<p class="source-note">Source: ${sourceLabel(source)}</p>`;
+      html += render(data);
+      html += insightWarningHtml(error);
+    } else {
+      html += insightErrorHtml(error);
+    }
+  } else if (data && render) {
     html += `<p class="source-note">Source: ${sourceLabel(source)}</p>`;
     html += render(data);
+  } else {
+    html += `<div class="insights-card">${emptyText}</div>`;
   }
-  if (!data && !error) html += `<div class="insights-card">${emptyText}</div>`;
   el.innerHTML = html;
 }
 
@@ -1872,6 +1898,7 @@ function renderDomainOverview(ov, error, source) {
         <div class="insights-card"><div class="insights-label">Paid Keywords</div><div class="insights-value">${o.paid_keywords_count ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Domain Rank</div><div class="insights-value">${o.domain_rank ?? "N/A"}</div></div>
       </div>
+      ${o.sample_n ? `<p class="source-note" style="margin-top:8px">Traffic is the summed organic clicks of the top ${escapeHtml(o.sample_n)} ranked keywords (DataForSEO Labs) — a lower bound. Organic keyword count is the domain's total ranked keyword count.</p>` : ""}
     `,
   });
 }
@@ -1897,8 +1924,18 @@ function renderOnpage(op, error, source) {
 
 function renderSerp(rankings, error, source) {
   const el = document.getElementById("serp-rankings");
+  const errMsg = String(error || "");
   let html = "";
-  if (error) html += serviceErrorHtml("SERP API", error);
+  if (!rankings.length && error) {
+    if (insightErrorKind(error).kind === "credits") {
+      html += `<div class="service-error" style="background:#fffbeb;border-color:#fde68a">
+        <div class="service-error-title" style="color:#92400e">SERP API unavailable (no credits)</div>
+        <div class="service-error-msg" style="color:#78350f">Rankings couldn't be fetched and no local fallback is available. Add a valid serp_api_key or top up SERP API credits.</div>
+      </div>`;
+    } else {
+      html += serviceErrorHtml("SERP API", errMsg);
+    }
+  }
   if (rankings.length) {
     html += `<p class="source-note">Source: ${sourceLabel(source)} — rankings for keywords extracted from your content</p>`;
     html += rankings.map(r => `
@@ -1906,6 +1943,7 @@ function renderSerp(rankings, error, source) {
         <strong>${escapeHtml(r.keyword || "")}</strong> — Rank: ${r.rank ?? "Not in top 100"} | Total Results: ${r.total_results ?? "N/A"}
         ${r.top_results && r.top_results.length ? r.top_results.slice(0, 3).map(t => `<div style="font-size:13px;margin-top:4px">#${t.position}: <a href="${escapeHtml(t.url)}" target="_blank" rel="noopener">${escapeHtml(t.title)}</a></div>`).join("") : ""}
       </div>`).join("");
+    if (error) html += insightWarningHtml(error);
   }
   if (!rankings.length && !error) {
     html += '<div class="insights-card">No SERP ranking data available. Use "Suggest Keywords" to add keywords.</div>';

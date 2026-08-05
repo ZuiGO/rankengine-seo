@@ -10,9 +10,50 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: SaaS UI — landing page, dark mode, animations)
+## Status (last update: external-service resilience + fallback UI)
 - All rounds DELIVERED. Latest commits pushed:
-  - SaaS UI round (working tree): professional SaaS front door + app polish.
+  - Resilience round (working tree): no more red "External service unavailable"
+    banners above valid fallback data; retries + blacklist + SERP cache.
+    - Probes (live, ~1 credit each): `keywords_data/google/keywords_for_site`,
+      `keywords_data/google_ads/search_volume`, `dataforseo_labs/google/ranked_keywords`,
+      `backlinks/summary` all return 200 + data when the account has credits;
+      `domain_analytics/google/overview` and `on_page/summary` are HARD 404
+      (not on plan). Account is CURRENTLY in payment-required state (HTTP 402 /
+      task code 40200) so live DataForSEO calls fail until credits are topped up.
+    - `services/dataforseo.py`: `_post` retries 429/5xx up to 3 attempts with
+      backoff honoring `Retry-After`; in-memory 404/403 endpoint blacklist
+      (`_BLACKLISTED_ENDPOINTS`, hint "not enabled on this plan", skips future
+      calls); task code 40200 mapped to the credits hint; `_normalize_keyword_item`
+      maps flat keywords_for_site items into `keyword_data.keyword_info` shape the
+      renderer expects (also passes through nested labs items);
+      `domain_overview_labs(domain)` synthesizes the domain overview from
+      `dataforseo_labs/google/ranked_keywords` (organic traffic = summed clicks of
+      top `limit` sampled keywords, `sample_n` flag, total = `total_count`) used as
+      the middle tier: overview chain is now domain_analytics → labs → local.
+    - `services/serp_api.py`: `_get_with_retry` (3 attempts on 429/5xx, honors
+      `Retry-After`, used by `search_keyword` + `search_keyword_full`);
+      `run_serp_rankings` caches per-keyword results 24h in new mongo collection
+      `serp_cache` (key `domain|keyword`) so a transient SERP 429 doesn't blank
+      the section on every insights refresh (cache read only via `db is not None`,
+      Motor proxies raise on bool()).
+    - `app.js`: `insightErrorKind` buckets error strings (credits/404-disabled/
+      rate-limited/5xx/partial); `insightWarningHtml` muted amber note with
+      <details> for the raw string; `renderInsightSection` only renders the big
+      red/amber banner when there is NO fallback data — otherwise it shows data +
+      source note + muted warning; `renderSerp` shows rankings + muted note on
+      partial failure and only a red block (or SERP-specific credits block) when
+      zero rankings; URL `renderDomainOverview` adds a "sampled top N keywords
+      (lower bound)" footnote for the labs-sourced overview; `sourceLabel` adds
+      dataforseo-labs and gsc.
+    - Tests: `backend/tests/test_dataforseo_resilience.py` (11 new; total 179):
+      retry-then-succeed, retry-exhausted raises, 404 blacklists + immediate
+      skip, 40200 -> credits hint, keyword normalization (flat + nested), labs
+      synthesis sums, SERP 429 retry, cache-hit avoids re-call, expired cache
+      refetches, no-db still searches. Full suite 179/179; `node --check` clean.
+    - Live-verified (fluidcontrols.com job): keywords/overview/onpage show local
+      data + muted warnings; backlinks + SERP red blocks ONLY because they have
+      zero fallback data currently; Playwright zero console errors.
+  - SaaS UI round: professional SaaS front door + app polish.
     - `landing.html` (NEW) served at `/` — marketing page (brand nav, animated
       hero with orbs + staggered reveals, live-analysis mock card with
       count-up metrics, 6 feature cards, 3-step how-it-works, CTA band,
@@ -318,10 +359,10 @@ curl -s localhost:8001/api/health
   overrides the token palette in style.css.
 - Brand logomark is inline SVG in both pages — no logo.png dependency
   (old `#app-logo`/`#logo-fallback` markup removed).
-- GSC: user completes one-time Google Cloud OAuth client setup (Web app + in-app
+-   GSC: user completes one-time Google Cloud OAuth client setup (Web app + in-app
   Settings tab) then end-to-end connect test on the live job; DataForSEO full
-  re-test once account stability/fraud-pause lift confirmed ("we will do test
-  later").
+  re-test once credits are topped up (account currently returns HTTP 402) and
+  stability/fraud-pause lift confirmed ("we will do test later").
 - Competitor-audit speed items (approved, not implemented): PSI sampling cap,
   no mobile browser pass for competitors, no asset downloads, content-hash page
   dedup, parallel competitor audits, SERP budget trim.

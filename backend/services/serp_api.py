@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta
 from typing import Optional
+import asyncio
 import httpx
 
 from backend.config import settings
@@ -10,12 +12,45 @@ SERVICE = "serp"
 
 HINT = "Add a valid SERP API key to .env (serp_api_key) or top up your SERP API credits."
 
+SERP_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+SERP_MAX_ATTEMPTS = 3
+SERP_CACHE_TTL_SECONDS = 24 * 3600
 
 def _raise_api_error(data: dict, query: str) -> None:
     err = data.get("error")
     if not err:
         return
     raise ServiceError(SERVICE, f"SERP API ({query}): {err}", hint=HINT)
+
+
+async def _get_with_retry(client: httpx.AsyncClient, params: dict, query: str) -> httpx.Response:
+    last_error: ServiceError | None = None
+    for attempt in range(SERP_MAX_ATTEMPTS):
+        try:
+            resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+        except Exception as e:
+            last_error = ServiceError(SERVICE, f"SERP API request failed: {e}", hint=HINT)
+            if attempt < SERP_MAX_ATTEMPTS - 1:
+                await asyncio.sleep(1.0 * (attempt + 1))
+                continue
+            raise last_error from e
+        if resp.status_code in SERP_RETRYABLE_STATUSES:
+            if attempt < SERP_MAX_ATTEMPTS - 1:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    delay = min(float(retry_after), 5.0) if retry_after else 1.0 * (attempt + 1)
+                except ValueError:
+                    delay = 1.0 * (attempt + 1)
+                await asyncio.sleep(delay)
+                continue
+            raise ServiceError(
+                SERVICE,
+                f"SERP API ({query}) failed (HTTP {resp.status_code})",
+                status_code=resp.status_code,
+                hint=HINT,
+            )
+        return resp
+    raise last_error or ServiceError(SERVICE, f"SERP API ({query}): retries exhausted", hint=HINT)
 
 
 async def search_keyword(keyword: str, domain: Optional[str] = None) -> dict:
@@ -31,16 +66,11 @@ async def search_keyword(keyword: str, domain: Optional[str] = None) -> dict:
     }
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+            resp = await _get_with_retry(client, params, keyword)
+    except ServiceError:
+        raise
     except Exception as e:
         raise ServiceError(SERVICE, f"SERP API request failed: {e}", hint=HINT) from e
-    if resp.status_code >= 400:
-        raise ServiceError(
-            SERVICE,
-            f"SERP API ({keyword}) failed (HTTP {resp.status_code})",
-            status_code=resp.status_code,
-            hint=HINT,
-        )
     data = resp.json()
     _raise_api_error(data, keyword)
     try:
@@ -93,16 +123,11 @@ async def search_keyword_full(keyword: str) -> dict:
     }
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(SERP_BASE_URL, params=params, timeout=30)
+            resp = await _get_with_retry(client, params, keyword)
+    except ServiceError:
+        raise
     except Exception as e:
         raise ServiceError(SERVICE, f"SERP API request failed: {e}", hint=HINT) from e
-    if resp.status_code >= 400:
-        raise ServiceError(
-            SERVICE,
-            f"SERP API ({keyword}) failed (HTTP {resp.status_code})",
-            status_code=resp.status_code,
-            hint=HINT,
-        )
     data = resp.json()
     _raise_api_error(data, keyword)
     try:
@@ -262,17 +287,67 @@ async def serp_link_search(domain: str, max_pages: int = 3) -> list[dict]:
     return sources
 
 
+async def _serp_cache_get(db, cache_key: str) -> Optional[dict]:
+    try:
+        row = await db.serp_cache.find_one({"cache_key": cache_key})
+    except Exception:
+        return None
+    if not row:
+        return None
+    fetched = row.get("fetched_at")
+    if not fetched:
+        return None
+    if isinstance(fetched, dict) and "$date" in fetched:
+        fetched = fetched["$date"]
+    if isinstance(fetched, datetime):
+        if datetime.utcnow() - fetched > timedelta(seconds=SERP_CACHE_TTL_SECONDS):
+            return None
+    return row.get("data")
+
+
+async def _serp_cache_put(db, cache_key: str, data: dict) -> None:
+    try:
+        await db.serp_cache.update_one(
+            {"cache_key": cache_key},
+            {"$set": {"cache_key": cache_key, "data": data, "fetched_at": datetime.utcnow()}},
+            upsert=True,
+        )
+    except Exception:
+        pass
+
+
 async def run_serp_rankings(domain: str, job_id: str | None, max_keywords: int = 5) -> tuple[list[dict], list[str]]:
-    """Check SERP ranking for a handful of job keywords. Returns (results, per-keyword errors)."""
+    """Check SERP ranking for a handful of job keywords. Returns (results, per-keyword errors).
+
+    Per-keyword results are cached for 24h (with the rank stamped at crawl time)
+    so a transient SERP 429 doesn't blank the section on every insights refresh.
+    """
     keywords = []
     if job_id:
         keywords = await extract_keywords_from_content(job_id)
     keywords = keywords[:max_keywords]
     results = []
     errors = []
+    db = None
     for kw in keywords:
+        cache_key = f"{domain}|{kw}".lower()
+        if db is None:
+            try:
+                from backend.db.mongo import get_db
+                db = get_db()
+            except Exception:
+                db = False
+        use_cache = db is not None and db is not False
+        if use_cache:
+            cached = await _serp_cache_get(db, cache_key)
+            if cached is not None:
+                results.append(cached)
+                continue
         try:
-            results.append(await search_keyword(kw, domain))
+            result = await search_keyword(kw, domain)
+            if use_cache:
+                await _serp_cache_put(db, cache_key, result)
+            results.append(result)
         except Exception as e:
             errors.append(f"{kw}: {e}")
     return results, errors

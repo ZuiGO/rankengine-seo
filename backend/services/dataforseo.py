@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from datetime import datetime
 from typing import Optional
@@ -10,11 +11,18 @@ BASE_URL = "https://api.dataforseo.com"
 
 SERVICE = "dataforseo"
 
+RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 3
+RETRY_BASE_SECONDS = 1.0
+
 HINTS = {
     401: "Check your DataForSEO login and password in .env (dataforseo_login / dataforseo_password).",
     402: "DataForSEO subscription has no credits left. Top up credits, or use the built-in SERP / local crawl fallbacks.",
     403: "DataForSEO access is restricted for this account.",
+    404: "This DataForSEO endpoint is not enabled on your subscription plan. Local crawl data is shown instead.",
 }
+
+_BLACKLISTED_ENDPOINTS: set[str] = set()
 
 
 def _auth_header() -> dict:
@@ -37,6 +45,8 @@ def _hint_for_code(status_code: int) -> str | None:
 def _raise_for_http(resp: httpx.Response, endpoint: str) -> None:
     if resp.status_code < 400:
         return
+    if resp.status_code in (403, 404):
+        _BLACKLISTED_ENDPOINTS.add(endpoint)
     message = f"DataForSEO {endpoint} failed (HTTP {resp.status_code})"
     try:
         body = resp.json()
@@ -64,30 +74,76 @@ def _raise_for_task(data: dict, endpoint: str) -> None:
     msg = err.get("message") or task.get("status_message") or "Unknown task error"
     lowered = f"{code} {msg}".lower()
     hint = None
-    if code in (40202, 40203, 40204) or "fund" in lowered or "payment" in lowered:
+    if code in (40200, 40202, 40203, 40204) or "fund" in lowered or "payment" in lowered:
         hint = _hint_for_code(402)
     elif code == 40101 or "login" in lowered:
         hint = _hint_for_code(401)
     raise ServiceError(SERVICE, f"DataForSEO {endpoint}: {msg} (code {code})", status_code=code, hint=hint)
 
 
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    retry_after = resp.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return min(float(retry_after), 5.0)
+        except ValueError:
+            pass
+    return RETRY_BASE_SECONDS * (attempt + 1)
+
+
 async def _post(endpoint: str, payload: list) -> dict:
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{BASE_URL}/v3/{endpoint}/live",
-                headers=_auth_header(),
-                json=payload,
-                timeout=90,
-            )
-    except ServiceError:
-        raise
-    except Exception as e:
-        raise ServiceError(SERVICE, f"DataForSEO {endpoint}: {e}") from e
-    _raise_for_http(resp, endpoint)
-    data = resp.json()
-    _raise_for_task(data, endpoint)
-    return data
+    if endpoint in _BLACKLISTED_ENDPOINTS:
+        raise ServiceError(
+            SERVICE,
+            f"DataForSEO {endpoint} not enabled on this plan",
+            status_code=404,
+            hint=_hint_for_code(404),
+        )
+    last_error: ServiceError | None = None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{BASE_URL}/v3/{endpoint}/live",
+                    headers=_auth_header(),
+                    json=payload,
+                    timeout=90,
+                )
+        except ServiceError:
+            raise
+        except Exception as e:
+            last_error = ServiceError(SERVICE, f"DataForSEO {endpoint}: {e}")
+            if attempt < MAX_ATTEMPTS - 1:
+                await asyncio.sleep(RETRY_BASE_SECONDS * (attempt + 1))
+                continue
+            raise last_error
+        if resp.status_code in RETRYABLE_STATUSES:
+            if attempt < MAX_ATTEMPTS - 1:
+                await asyncio.sleep(_retry_delay(resp, attempt))
+                continue
+        _raise_for_http(resp, endpoint)
+        data = resp.json()
+        _raise_for_task(data, endpoint)
+        return data
+    raise last_error or ServiceError(SERVICE, f"DataForSEO {endpoint}: retries exhausted")
+
+
+def _normalize_keyword_item(item: dict) -> dict:
+    kd = item.get("keyword_data") or {}
+    ki = kd.get("keyword_info") or {}
+    kp = kd.get("keyword_properties") or {}
+    return {
+        "keyword": item.get("keyword") or kd.get("keyword") or "",
+        "keyword_data": {
+            "keyword_info": {
+                "search_volume": ki.get("search_volume", item.get("search_volume")),
+                "cpc": ki.get("cpc", item.get("cpc")),
+            },
+            "keyword_properties": {
+                "keyword_difficulty": kp.get("keyword_difficulty"),
+            },
+        },
+    }
 
 
 async def domain_keywords(domain: str, limit: int = 20) -> list[dict]:
@@ -98,9 +154,8 @@ async def domain_keywords(domain: str, limit: int = 20) -> list[dict]:
         "language_name": "English",
     }])
     result = data["tasks"][0]["result"][0]
-    if isinstance(result, list):
-        return result
-    return result.get("items", [])
+    items = result if isinstance(result, list) else result.get("items", [])
+    return [_normalize_keyword_item(it) for it in items]
 
 
 async def backlink_summary(target: str) -> Optional[dict]:
@@ -126,6 +181,38 @@ async def onpage_summary(url: str) -> Optional[dict]:
 async def domain_overview(domain: str) -> Optional[dict]:
     data = await _post("domain_analytics/google/overview", [{"target": domain}])
     return data["tasks"][0]["result"][0]
+
+
+async def domain_overview_labs(domain: str, limit: int = 100) -> Optional[dict]:
+    """DataForSEO Labs ranked-keywords synthesis for the domain overview.
+
+    Not a full domain_analytics overview (that endpoint is plan-gated), so the
+    traffic figure is the summed organic clicks of the top `limit` ranked
+    keywords; `sample_n` flags that the sum is a lower bound.
+    """
+    data = await _post("dataforseo_labs/google/ranked_keywords", [{
+        "target": domain,
+        "location_name": "United States",
+        "language_name": "English",
+        "limit": limit,
+        "include_subdomains": True,
+    }])
+    res = (data["tasks"][0].get("result") or [{}])[0]
+    items = res.get("items") or []
+    if not items:
+        return None
+    total = res.get("total_count") or len(items)
+    organic_clicks = sum(
+        ((it.get("metrics") or {}).get("organic") or {}).get("clicks", 0) for it in items
+    )
+    return {
+        "domain": domain,
+        "estimated_organic_traffic": round(organic_clicks),
+        "organic_keywords_count": total,
+        "paid_keywords_count": None,
+        "sample_n": len(items),
+        "source": "dataforseo-labs",
+    }
 
 
 async def rank_tracking_keywords(domain: str, keywords: list[str]) -> list[dict]:
@@ -169,11 +256,19 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["overview"] = await domain_overview(domain)
         insights["overview_source"] = "dataforseo"
         insights["overview_error"] = None
-    except Exception as e:
-        insights["overview_error"] = str(e)
-        from backend.services.local_insights import local_overview
-        insights["overview"] = await local_overview(job_id) if job_id else None
-        insights["overview_source"] = "local" if insights["overview"] else "none"
+    except Exception as first_e:
+        try:
+            labs = await domain_overview_labs(domain)
+            if not labs:
+                raise ServiceError(SERVICE, "no overview data returned (labs)")
+            insights["overview"] = labs
+            insights["overview_source"] = "dataforseo-labs"
+            insights["overview_error"] = None
+        except Exception as e:
+            insights["overview_error"] = f"{first_e} | {e}"
+            from backend.services.local_insights import local_overview
+            insights["overview"] = await local_overview(job_id) if job_id else None
+            insights["overview_source"] = "local" if insights["overview"] else "none"
 
     try:
         insights["onpage"] = await onpage_summary(f"https://{domain}")
