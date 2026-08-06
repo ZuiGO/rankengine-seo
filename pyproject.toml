@@ -22,6 +22,8 @@ dependencies = [
     "numpy>=1.26.0",
     "pymupdf>=1.24.0",
     "python-magic>=0.4.27",
+    "chromadb==1.5.9",
+    "arq>=0.25.0",
 ]
 
 [build-system]

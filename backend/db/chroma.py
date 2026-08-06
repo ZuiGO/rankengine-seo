@@ -2,7 +2,7 @@ import chromadb
 from chromadb.config import Settings
 from chromadb.errors import NotFoundError
 
-_client: chromadb.Client | None = None
+_client: chromadb.ClientAPI | None = None
 
 
 def get_chroma_client():
