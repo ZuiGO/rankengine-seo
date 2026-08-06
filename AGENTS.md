@@ -10,8 +10,54 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: seo-audit skill round — live-verified on a full
-  fluidcontrols.com crawl + report key-mismatch fixes, committed `90fd0eb`)
+## Status (last update: M4 SE Ranking provider round — live-verified on job
+  `24fd33f6`, committed `289434c`)
+- M1+M2+M3 round `c8aac33`, M5 round `1062bf9` (both pushed): honest counts
+  (unique images/occurrences, video_embed classification), metadata-only
+  crawl (~10 min vs 16.6 for fluidcontrols 261 pages), competitor reliability
+  (domain normalization, stale-key migration, status lifecycle, retry,
+  caps `competitor_crawl_max_pages=1000`/`competitor_psi_sample=10`,
+  mobile=False for competitors), Site Health & Audits dashboard
+  (renderSiteHealth + 16 audit cards + status chips), professional Pages tab
+  (search/filter/sort/pagination via `GET /api/pages/{job}/all`).
+- M4 round `289434c` (pushed): SE Ranking Data API provider.
+  - NEW `backend/services/se_ranking.py`: `Authorization: Token` against
+    `https://api.seranking.com/v1`; key/region from MongoDB `app_settings`
+    doc key `se_ranking` (Settings page) with `settings.se_ranking_api_key`
+    (.env) fallback (mirrors GSC); ~0.2s request throttle + 429/5xx retry
+    (honors Retry-After, 3 attempts); error hints for missing key / expired
+    license / insufficient funds / rate limit; `_record_usage` -> spend
+    tracker (`se_ranking` added to `SERVICE_RATES`).
+  - Functions (shapes matched to existing renderers): `domain_overview`
+    (`domain/overview/db` -> estimated_organic_traffic/organic_keywords_count/
+    paid_keywords_count), `domain_keywords` (`domain/keywords` organic, ordered
+    by volume -> keyword_data.keyword_info shape), `ranked_keywords` (same
+    endpoint ordered by position -> SERP rankings shape with rank + top url),
+    `backlink_summary` (`backlinks/summary` mode=domain -> backlinks/
+    referring_domains/referring_ips/rank/rich detail). `source` = "se-ranking".
+  - Provider chain in `dataforseo.py::fetch_all_insights`: keywords
+    dataforseo -> se-ranking -> local; overview dataforseo -> labs ->
+    se-ranking -> local; backlinks dataforseo -> se-ranking -> local; serp
+    rankings serp -> se-ranking ranked_keywords when empty/failed. Errors
+    chained with ` | ` separators (e.g. "dataforseo: ... | se_ranking: SE
+    Ranking API key not configured").
+  - `routes/app_settings.py`: `GET/PUT /api/settings/se-ranking` (masked
+    api_key + api_key_set + region, default "us"); Settings tab in index.html
+    + loadSettings/save handler in app.js; `sourceLabel` map gains
+    "se-ranking"; `loadSettings` also called when a job is open (settings tab
+    now loads in job context — GSC status was previously blank there too).
+  - Tests: `backend/tests/test_se_ranking.py` (13 new; suite 237 -> 250/250):
+    retry-then-succeed, retries-exhausted, 401->key hint, insufficient-funds
+    -> credits hint, region param injected from config, field mapping for all
+    3 endpoints + ranked_keywords position filtering, missing-key raises,
+    chain fallback tests (keywords/backlinks/overview to se-ranking and on
+    full failure to local) with FakeClient + monkeypatched local/serp helpers.
+  - Live-verified on job `24fd33f6` (fluidcontrols.com): refresh shows
+    `keywords_source=se-ranking` (10 real keywords: vol/cpc/difficulty
+    populated), `serp_source=se-ranking` (10 rankings w/ real positions);
+    overview dataforseo-labs, backlinks dataforseo (both now live again);
+    Settings tab shows masked key + Configured; Playwright zero console
+    errors.
 - Fix round `90fd0eb` (pushed): first real crawl (fluidcontrols.com 300 pages,
   job `088570da`) surfaced stored-key mismatches between the 4 new audit docs
   and their consumers:
@@ -489,6 +535,13 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
+- M6 (LAST milestone of the M1-M6 plan): apply-actions flow replacing the
+  dummy-site demo — use `backend/routes/actions.py` patch endpoint
+  (`GET /api/actions/{job}/patch?format=json|md`), apply via GitHub PR
+  (`notifications.create_github_pr`) + in-repo guide, remove dummy-site UI
+  entry points from index.html/app.js (~lines 212-213 tab + ~985-1030
+  generate/dummy-site handlers). M1d (remove dummy-site entry points) is
+  merged into M6.
 - The app lives at `/app` (index.html); `/` serves the marketing landing page
   (landing.html). Deep links `/#job/<id>` redirect to `/app#job/<id>`.
 - Full smoke run with the new audits (long crawl) — books.toscrape is
