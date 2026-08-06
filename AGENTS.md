@@ -10,8 +10,62 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: professional audit extras round — accurate full-site
-  crawls + rich sitemap / AI-visibility / local-SEO sections)
+## Status (last update: seo-audit skill round — international SEO / URL hygiene /
+  indexation / image optimization, committed `d9126b8`, pushed)
+- seo-audit skill integration round (committed `d9126b8`, pushed):
+  - Skill installed: `~/.agents/skills/seo-audit/` (SKILL.md +
+    references/international-seo.md) via `skills add coreyhaines31/marketingskills
+    --skill seo-audit -a opencode -g --copy`; opencode picks up `~/.agents/skills/`.
+  - `services/international_seo.py` (NEW): hreflang audit — self-referencing
+    pages, x-default, valid codes (ISO 639-1 + ISO 3166-1 sets, KNOWN_BAD_CODES
+    en-uk/es-419/pt-braz), reciprocal pairs, canonical-in-set, locale-in-URL
+    structure, lang-parameter pages; `applicable` False when monolingual
+    (score None); subscores 30/15/15/25/15; merges sitemap alternate stats;
+    stores `hreflang_audits`.
+  - `services/url_hygiene.py` (NEW): FACET_PARAMS (page/sort/filter/...),
+    param/facet/lang-param counts, top_params, uppercase/underscore/long-slug
+    paths, trailing-slash consistency; subscores 40/20/20/20; `url_hygiene_audits`.
+  - `services/indexation.py` (NEW): `site:{domain}` SERP check via spend-tracked
+    `search_keyword`; `status` measured (adwords-indexed estimate + top indexed
+    pages) or `unmeasured` with credits hint on ServiceError; `indexation_audits`.
+  - `services/image_optimization.py` (NEW): WebP/AVIF via src/srcset/picture
+    (ancestor walk — lxml nests <img> inside <source>, so `parent.name` fails),
+    lazy loading, explicit dimensions; subscores 40/30/30; `image_optimization_audits`.
+  - `services/sitemap.py`: `_fetch_sitemap_entries` captures
+    `<xhtml:link rel="alternate" hreflang>` into per-entry `alternates`;
+    audit_sitemap aggregation adds `sitemap_alt_entries`/`sitemap_alt_codes`/
+    `sitemap_missing_self_ref` (normalized self-check)/`sitemap_invalid_alt_codes`
+    (via `is_valid_hreflang_code`, imported in-loop to dodge circular imports).
+  - Pipeline: analysis.py wave1 stages `hreflang`, `url_hygiene`, `indexation`,
+    `image_opt` (indexation needs SERP spend; degrades gracefully). quality.py
+    GET endpoints `/api/quality/{job}/hreflang|url-hygiene|indexation|image-optimization`.
+  - site_health: metrics (hreflang_score/locales, url_hygiene_score/param_pages,
+    indexation_status/indexed_estimate, image_opt_score) + issues (multi-locale
+    no-hreflang high, hreflang errors medium, facet params medium, image weak low).
+    exec_summary: keys hreflang_errors/url_param_issues/image_optimization
+    (EFFORT/TITLES/EXPLANATIONS/HOW_TO_FIX + ISSUE_KEY_FROM_MESSAGE substrings
+    hreflang/faceted/pagination url/image optimization).
+  - Frontend Report: 4 new loadReportExtras sections (hreflang incl. N/A case,
+    url-hygiene top params, indexation measured/unmeasured, image-opt stats).
+    PDF: 4 new branded sections in reports.py `_report_html`.
+  - Chat: `SEO_AUDIT_GUIDANCE` constant (guidance vendored from the seo-audit
+    skill, marketing-skills, MIT — attributed in the constant) wired into
+    SYSTEM_PROMPT, FULL_SITE_PROMPT (now mentions new sections) and
+    GENERAL_SYSTEM_PROMPT; `_hreflang_context`/`_url_hygiene_context`/
+    `_indexation_context`/`_image_opt_context` builders added to full-site
+    context + `_context_for_section` dispatch (hreflang/url-hygiene/indexation/
+    image-optimization section names).
+  - Tests: `backend/tests/test_international_extras.py` (20 new; full suite
+    218/218) — FakeDb/FakeCollection pattern (find sync like Motor cursor),
+    hreflang helpers + full audit cases (monolingual N/A, reciprocal pair
+    scores 85 without x-default, invalid/one-way detection), sitemap xhtml
+    alternate capture, URL hygiene counts, image modern/lazy/dims (picture
+    source detection), indexation measured + ServiceError degradation,
+    chat guidance + exec_summary key mapping.
+  - Live-verified on example.com job `1707d895`: all 4 stages ok in /tmp/arq.log,
+    endpoints return data (hreflang not applicable, url-hygiene 100, indexation
+    unmeasured w/ credits hint, image 70/0 images), `/download` HTML + PDF 200
+    include the new sections; services restarted via launchd.
 - Professional audit extras round (working tree, committed as one round):
   fixes "0 pages crawled" plus professional Report/Overview/PDF sections.
   - `services/crawler.py`: normal analyses now call
@@ -416,6 +470,17 @@ curl -s localhost:8001/api/health
 ## Next up (candidate work, NOT started)
 - The app lives at `/app` (index.html); `/` serves the marketing landing page
   (landing.html). Deep links `/#job/<id>` redirect to `/app#job/<id>`.
+- Full smoke run with the new audits (long crawl) — books.toscrape is
+  monolingual/clean so hreflang will be N/A, url-hygiene high, indexation
+  unmeasured (serp key not configured), image-opt to be confirmed; also a
+  fresh fluidcontrols.com re-crawl to see the new sections populate with real
+  data + verify Playwright Report tab for the 4 new sections.
+- Chat: new audits are in full-site context; a per-section chat test
+  (e.g. section=hreflang) can be verified once a multilingual job exists.
+- Optional follow-ups from the skill's checklist not yet automated: hreflang
+  validation via `?hl=` parameter casing rules, news/video/image sitemap
+  variants (sitemap audit ignores them), crawl-budget heuristics (thin
+  parameter trees), real AI-overview citation monitoring.
 - Theme toggle: header `#theme-toggle` (app) / `#theme-toggle-landing`
   (landing), persists `zui-theme` in localStorage; `[data-theme="dark"]`
   overrides the token palette in style.css.
