@@ -10,8 +10,29 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: seo-audit skill round — international SEO / URL hygiene /
-  indexation / image optimization, committed `d9126b8`, pushed)
+## Status (last update: seo-audit skill round — live-verified on a full
+  fluidcontrols.com crawl + report key-mismatch fixes, committed `90fd0eb`)
+- Fix round `90fd0eb` (pushed): first real crawl (fluidcontrols.com 300 pages,
+  job `088570da`) surfaced stored-key mismatches between the 4 new audit docs
+  and their consumers:
+  - `url_hygiene_audits.top_params` is a **dict**; the PDF report did
+    `top_params[:6]` -> KeyError, 500 on `/api/reports/{job}/download` and
+    `/pdf`; frontend `.map` on a dict silently dropped the section. Fixed in
+    reports.py / app.js / chat `_url_hygiene_context` (normalize dict|list).
+  - image_optimization_audits stores `total_images`/`modern_images`/
+    `lazy_images`/`missing_dimensions` (NOT total_imgs/modern/lazy/dims_missing)
+    — PDF said "0 images on page" for 9424. Fixed in reports.py / app.js /
+    `_image_opt_context`.
+  - url hygiene stores `uppercase_paths`/`underscore_paths` (not _slugs).
+  - Added 4 chat-context regression tests (suite 222/222).
+  - Live checks on `088570da`: all 4 stages ok (url_hygiene/hreflang/image_opt
+    ~33s, indexation ~63s on 300 pages), hreflang not applicable (monolingual,
+    score null), url-hygiene 40 (99 page_id params, 17 long slugs, 1 uppercase,
+    4 underscore), image 15 (9424 imgs, 0 WebP, 2932 no dims), indexation
+    unmeasured (credits hint); site_health metrics nested under `metrics` all
+    populated; exec summary includes `image_optimization` issue; Report tab
+    Playwright: 4 sections render with real data, zero console errors; PDF
+    200 ~3MB.
 - seo-audit skill integration round (committed `d9126b8`, pushed):
   - Skill installed: `~/.agents/skills/seo-audit/` (SKILL.md +
     references/international-seo.md) via `skills add coreyhaines31/marketingskills
@@ -481,6 +502,10 @@ curl -s localhost:8001/api/health
   validation via `?hl=` parameter casing rules, news/video/image sitemap
   variants (sitemap audit ignores them), crawl-budget heuristics (thin
   parameter trees), real AI-overview citation monitoring.
+- NOTE: `page_id` (99 pages on fluidcontrols) is a URL param not in
+  FACET_PARAMS — audit flags param_pages but not facet_pages for it; consider
+  adding page_id/pid to FACET_PARAMS if a future crawl shows similar pagination
+  params being missed.
 - Theme toggle: header `#theme-toggle` (app) / `#theme-toggle-landing`
   (landing), persists `zui-theme` in localStorage; `[data-theme="dark"]`
   overrides the token palette in style.css.
