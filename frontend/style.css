@@ -1361,6 +1361,14 @@ body {
 }
 .brand-lockup:hover { background: var(--surface-hover); }
 .brand-mark { flex: 0 0 auto; filter: drop-shadow(0 2px 6px rgba(99, 102, 241, 0.35)); }
+.brand-mark-img {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 2px 6px rgba(99, 102, 241, 0.35));
+}
 .brand-lockup-text { font-size: 20px; font-weight: 800; letter-spacing: -0.6px; color: var(--text); }
 .brand-lockup-text b { font-weight: 800; background: var(--grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .header-spacer { flex: 1; }
