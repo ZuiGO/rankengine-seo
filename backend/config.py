@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     serp_api_key: str = ""
+    se_ranking_api_key: str = ""
     dataforseo_login: str = ""
     dataforseo_password: str = ""
     gemini_api_key: str = ""

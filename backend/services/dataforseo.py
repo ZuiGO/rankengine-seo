@@ -17,9 +17,9 @@ RETRY_BASE_SECONDS = 1.0
 
 HINTS = {
     401: "Check your DataForSEO login and password in .env (dataforseo_login / dataforseo_password).",
-    402: "DataForSEO subscription has no credits left. Top up credits, or use the built-in SERP / local crawl fallbacks.",
+    402: "DataForSEO subscription has no credits left. Top up credits, or use SE Ranking / the built-in SERP / local crawl fallbacks.",
     403: "DataForSEO access is restricted for this account.",
-    404: "This DataForSEO endpoint is not enabled on your subscription plan. Local crawl data is shown instead.",
+    404: "This DataForSEO endpoint is not enabled on your subscription plan. SE Ranking / local crawl data is shown instead.",
 }
 
 _BLACKLISTED_ENDPOINTS: set[str] = set()
@@ -228,6 +228,7 @@ async def rank_tracking_keywords(domain: str, keywords: list[str]) -> list[dict]
 async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
     """Fetch external SEO insights with per-section structured errors and local fallbacks."""
     from backend.services.local_insights import local_keywords, local_onpage, local_backlinks
+    from backend.services import se_ranking
 
     insights = {"domain": domain}
 
@@ -240,8 +241,16 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["keywords_error"] = None
     except Exception as e:
         insights["keywords_error"] = str(e)
-        insights["keywords"] = await local_keywords(job_id) if job_id else []
-        insights["keywords_source"] = "local" if insights["keywords"] else "none"
+        try:
+            insights["keywords"] = await se_ranking.domain_keywords(domain)
+            if not insights["keywords"]:
+                raise ServiceError(SERVICE, "no keyword data returned (se-ranking)")
+            insights["keywords_source"] = "se-ranking"
+            insights["keywords_error"] = None
+        except Exception as e2:
+            insights["keywords_error"] = f"{e} | {e2}"
+            insights["keywords"] = await local_keywords(job_id) if job_id else []
+            insights["keywords_source"] = "local" if insights["keywords"] else "none"
 
     try:
         insights["backlinks"] = await backlink_summary(domain)
@@ -249,8 +258,16 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["backlinks_error"] = None
     except Exception as e:
         insights["backlinks_error"] = str(e)
-        insights["backlinks"] = await local_backlinks(job_id) if job_id else None
-        insights["backlinks_source"] = "local" if insights["backlinks"] else "none"
+        try:
+            insights["backlinks"] = await se_ranking.backlink_summary(domain)
+            if not insights["backlinks"]:
+                raise ServiceError(SERVICE, "no backlink data returned (se-ranking)")
+            insights["backlinks_source"] = "se-ranking"
+            insights["backlinks_error"] = None
+        except Exception as e2:
+            insights["backlinks_error"] = f"{e} | {e2}"
+            insights["backlinks"] = await local_backlinks(job_id) if job_id else None
+            insights["backlinks_source"] = "local" if insights["backlinks"] else "none"
 
     try:
         insights["overview"] = await domain_overview(domain)
@@ -266,9 +283,17 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
             insights["overview_error"] = None
         except Exception as e:
             insights["overview_error"] = f"{first_e} | {e}"
-            from backend.services.local_insights import local_overview
-            insights["overview"] = await local_overview(job_id) if job_id else None
-            insights["overview_source"] = "local" if insights["overview"] else "none"
+            try:
+                insights["overview"] = await se_ranking.domain_overview(domain)
+                if not insights["overview"]:
+                    raise ServiceError(SERVICE, "no overview data returned (se-ranking)")
+                insights["overview_source"] = "se-ranking"
+                insights["overview_error"] = None
+            except Exception as e2:
+                insights["overview_error"] = f"{insights['overview_error']} | {e2}"
+                from backend.services.local_insights import local_overview
+                insights["overview"] = await local_overview(job_id) if job_id else None
+                insights["overview_source"] = "local" if insights["overview"] else "none"
 
     try:
         insights["onpage"] = await onpage_summary(f"https://{domain}")
@@ -312,6 +337,16 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["serp_rankings"] = []
         insights["serp_source"] = "none"
         insights["serp_error"] = str(e)
+    if not insights["serp_rankings"]:
+        try:
+            from backend.services.se_ranking import ranked_keywords
+            rankings = await ranked_keywords(domain)
+            if rankings:
+                insights["serp_rankings"] = rankings
+                insights["serp_source"] = "se-ranking"
+                insights["serp_error"] = None
+        except Exception:
+            pass
 
     return insights
 

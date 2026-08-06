@@ -163,6 +163,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
       if (currentTab === "logs") loadLogs();
+      if (currentTab === "settings") loadSettings();
     } else if (["sites", "schedules", "logs", "settings"].includes(currentTab)) {
       if (currentTab === "sites") loadSites();
       if (currentTab === "schedules") loadSchedules();
@@ -190,6 +191,18 @@ async function loadSettings() {
     if (status) status.textContent = s.client_id_set ? "Configured" : "Not configured yet";
   } catch (err) {
     if (status) status.textContent = "Settings unavailable: " + err.message;
+  }
+  const seStatus = document.getElementById("se-ranking-settings-status");
+  const seRegion = document.getElementById("se-ranking-region");
+  const seHint = document.getElementById("se-ranking-settings-hint");
+  if (seHint) seHint.style.display = "none";
+  try {
+    const seResp = await fetch(`${API_BASE}/settings/se-ranking`);
+    const se = seResp.ok ? await seResp.json() : {};
+    if (seRegion) seRegion.placeholder = se.region || "us";
+    if (seStatus) seStatus.textContent = se.api_key_set ? "Configured" : "Not configured yet";
+  } catch (err) {
+    if (seStatus) seStatus.textContent = "Settings unavailable: " + err.message;
   }
 }
 
@@ -220,6 +233,38 @@ document.getElementById("gsc-settings-save")?.addEventListener("click", async ()
     if (secret) secret.value = "";
     if (status) status.textContent = "Configured";
     showToast("GSC settings saved");
+    loadSettings();
+  } catch (err) {
+    if (hint) {
+      hint.textContent = "Failed to save: " + err.message;
+      hint.style.display = "block";
+    }
+  }
+});
+
+document.getElementById("se-ranking-settings-save")?.addEventListener("click", async () => {
+  const apiKey = document.getElementById("se-ranking-api-key");
+  const region = document.getElementById("se-ranking-region");
+  const status = document.getElementById("se-ranking-settings-status");
+  const hint = document.getElementById("se-ranking-settings-hint");
+  try {
+    const resp = await fetch(`${API_BASE}/settings/se-ranking`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey ? apiKey.value.trim() : "",
+        region: region ? region.value.trim() : "",
+      }),
+    });
+    const s = await resp.json();
+    if (!resp.ok) throw new Error(s.detail || resp.status);
+    if (hint) {
+      hint.textContent = "Saved. Insights will prefer SE Ranking for keywords / overview / backlinks when DataForSEO isn't available.";
+      hint.style.display = "block";
+    }
+    if (apiKey) apiKey.value = "";
+    if (status) status.textContent = "Configured";
+    showToast("SE Ranking settings saved");
     loadSettings();
   } catch (err) {
     if (hint) {
@@ -1740,7 +1785,7 @@ function insightErrorHtml(error) {
 }
 
 function sourceLabel(source) {
-  const map = { dataforseo: "DataForSEO", "dataforseo-labs": "DataForSEO Labs", gsc: "Google Search Console", serp: "SERP API", local: "local crawl data", none: "not available" };
+  const map = { dataforseo: "DataForSEO", "dataforseo-labs": "DataForSEO Labs", gsc: "Google Search Console", serp: "SERP API", "se-ranking": "SE Ranking", local: "local crawl data", none: "not available" };
   return map[source] || source || "not available";
 }
 

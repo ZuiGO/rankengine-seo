@@ -55,3 +55,43 @@ async def write_gsc_settings(req: GscSettingsRequest):
         return await read_gsc_settings()
     await db.app_settings.update_one({"key": "gsc"}, {"$set": {**update, "key": "gsc"}}, upsert=True)
     return await read_gsc_settings()
+
+
+class SeRankingSettingsRequest(BaseModel):
+    api_key: str = ""
+    region: str = ""
+
+
+async def get_se_ranking_settings() -> dict:
+    db = get_db()
+    doc = await db.app_settings.find_one({"key": "se_ranking"}) or {}
+    return {
+        "api_key": doc.get("api_key", ""),
+        "region": doc.get("region", "us"),
+    }
+
+
+@router.get("/se-ranking")
+async def read_se_ranking_settings():
+    s = await get_se_ranking_settings()
+    return {
+        "api_key": _mask(s["api_key"]),
+        "api_key_set": bool(s["api_key"]),
+        "region": s["region"],
+    }
+
+
+@router.put("/se-ranking")
+async def write_se_ranking_settings(req: SeRankingSettingsRequest):
+    db = get_db()
+    update = {}
+    if req.api_key:
+        update["api_key"] = req.api_key.strip()
+    if req.region:
+        region = req.region.strip().lower()
+        if region:
+            update["region"] = region
+    if not update:
+        return await read_se_ranking_settings()
+    await db.app_settings.update_one({"key": "se_ranking"}, {"$set": {**update, "key": "se_ranking"}}, upsert=True)
+    return await read_se_ranking_settings()

@@ -18,6 +18,7 @@ SERVICE_RATES = {
     "groq": {"rate_per_1m_tokens": settings.groq_cost_per_million, "unit": "tokens"},
     "pagespeed": {"rate_per_1m_tokens": 0, "unit": "requests"},
     "serp": {"rate_per_1m_tokens": 0, "unit": "requests"},
+    "se_ranking": {"rate_per_1m_tokens": 0, "unit": "requests"},
     "dataforseo": {"rate_per_1m_tokens": settings.dataforseo_cost_per_million, "unit": "requests"},
 }
 

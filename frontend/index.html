@@ -418,6 +418,28 @@
             <div id="gsc-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
           </div>
         </div>
+
+        <div class="logs-section" style="margin-top:28px">
+          <h3>SE Ranking Data API</h3>
+          <p class="section-desc">SE Ranking (api.seranking.com/v1) provides domain overviews, ranked keywords, and backlinks as an alternative insights provider when DataForSEO isn't configured, is out of credits, or an endpoint isn't on plan. Data is refreshed monthly; 100 credits per domain request. Create an API key at seranking.com/api.</p>
+          <div class="insights-card" style="max-width:640px">
+            <div style="display:grid;gap:12px;grid-template-columns:1fr 120px">
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                API Key
+                <input type="password" id="se-ranking-api-key" class="settings-input" placeholder="Token from SE Ranking API" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                Region
+                <input type="text" id="se-ranking-region" class="settings-input" placeholder="us" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+            </div>
+            <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+              <button id="se-ranking-settings-save" class="btn-primary">Save SE Ranking Settings</button>
+              <span id="se-ranking-settings-status" class="count-label"></span>
+            </div>
+            <div id="se-ranking-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
+          </div>
+        </div>
       </div>
     </div>
   </main>
