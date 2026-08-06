@@ -48,13 +48,25 @@ async def send_webhook(payload: dict) -> bool:
         return False
 
 
-async def create_github_pr(domain: str, changes: list[dict]) -> dict | None:
+async def get_github_config() -> dict:
+    """GitHub token: MongoDB app_settings first, .env as fallback."""
+    try:
+        from backend.db.mongo import get_db
+        db = get_db()
+        doc = await db.app_settings.find_one({"key": "github"}) or {}
+    except Exception:
+        doc = {}
+    return {"token": doc.get("token") or settings.github_token}
+
+
+async def create_github_pr(domain: str, changes: list[dict], token: str | None = None) -> dict | None:
     """Open a PR on a repo named after the domain when a GitHub token is configured."""
-    if not settings.github_token:
+    token = token or settings.github_token
+    if not token:
         return None
     repo = domain.replace(".", "-").replace(":", "-")
     headers = {
-        "Authorization": f"Bearer {settings.github_token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }

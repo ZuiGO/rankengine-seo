@@ -222,8 +222,6 @@
           </select>
         </h3>
         <div id="all-links-card" class="insights-card"></div>
-        <h3>Dummy Parallel Site</h3>
-        <div id="dummy-site-card" class="insights-card"></div>
         <h3>Backlinks</h3>
         <div id="backlinks-list"></div>
       </div>
@@ -256,6 +254,13 @@
         <div id="actions-list"><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>
         <h3 style="margin:24px 0 10px">Before / After Changes</h3>
         <div id="versions-list"></div>
+        <h3 style="margin:24px 0 10px">Apply Approved Changes</h3>
+        <p class="section-desc">Send approved changes to GitHub as a pull request, or get an in-repo guide to apply them in your own repository.</p>
+        <div class="table-controls" style="margin-bottom:10px">
+          <button id="apply-changes-btn" class="btn-primary" style="padding:6px 14px;font-size:13px">Apply via GitHub PR</button>
+          <span id="apply-changes-status" class="count-label"></span>
+        </div>
+        <div id="apply-guide-card" class="insights-card" style="display:none"></div>
       </div>
 
       <div class="tab-content hidden" id="tab-report">
@@ -438,6 +443,24 @@
               <span id="se-ranking-settings-status" class="count-label"></span>
             </div>
             <div id="se-ranking-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
+          </div>
+        </div>
+
+        <div class="logs-section" style="margin-top:28px">
+          <h3>GitHub (Apply Changes)</h3>
+          <p class="section-desc">A personal access token (repo scope) lets the Actions tab push approved changes as a pull request on a repo named after the analyzed domain (e.g. <code>example-com</code>). Without a token, approved changes are applied via the in-repo guide instead. Create a token at github.com/settings/tokens.</p>
+          <div class="insights-card" style="max-width:640px">
+            <div style="display:grid;gap:12px;grid-template-columns:1fr">
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                Personal Access Token
+                <input type="password" id="github-token" class="settings-input" placeholder="ghp_..." style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+            </div>
+            <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+              <button id="github-settings-save" class="btn-primary">Save GitHub Settings</button>
+              <span id="github-settings-status" class="count-label"></span>
+            </div>
+            <div id="github-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
           </div>
         </div>
       </div>

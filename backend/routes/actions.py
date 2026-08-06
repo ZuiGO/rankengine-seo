@@ -205,10 +205,8 @@ async def batch_update_actions(job_id: str, req: BatchRequest):
     return {"status": "ok", "job_id": job_id, "updated": len(items), "errors": errors}
 
 
-@router.get("/{job_id}/patch")
-async def export_patch(job_id: str, format: str = "json"):
-    """Export all reviewed actions as a machine-applicable JSON patch or Markdown."""
-    db = get_db()
+async def _collect_changes(db, job_id: str) -> tuple[dict, list[dict], dict]:
+    """Shared change-payload builder for export_patch and apply."""
     job = await db.analysis_jobs.find_one({"_id": job_id}, {"url": 1})
     cursor = db.action_items.find({"job_id": job_id}).sort("content_type", 1)
     items = await cursor.to_list(length=1000)
@@ -241,6 +239,54 @@ async def export_patch(job_id: str, format: str = "json"):
     counts = {"approved": 0, "rejected": 0, "pending": 0}
     for c in changes:
         counts[c["status"]] = counts.get(c["status"], 0) + 1
+    return job, changes, counts
+
+
+def build_apply_guide(domain: str, changes: list[dict]) -> str:
+    """Markdown guide for applying approved changes in the user's own repo."""
+    approved = [c for c in changes if c["status"] == "approved"]
+    lines = [
+        f"# Applying SEO changes for {domain}",
+        "",
+        f"`{len(approved)}` approved change(s) with generated content.",
+        "",
+        "## How to apply in your repository",
+        "",
+        "1. Export the patch from the Actions tab (Export JSON / Export Markdown).",
+        "2. Open your repository and create a feature branch:",
+        "   `git checkout -b seo-patch-<job-id>`",
+        "3. Apply each approved change below to the matching file, replacing `before` with `after`.",
+        "4. Commit, push, and open a pull request:",
+        "   `git push -u origin seo-patch-<job-id>`",
+        "5. Merge after your review. The SEO provider(s) will pick up the content on the next crawl.",
+        "",
+        "## Approved changes",
+        "",
+    ]
+    for c in approved:
+        v = c.get("version") or {}
+        lines.append(f"### {c['content_type']} - {c['page_url'] or '(page-level)'}")
+        if c["issue_key"]:
+            lines.append(f"- Issue: `{c['issue_key']}` ({c['impact_on_ranking']} impact)")
+        if c["identified_issues"]:
+            lines.append(f"- Problems: {'; '.join(c['identified_issues'])}")
+        if c["improvement_suggestions"]:
+            lines.append(f"- Suggested fixes: {'; '.join(c['improvement_suggestions'])}")
+        if v.get("field"):
+            lines.append(f"- Field: `{v['field']}`")
+        if v.get("before") is not None:
+            lines.append(f"- Before: `{v['before'][:200]}`")
+        if v.get("after") is not None:
+            lines.append(f"- After: `{v['after'][:200]}`")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+@router.get("/{job_id}/patch")
+async def export_patch(job_id: str, format: str = "json"):
+    """Export all reviewed actions as a machine-applicable JSON patch or Markdown."""
+    db = get_db()
+    job, changes, counts = await _collect_changes(db, job_id)
 
     if format == "md":
         lines = [
@@ -271,6 +317,67 @@ async def export_patch(job_id: str, format: str = "json"):
         "generated_at": datetime.utcnow().isoformat(),
         "summary": counts,
         "changes": changes,
+    }
+
+
+@router.post("/{job_id}/apply")
+async def apply_approved_changes(job_id: str):
+    """Apply approved actions: export the patch, then push a GitHub PR when a token is configured.
+
+    Returns either a live PR URL (github_token set in Settings) or an in-repo
+    apply guide (markdown) the user can follow to apply the changes themselves.
+    """
+    db = get_db()
+    job, changes, counts = await _collect_changes(db, job_id)
+    domain = (job or {}).get("url", "") or job_id
+    approved = [c for c in changes if c["status"] == "approved"]
+    guide = build_apply_guide(domain, changes)
+
+    if not approved:
+        return {
+            "ok": False,
+            "reason": "no_approved",
+            "message": "No approved changes to apply yet. Approve action items first.",
+        }
+
+    from backend.services.notifications import get_github_config, create_github_pr
+    config = await get_github_config()
+    token = config.get("token")
+
+    if not token:
+        return {
+            "ok": False,
+            "reason": "no_token",
+            "message": "No GitHub token configured. Follow the in-repo guide below or add a token in Settings (GitHub).",
+            "approved": counts["approved"],
+            "domain": domain,
+            "guide": guide,
+        }
+
+    result = await create_github_pr(domain, approved, token=token)
+    await log_audit(
+        "actions_applied",
+        job_id,
+        {"approved": counts["approved"], "github_pr": bool(result and result.get("ok"))},
+    )
+    if result and result.get("ok"):
+        return {
+            "ok": True,
+            "reason": "github_pr",
+            "message": "Changes sent to GitHub. Review and merge the pull request once content checks pass.",
+            "approved": counts["approved"],
+            "domain": domain,
+            "html_url": result.get("html_url"),
+            "guide": guide,
+        }
+    return {
+        "ok": False,
+        "reason": "pr_failed",
+        "message": "GitHub PR failed. Use the in-repo guide below to apply the changes manually.",
+        "approved": counts["approved"],
+        "domain": domain,
+        "error": (result or {}).get("error") or f"HTTP {(result or {}).get('status_code', '?')}",
+        "guide": guide,
     }
 
 

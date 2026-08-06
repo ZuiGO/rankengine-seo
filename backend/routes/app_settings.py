@@ -95,3 +95,32 @@ async def write_se_ranking_settings(req: SeRankingSettingsRequest):
         return await read_se_ranking_settings()
     await db.app_settings.update_one({"key": "se_ranking"}, {"$set": {**update, "key": "se_ranking"}}, upsert=True)
     return await read_se_ranking_settings()
+
+
+class GithubSettingsRequest(BaseModel):
+    token: str = ""
+
+
+async def get_github_settings() -> dict:
+    db = get_db()
+    doc = await db.app_settings.find_one({"key": "github"}) or {}
+    return {"token": doc.get("token", "")}
+
+
+@router.get("/github")
+async def read_github_settings():
+    s = await get_github_settings()
+    return {
+        "token": _mask(s["token"]),
+        "token_set": bool(s["token"]),
+    }
+
+
+@router.put("/github")
+async def write_github_settings(req: GithubSettingsRequest):
+    db = get_db()
+    token = req.token.strip()
+    if not token:
+        return await read_github_settings()
+    await db.app_settings.update_one({"key": "github"}, {"$set": {"token": token, "key": "github"}}, upsert=True)
+    return await read_github_settings()

@@ -204,6 +204,16 @@ async function loadSettings() {
   } catch (err) {
     if (seStatus) seStatus.textContent = "Settings unavailable: " + err.message;
   }
+  const ghStatus = document.getElementById("github-settings-status");
+  const ghHint = document.getElementById("github-settings-hint");
+  if (ghHint) ghHint.style.display = "none";
+  try {
+    const ghResp = await fetch(`${API_BASE}/settings/github`);
+    const gh = ghResp.ok ? await ghResp.json() : {};
+    if (ghStatus) ghStatus.textContent = gh.token_set ? "Configured" : "Not configured yet";
+  } catch (err) {
+    if (ghStatus) ghStatus.textContent = "Settings unavailable: " + err.message;
+  }
 }
 
 document.getElementById("gsc-settings-save")?.addEventListener("click", async () => {
@@ -265,6 +275,34 @@ document.getElementById("se-ranking-settings-save")?.addEventListener("click", a
     if (apiKey) apiKey.value = "";
     if (status) status.textContent = "Configured";
     showToast("SE Ranking settings saved");
+    loadSettings();
+  } catch (err) {
+    if (hint) {
+      hint.textContent = "Failed to save: " + err.message;
+      hint.style.display = "block";
+    }
+  }
+});
+
+document.getElementById("github-settings-save")?.addEventListener("click", async () => {
+  const token = document.getElementById("github-token");
+  const status = document.getElementById("github-settings-status");
+  const hint = document.getElementById("github-settings-hint");
+  try {
+    const resp = await fetch(`${API_BASE}/settings/github`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token ? token.value.trim() : "" }),
+    });
+    const s = await resp.json();
+    if (!resp.ok) throw new Error(s.detail || resp.status);
+    if (hint) {
+      hint.textContent = "Saved. The Actions tab can now push approved changes as a GitHub PR.";
+      hint.style.display = "block";
+    }
+    if (token) token.value = "";
+    if (status) status.textContent = "Configured";
+    showToast("GitHub settings saved");
     loadSettings();
   } catch (err) {
     if (hint) {
@@ -994,7 +1032,6 @@ async function loadLinks(jobId) {
        <table class="data-table"><thead><tr><th>Source URL</th><th>Domain</th><th>Anchor</th></tr></thead>
        <tbody>${blData.backlinks.map(b => `<tr><td class="page-url-cell" title="${b.source_url}">${linkify(b.source_url, 60)}</td><td>${b.source_domain || "-"}</td><td>${(b.anchor || "-").substring(0, 60)}</td></tr>`).join("")}</tbody></table>`;
   loadLinkHealth(jobId);
-  loadDummySite(jobId);
 }
 
 async function loadLinkHealth(jobId) {
@@ -1085,92 +1122,6 @@ document.getElementById("all-links-filter")?.addEventListener("change", () => {
   if (currentJobId) loadAllLinks(currentJobId, { reset: true });
 });
 
-async function loadDummySite(jobId) {
-  const el = document.getElementById("dummy-site-card");
-  try {
-    const resp = await fetch(`${API_BASE}/dummy/${jobId}`);
-    const data = await resp.json();
-    if (data.status === "not_generated" || !data.file_count) {
-      el.innerHTML = `<p class="section-desc">No dummy site generated yet. Generate a static mirror with approved changes applied.</p>
-        <button id="generate-dummy-btn" class="btn-secondary" style="margin-top:8px">Generate Dummy Site</button>`;
-      document.getElementById("generate-dummy-btn").onclick = async () => {
-        el.innerHTML = '<p class="section-desc">Generating mirror (fetches each page)...</p>';
-        try {
-          const g = await fetch(`${API_BASE}/dummy/${jobId}/generate`, { method: "POST" });
-          const gd = await g.json();
-          showToast(`Dummy site generated: ${gd.file_count} files, ${gd.changes_applied} changes applied`);
-        } catch (e2) {
-          showToast("Generation failed: " + e2.message);
-        }
-        loadDummySite(jobId);
-      };
-      return;
-    }
-      el.innerHTML = `
-      ${data.stale ? `<div class="service-error" style="background:#fffbeb;border-color:#fde68a"><div class="service-error-title" style="color:#92400e">Mirror is out of date</div><div class="service-error-msg" style="color:#78350f">SEO actions were reviewed after this mirror was generated. Regenerate to apply the latest approved changes.</div></div>` : ""}
-      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
-        <div class="insights-card"><div class="insights-label">Files</div><div class="insights-value">${data.file_count}</div></div>
-        <div class="insights-card"><div class="insights-label">Pages Mirrored</div><div class="insights-value">${data.pages}</div></div>
-        <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${data.changes_applied}</div></div>
-        <div class="insights-card"><div class="insights-label">Suggestions Previewed</div><div class="insights-value" style="color:#d97706">${data.suggestions_applied ?? 0}</div></div>
-        <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value">${data.pending_changes ?? 0}</div></div>
-        <div class="insights-card"><div class="insights-label">Links Rewritten</div><div class="insights-value">${data.links_rewritten}</div></div>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
-        <a class="btn-primary" href="${data.url}" target="_blank" rel="noopener">Open Dummy Site</a>
-        <a class="btn-secondary" href="${API_BASE}/dummy/${jobId}/download">Download ZIP</a>
-        <button id="regenerate-dummy-btn" class="btn-secondary">Regenerate</button>
-        <button id="compare-dummy-btn" class="btn-secondary">Compare & Report</button>
-        <a class="btn-secondary" href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Comparison HTML</a>
-        <a class="btn-secondary" href="${API_BASE}/reports/${jobId}/compare/pdf" target="_blank" rel="noopener">Comparison PDF</a>
-      </div>`;
-    document.getElementById("regenerate-dummy-btn").onclick = async () => {
-      await fetch(`${API_BASE}/dummy/${jobId}/generate`, { method: "POST" });
-      showToast("Dummy site regenerated");
-      loadDummySite(jobId);
-    };
-    document.getElementById("compare-dummy-btn").onclick = async () => {
-      const btn = document.getElementById("compare-dummy-btn");
-      btn.disabled = true;
-      btn.textContent = "Comparing...";
-      try {
-        const resp = await fetch(`${API_BASE}/sites/${jobId}/compare-changes`, { method: "POST" });
-        const c = await resp.json();
-        if (!resp.ok) {
-          showToast("Comparison failed: " + (c.detail || resp.status));
-          return;
-        }
-        const alt = c.alt_text || {};
-        const lb = c.link_health_before || {};
-        const la = c.link_health_after || {};
-        const dummy = c.dummy || {};
-        const health = c.health || {};
-        showModal("Original vs Suggested-Changes", `
-          <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-            <div class="insights-card"><div class="insights-label">Pages Compared</div><div class="insights-value">${c.pages_compared}</div></div>
-            <div class="insights-card"><div class="insights-label">Changes Applied</div><div class="insights-value" style="color:var(--success)">${dummy.changes_applied ?? 0}</div></div>
-            <div class="insights-card"><div class="insights-label">Suggestions Previewed</div><div class="insights-value" style="color:#d97706">${dummy.suggestions_applied ?? 0}</div></div>
-            <div class="insights-card"><div class="insights-label">Pending Suggestions</div><div class="insights-value">${c.pending_suggestions ?? 0}</div></div>
-            ${health.score !== undefined ? `<div class="insights-card"><div class="insights-label">Site Health</div><div class="insights-value">${health.grade ?? "N/A"} (${health.score}/100)</div></div>` : ""}
-          </div>
-          <h4 style="margin-top:16px">Alt text coverage: ${alt.coverage_before ?? "N/A"}% → <b style="color:var(--success)">${alt.coverage_after ?? "N/A"}%</b></h4>
-          <div class="data-row"><span class="label">Images without alt (before)</span><span class="value">${alt.missing_before ?? "N/A"}</span></div>
-          <div class="data-row"><span class="label">Images without alt (after)</span><span class="value" style="color:${(alt.missing_after ?? 999) < (alt.missing_before ?? 0) ? "var(--success)" : ""}">${alt.missing_after ?? "N/A"}</span></div>
-          <div class="data-row"><span class="label">Broken links (original)</span><span class="value">${lb.broken ?? 0} / ${lb.checked ?? 0}</span></div>
-          <div class="data-row"><span class="label">Broken links (dummy mirror)</span><span class="value">${la.broken ?? 0} / ${la.checked ?? 0}</span></div>
-          <p class="section-desc" style="margin-top:12px"><a href="${API_BASE}/reports/${jobId}/compare" target="_blank" rel="noopener">Full comparison report (HTML)</a> · <a href="${API_BASE}/reports/${jobId}/compare/pdf" target="_blank" rel="noopener">PDF</a></p>
-        `);
-      } catch (err) {
-        showToast("Comparison failed: " + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Compare & Report";
-      }
-    };
-  } catch (err) {
-    el.innerHTML = `<p class="section-desc">Error: ${escapeHtml(err.message)}</p>`;
-  }
-}
 
 document.getElementById("check-links-btn").addEventListener("click", async () => {
   document.getElementById("link-health-summary").innerHTML = '<p class="section-desc">Checking links...</p>';
@@ -1308,9 +1259,48 @@ async function downloadPatch(fmt) {
 document.getElementById("patch-json-btn")?.addEventListener("click", () => downloadPatch("json"));
 document.getElementById("patch-md-btn")?.addEventListener("click", () => downloadPatch("md"));
 
+function renderApplyGuide(guide) {
+  const card = document.getElementById("apply-guide-card");
+  if (!card) return;
+  card.style.display = "block";
+  const safe = escapeHtml(guide || "");
+  card.innerHTML = `<pre style="white-space:pre-wrap;font-family:monospace;font-size:12px;line-height:1.6;margin:0;max-height:420px;overflow:auto">${safe}</pre>`;
+}
+
+document.getElementById("apply-changes-btn")?.addEventListener("click", async () => {
+  if (!currentJobId) return;
+  if (!confirm("Apply approved SEO changes? Approved content is sent to GitHub as a pull request (or you get an in-repo guide to apply manually).")) return;
+  const btn = document.getElementById("apply-changes-btn");
+  const status = document.getElementById("apply-changes-status");
+  btn.disabled = true;
+  btn.textContent = "Applying...";
+  if (status) status.textContent = "";
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${currentJobId}/apply`, { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    if (data.ok) {
+      showToast("Approved changes sent to GitHub PR");
+      if (data.html_url) {
+        if (status) status.innerHTML = `<a href="${data.html_url}" target="_blank" rel="noopener">PR created: ${data.html_url}</a>`;
+      }
+    } else if (data.reason === "no_approved") {
+      if (status) status.textContent = data.message || "No approved changes yet.";
+    } else {
+      if (status) status.textContent = data.message || "Apply failed — see guide below.";
+    }
+    renderApplyGuide(data.guide);
+  } catch (err) {
+    showToast("Apply failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Apply via GitHub PR";
+  }
+});
+
 document.getElementById("approve-all-btn")?.addEventListener("click", async () => {
   if (!currentJobId) return;
-  if (!confirm("Approve ALL pending SEO changes? This generates improved content for every pending action and rebuilds the dummy site. This cannot be undone per-item.")) return;
+  if (!confirm("Approve ALL pending SEO changes? This generates improved content for every pending action. This cannot be undone per-item.")) return;
   const btn = document.getElementById("approve-all-btn");
   btn.disabled = true;
   btn.textContent = "Working...";
@@ -1334,7 +1324,7 @@ document.getElementById("approve-all-btn")?.addEventListener("click", async () =
           btn.disabled = false;
           btn.textContent = "Approve All";
           if (currentJobId) loadActions(currentJobId);
-          showToast(timedOut ? "Approve all is still running - check the Actions tab shortly" : "All changes approved. Dummy site rebuilding...");
+          showToast(timedOut ? "Approve all is still running - check the Actions tab shortly" : "All changes approved. Export the patch or apply via GitHub.");
         }
       } catch (err) {
         clearInterval(poll);
@@ -2742,7 +2732,7 @@ async function loadSites() {
       btn.addEventListener("click", async () => {
         const jid = btn.dataset.job;
         const url = btn.dataset.url;
-        if (!confirm(`Permanently delete ${url}?\n\nThis removes ALL data for this site: pages, content, action items, reports, dummy site, downloads, insights and vectors. This cannot be undone.`)) return;
+        if (!confirm(`Permanently delete ${url}?\n\nThis removes ALL data for this site: pages, content, action items, reports, downloads, insights and vectors. This cannot be undone.`)) return;
         try {
           const resp = await fetch(`${API_BASE}/sites/${jid}/hard`, { method: "DELETE" });
           const data = await resp.json();
