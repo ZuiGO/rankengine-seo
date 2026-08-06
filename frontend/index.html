@@ -168,6 +168,19 @@
       <div class="tab-content hidden" id="tab-pages">
         <div class="table-controls">
           <input type="text" id="pages-search" placeholder="Search pages..." class="search-input">
+          <select id="pages-type-filter" class="filter-select"><option value="">All Types</option></select>
+          <select id="pages-sort" class="filter-select">
+            <option value="url">Sort: URL</option>
+            <option value="word_count">Sort: Word count</option>
+            <option value="status_code">Sort: Status</option>
+            <option value="click_depth">Sort: Click depth</option>
+          </select>
+          <select id="pages-order" class="filter-select">
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+          <button id="pages-prev-btn" class="btn-secondary">Prev</button>
+          <button id="pages-next-btn" class="btn-secondary">Next</button>
           <span id="pages-count" class="count-label"></span>
         </div>
         <div class="table-container" id="pages-table"><div class="skeleton skeleton-table"></div></div>
@@ -350,10 +363,10 @@
       </div>
 
       <div class="tab-content hidden" id="tab-quality">
-        <p class="section-desc">Quality audits: duplicate content, canonical tags, structured data, Core Web Vitals, industry alignment (GEO) and orphan pages.</p>
-        <div id="quality-content">
-          <div class="insights-card">Run an analysis to see quality audits.</div>
-        </div>
+        <p class="section-desc">Site health & audits: every measured audit with pass/attention/fail status, plain-language verdicts and expandable checks.</p>
+        <div id="quality-health-card" class="insights-card" style="margin-bottom:14px"></div>
+        <div id="quality-content"></div>
+        <div id="quality-spend"></div>
       </div>
       <div class="tab-content hidden" id="tab-logs">
         <div class="logs-controls">

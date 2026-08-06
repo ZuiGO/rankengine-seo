@@ -1762,3 +1762,61 @@ body {
   .hero { padding: 56px 20px 24px; }
   .hero-title { font-size: 32px; }
 }
+
+/* Site Health & Audits dashboard */
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+.audit-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.audit-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.audit-title { font-weight: 700; font-size: 14px; color: var(--text); }
+.status-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.chip-pass { background: #dcfce7; color: #166534; }
+.chip-attention { background: #fef3c7; color: #92400e; }
+.chip-fail { background: #fee2e2; color: #991b1b; }
+.chip-na { background: var(--surface-hover); color: var(--text-secondary); }
+.chip-notconfigured { background: #e0e7ff; color: #3730a3; }
+[data-theme="dark"] .chip-pass { background: #14532d; color: #bbf7d0; }
+[data-theme="dark"] .chip-attention { background: #78350f; color: #fde68a; }
+[data-theme="dark"] .chip-fail { background: #7f1d1d; color: #fecaca; }
+[data-theme="dark"] .chip-na { background: var(--surface-hover); color: var(--text-secondary); }
+[data-theme="dark"] .chip-notconfigured { background: #312e81; color: #c7d2fe; }
+.audit-verdict { font-size: 13px; line-height: 1.45; color: var(--text); }
+.audit-detail { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+.audit-checks { margin-top: 8px; font-size: 12px; }
+.audit-checks summary { cursor: pointer; color: var(--text-secondary); font-weight: 600; user-select: none; }
+.audit-check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.check-mark { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px; flex-shrink: 0; }
+.check-mark.ok { background: #dcfce7; color: #166534; }
+.check-mark.issue { background: #fee2e2; color: #991b1b; }
+[data-theme="dark"] .check-mark.ok { background: #14532d; color: #bbf7d0; }
+[data-theme="dark"] .check-mark.issue { background: #7f1d1d; color: #fecaca; }

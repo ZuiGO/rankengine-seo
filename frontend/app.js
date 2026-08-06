@@ -672,46 +672,104 @@ async function loadAnalytics(jobId) {
   }
 }
 
+let pagesOffset = 0;
+
+function yesNo(v) {
+  return v ? '<span class="check-mark ok">Yes</span>' : '<span class="check-mark issue">No</span>';
+}
+
+function populatePageTypeFilter(types) {
+  const sel = document.getElementById("pages-type-filter");
+  if (!sel || sel.dataset.built) return;
+  const opts = Object.entries(types || {}).sort((a, b) => b[1] - a[1]);
+  opts.forEach(([t, n]) => {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = t + " (" + n + ")";
+    sel.appendChild(o);
+  });
+  sel.dataset.built = "1";
+}
+
 async function loadPages(jobId) {
-  const resp = await fetch(`${API_BASE}/pages/${jobId}?limit=500`);
-  const data = await resp.json();
-  document.getElementById("pages-count").textContent = `${data.total} pages`;
-
-  const search = document.getElementById("pages-search").value.toLowerCase();
-  const filtered = data.pages.filter(p =>
-    p.url.toLowerCase().includes(search) ||
-    (p.title || "").toLowerCase().includes(search)
-  );
-
   const table = document.getElementById("pages-table");
-  if (filtered.length === 0) {
-    table.innerHTML = '<p class="section-desc">No pages found.</p>';
+  const search = document.getElementById("pages-search").value.trim();
+  const pageType = document.getElementById("pages-type-filter").value;
+  const sort = document.getElementById("pages-sort").value;
+  const order = document.getElementById("pages-order").value;
+  const params = new URLSearchParams({ limit: "50", offset: String(pagesOffset) });
+  if (search) params.set("search", search);
+  if (pageType) params.set("page_type", pageType);
+  if (sort) params.set("sort", sort);
+  if (order) params.set("order", order);
+
+  let data;
+  try {
+    const resp = await fetch(`${API_BASE}/pages/${jobId}/all?${params}`);
+    data = resp.ok ? await resp.json() : null;
+  } catch { data = null; }
+  if (!data) {
+    table.innerHTML = '<div class="insights-card">Failed to load pages.</div>';
+    return;
+  }
+
+  populatePageTypeFilter(data.types);
+  document.getElementById("pages-count").textContent = `${data.total} pages`;
+  const prevBtn = document.getElementById("pages-prev-btn");
+  const nextBtn = document.getElementById("pages-next-btn");
+  if (prevBtn) prevBtn.disabled = pagesOffset <= 0;
+  if (nextBtn) nextBtn.disabled = pagesOffset + data.pages.length >= data.total;
+
+  if (data.pages.length === 0) {
+    table.innerHTML = '<div class="insights-card">No pages match the current search and filters.</div>';
     return;
   }
 
   table.innerHTML = `
     <table class="data-table">
       <thead><tr>
-        <th>URL</th><th>Type</th><th>Title</th><th>Words</th><th>Links</th><th>Images</th><th>Schema</th><th>Indexable</th>
+        <th>URL</th><th>Type</th><th>Title</th><th>Words</th><th>Links</th><th>Images</th><th>Schema</th><th>Depth</th><th>Indexable</th>
       </tr></thead>
-      <tbody>${filtered.map(p => `
+      <tbody>${data.pages.map(p => `
         <tr>
-          <td class="page-url-cell" title="${p.url}">${linkify(p.url, 90)}</td>
-          <td><span class="page-type-badge">${p.page_type || "other"}</span></td>
-          <td>${(p.title || "-").substring(0, 50)}</td>
+          <td class="page-url-cell" title="${escapeHtml(p.url)}">${linkify(p.url, 80)}</td>
+          <td><span class="page-type-badge">${escapeHtml(p.page_type || "other")}</span></td>
+          <td>${escapeHtml((p.title || "-").substring(0, 55))}</td>
           <td>${p.word_count || 0}</td>
           <td>${p.internal_links || 0}i / ${p.external_links || 0}e</td>
           <td>${p.image_count || 0}</td>
-          <td>${p.has_structured_data ? "✅" : "❌"}</td>
-          <td>${p.is_indexable ? "✅" : "❌"}</td>
+          <td>${yesNo(p.has_structured_data)}</td>
+          <td>${p.click_depth ?? "-"}</td>
+          <td>${yesNo(p.is_indexable)}</td>
         </tr>
       `).join("")}</tbody>
     </table>
   `;
 }
 
-// Search binding
+// Pages bindings
 document.getElementById("pages-search")?.addEventListener("input", () => {
+  pagesOffset = 0;
+  if (currentJobId) loadPages(currentJobId);
+});
+document.getElementById("pages-type-filter")?.addEventListener("change", () => {
+  pagesOffset = 0;
+  if (currentJobId) loadPages(currentJobId);
+});
+document.getElementById("pages-sort")?.addEventListener("change", () => {
+  pagesOffset = 0;
+  if (currentJobId) loadPages(currentJobId);
+});
+document.getElementById("pages-order")?.addEventListener("change", () => {
+  pagesOffset = 0;
+  if (currentJobId) loadPages(currentJobId);
+});
+document.getElementById("pages-prev-btn")?.addEventListener("click", () => {
+  pagesOffset = Math.max(0, pagesOffset - 50);
+  if (currentJobId) loadPages(currentJobId);
+});
+document.getElementById("pages-next-btn")?.addEventListener("click", () => {
+  pagesOffset += 50;
   if (currentJobId) loadPages(currentJobId);
 });
 
@@ -1708,8 +1766,8 @@ function renderInsightSection(el, { data, error, source, emptyText, render }) {
 async function loadQuality(jobId) {
   const el = document.getElementById("quality-content");
   if (!el) return;
-  el.innerHTML = '<div class="insights-card">Loading quality audits...</div>';
-  const [dup, sd, perf, geo, orphans, spend, summary, decay] = await Promise.all([
+  el.innerHTML = '<div class="insights-card">Loading site health & audits...</div>';
+  const [dup, sd, perf, geo, orphans, spend, summary, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, cannib, links, health] = await Promise.all([
     clientGet(`${API_BASE}/quality/${jobId}/duplicates`),
     clientGet(`${API_BASE}/quality/${jobId}/structured-data`),
     clientGet(`${API_BASE}/quality/${jobId}/performance`),
@@ -1718,8 +1776,22 @@ async function loadQuality(jobId) {
     clientGet(`${API_BASE}/spend/${jobId}`),
     clientGet(`${API_BASE}/analysis/${jobId}/summary`),
     clientGet(`${API_BASE}/quality/${jobId}/decay?months=6`),
+    clientGet(`${API_BASE}/quality/${jobId}/hreflang`),
+    clientGet(`${API_BASE}/quality/${jobId}/url-hygiene`),
+    clientGet(`${API_BASE}/quality/${jobId}/indexation`),
+    clientGet(`${API_BASE}/quality/${jobId}/image-optimization`),
+    clientGet(`${API_BASE}/quality/${jobId}/sitemap`),
+    clientGet(`${API_BASE}/quality/${jobId}/ai-visibility`),
+    clientGet(`${API_BASE}/quality/${jobId}/local-seo`),
+    clientGet(`${API_BASE}/quality/${jobId}/cannibalization`),
+    clientGet(`${API_BASE}/links/${jobId}`),
+    clientGet(`${API_BASE}/sites/${jobId}/health`),
   ]);
-  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, summary?.summary?.geo_readiness, decay) + renderSpend(spend);
+  const nested = summary?.summary || summary || {};
+  renderSiteHealth(health, nested);
+  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, cannib, links);
+  const spendEl = document.getElementById("quality-spend");
+  if (spendEl) spendEl.innerHTML = renderSpend(spend);
 }
 
 function renderSpend(spend) {
@@ -1748,70 +1820,275 @@ function qualitySection(title, inner) {
   return `<div class="insights-card" style="margin-bottom:14px"><h3>${title}</h3>${inner}</div>`;
 }
 
-function renderQuality(dup, sd, perf, geo, orphans, geoReadiness, decay) {
-  let html = "";
+function statusChip(status, label) {
+  const cls = { pass: "chip-pass", attention: "chip-attention", fail: "chip-fail", na: "chip-na", notconfigured: "chip-notconfigured" }[status] || "chip-na";
+  return `<span class="status-chip ${cls}">${escapeHtml(label)}</span>`;
+}
 
-  html += qualitySection("AI Search (GEO) Readiness", geoReadiness
-    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-         <div class="insights-card"><div class="insights-label">Status</div><div class="insights-value">${escapeHtml(geoReadiness.status || "unknown")}${geoReadiness.score !== null && geoReadiness.score !== undefined ? ` (${geoReadiness.score}/100)` : ""}</div></div>
-         <div class="insights-card"><div class="insights-label">robots.txt</div><div class="insights-value">${geoReadiness.robots_txt_found ? "found" : "not found"}</div></div>
-         <div class="insights-card"><div class="insights-label">Blocked AI crawlers</div><div class="insights-value">${escapeHtml((geoReadiness.blocked_ai_crawlers || []).join(", ") || "none")}</div></div>
-         <div class="insights-card"><div class="insights-label">Allowed AI crawlers</div><div class="insights-value">${escapeHtml((geoReadiness.allowed_ai_crawlers || []).join(", ") || "none")}</div></div>
-       </div>
-       <div class="insights-label" style="margin-top:8px">Checked: ${escapeHtml((geoReadiness.ai_agents_scanned || []).join(", ") || "none")}</div>
-       <div class="insights-label" style="margin-top:4px;color:var(--text-secondary)">Improves visibility in AI search (ChatGPT, Perplexity, etc.). Not required for Google AI Overviews or AI Mode.</div>`
-    : '<div class="insights-label">Covered in Overview for this job.</div>');
+function scoreFrom(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  const v = Number(value);
+  return v >= 70 ? "pass" : v >= 40 ? "attention" : "fail";
+}
 
-  html += qualitySection("Duplicate Content & Canonicals", dup
-    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-         <div class="insights-card"><div class="insights-label">Duplicate Groups</div><div class="insights-value">${dup.duplicate_groups?.length ?? 0}</div></div>
-         <div class="insights-card"><div class="insights-label">Duplicate Pages</div><div class="insights-value">${dup.duplicate_pages ?? 0}</div></div>
-         <div class="insights-card"><div class="insights-label">Canonical Missing</div><div class="insights-value">${dup.canonical_missing ?? 0}</div></div>
-         <div class="insights-card"><div class="insights-label">Canonical Conflicts</div><div class="insights-value">${(dup.canonical_conflicting ?? 0) + (dup.canonical_cross_domain ?? 0)}</div></div>
-       </div>
-       ${(dup.duplicate_groups || []).map(g => `<div style="margin-top:8px;font-size:13px;color:var(--text-secondary)">${escapeHtml(g.urls.join("  ≈  "))} <span class="count-label">(${escapeHtml(g.similarity)})</span></div>`).join("")}
-       ${(dup.canonical_flags || []).filter(f => f.canonical_conflicting || f.canonical_cross_domain).map(f => `<div style="margin-top:6px;font-size:13px">${f.canonical_cross_domain ? "cross-domain canonical" : "conflicting canonical"} → ${escapeHtml(f.page_url)}${f.canonical_target ? " → " + escapeHtml(f.canonical_target) : ""}</div>`).join("")}`.trim()
-    : '<div class="insights-label">Not run for this job yet.</div>');
+function auditCard(title, { status, label, score, verdict, detail, checks }) {
+  return `<div class="audit-card">
+    <div class="audit-card-head"><span class="audit-title">${escapeHtml(title)}</span>${statusChip(status, label)}</div>
+    ${score !== null && score !== undefined ? `<div class="bar-track" style="margin:6px 0"><div class="bar-fill" style="width:${Math.max(0, Math.min(100, score))}%;background:${score >= 70 ? "#16a34a" : score >= 40 ? "#d97706" : "#dc2626"}"></div></div>` : ""}
+    <div class="audit-verdict">${verdict}</div>
+    ${detail ? `<div class="audit-detail">${detail}</div>` : ""}
+    ${checks && checks.length ? `<details class="audit-checks"><summary>Checks (${checks.length})</summary>${checks.map(c => `<div class="audit-check"><span class="check-mark ${c.passed ? "ok" : "issue"}">${c.passed ? "Pass" : "Issue"}</span> ${escapeHtml(c.label)}${c.detail ? ` <span class="count-label">— ${escapeHtml(c.detail)}</span>` : ""}</div>`).join("")}</details>` : ""}
+  </div>`;
+}
 
-  html += qualitySection("Structured Data", sd
-    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-         <div class="insights-card"><div class="insights-label">Valid Pages</div><div class="insights-value">${sd.valid ?? 0}</div></div>
-         <div class="insights-card"><div class="insights-label">No Structured Data</div><div class="insights-value">${sd.no_structured_data ?? 0}</div></div>
-         <div class="insights-card"><div class="insights-label">Invalid Markup</div><div class="insights-value">${sd.invalid_types ?? 0}</div></div>
-       </div>
-       ${Object.entries(sd.type_counts || {}).map(([t, c]) => `<span class="count-label" style="margin-right:10px">${escapeHtml(t)}: ${c}</span>`).join("")}`
-    : '<div class="insights-label">Not run for this job yet.</div>');
+function renderSiteHealth(health, nested) {
+  const el = document.getElementById("quality-health-card");
+  if (!el) return;
+  const h = health || {};
+  if (!h.score && !h.grade && !(h.issues || []).length) {
+    el.innerHTML = "";
+    return;
+  }
+  const score = h.score !== undefined && h.score !== null ? Number(h.score) : null;
+  const issues = (h.issues || []).slice(0, 6);
+  el.innerHTML = `<div class="audit-card" style="grid-column:1/-1">
+    <div class="audit-card-head">
+      <span class="audit-title">Overall Site Health</span>
+      <span class="status-chip ${scoreFrom(score) || "na"}">Grade ${escapeHtml(h.grade || "N/A")}</span>
+    </div>
+    ${score !== null ? `<div class="bar-track" style="margin:6px 0"><div class="bar-fill" style="width:${score}%;background:${score >= 70 ? "#16a34a" : score >= 40 ? "#d97706" : "#dc2626"}"></div></div>
+    <div class="audit-verdict">Overall health score: ${score}/100 (grade ${escapeHtml(h.grade || "N/A")}).</div>` : `<div class="audit-verdict">Site health not computed for this job yet.</div>`}
+    ${issues.length ? `<div class="audit-detail">${issues.map(i => `<div class="audit-check"><span class="check-mark issue">Issue</span> ${escapeHtml(i.message || i)}</div>`).join("")}</div>` : ""}
+  </div>`;
+}
 
-  html += qualitySection("Core Web Vitals", perf
-    ? `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-         <div class="insights-card"><div class="insights-label">Pages Measured</div><div class="insights-value">${perf.checked ?? 0}</div></div>
-         <div class="insights-card"><div class="insights-label">Avg CWV Score</div><div class="insights-value">${perf.avg_cwv_score ?? "N/A"}</div></div>
-       </div>
-       ${(perf.errors || []).slice(0, 3).map(e => `<div style="margin-top:6px;font-size:12px;color:var(--danger)">${escapeHtml(e)}</div>`).join("")}`
-    : '<div class="insights-label">Not run for this job yet.</div>');
+function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, cannib, links) {
+  const cards = [];
 
-  html += qualitySection("Industry Alignment (GEO)", geo
-    ? `<div class="insights-label" style="margin-bottom:8px">Core industry keywords: <span class="count-label">${(geo.industry_keywords || []).map(escapeHtml).join(", ")}</span></div>
-       <div class="insights-label">Off-topic pages: ${geo.off_topic_pages ?? 0} of ${geo.pages_analyzed ?? 0}</div>
-       ${(geo.pages || []).filter(p => p.off_topic).slice(0, 12).map(p => `
-         <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-           <div style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(p.page_url)}">${escapeHtml(p.title || p.page_url)}</div>
-           <div class="bar-track" style="width:120px"><div class="bar-fill" style="width:${Math.max(2, Math.round((p.alignment || 0) * 100))}%;background:var(--danger)"></div></div>
-           <span class="count-label">${(p.alignment || 0).toFixed(2)}</span>
-         </div>`).join("")}`
-    : '<div class="insights-label">Not run for this job yet.</div>');
+  const dupCount = (dup?.duplicate_groups?.length) ?? 0;
+  cards.push(auditCard("Duplicate Content & Canonicals", dup
+    ? (() => {
+        const conflicts = (dup.canonical_conflicting ?? 0) + (dup.canonical_cross_domain ?? 0);
+        const status = dupCount === 0 && conflicts === 0 ? "pass" : dupCount <= 5 && conflicts === 0 ? "attention" : "fail";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: dupCount === 0 && conflicts === 0 ? 100 : Math.max(0, 100 - dupCount * 10 - conflicts * 15),
+          verdict: dupCount === 0 && conflicts === 0
+            ? "No duplicate or near-duplicate page groups found."
+            : `${dupCount} duplicate group(s) and ${conflicts} canonical conflict(s) found — consolidate to one canonical URL per topic.`,
+          detail: `${dup.duplicate_pages ?? 0} pages involved · ${dup.canonical_missing ?? 0} pages missing a canonical tag`,
+          checks: (dup.canonical_flags || []).filter(f => f.canonical_conflicting || f.canonical_cross_domain).map(f => ({ passed: false, label: f.page_url, detail: f.canonical_target })),
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "Duplicate-content audit not run for this job." }));
 
-  html += qualitySection("Orphan Pages", orphans
-    ? `<div class="insights-label">Pages with no internal links pointing to them: ${orphans.orphan_pages ?? 0}</div>
-       ${(orphans.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${linkify(p.page_url, 70)}${(p.suggested_link_sources || []).length ? `<div style="margin-left:12px;font-size:12px">↳ link from: ${p.suggested_link_sources.map(s => linkify(s, 50)).join(", ")}</div>` : ""}</div>`).join("")}`
-    : '<div class="insights-label">Not run for this job yet.</div>');
+  const sdInvalid = (sd?.invalid_types ?? 0);
+  cards.push(auditCard("Structured Data", sd
+    ? (() => {
+        const status = sdInvalid === 0 ? "pass" : "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : "Attention",
+          score: sdInvalid === 0 ? 100 : Math.max(0, 100 - sdInvalid * 20),
+          verdict: sdInvalid === 0
+            ? `Valid structured data on ${sd.valid ?? 0} page(s); ${sd.no_structured_data ?? 0} pages have none.`
+            : `${sdInvalid} page(s) have invalid or unsupported markup — fix to enable rich results.`,
+          detail: Object.entries(sd.type_counts || {}).map(([t, c]) => `${t}: ${c}`).join(" · "),
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "Structured-data audit not run for this job." }));
 
-  html += qualitySection("Content Decay", decay && decay.pages_with_last_modified > 0
-    ? `<div class="insights-label">Pages with a Last-Modified header: ${decay.pages_with_last_modified} · stale (>${decay.stale_after_days} days): <strong>${decay.stale_pages}</strong></div>
-       ${(decay.pages || []).slice(0, 20).map(p => `<div style="margin-top:6px;font-size:13px;color:var(--text-secondary)">• ${linkify(p.page_url, 70)} — ${p.stale_days} days old</div>`).join("")}`
-    : '<div class="insights-label">Not available (site does not send Last-Modified headers, or not run).</div>');
+  const perfScore = perf?.avg_cwv_score ?? null;
+  cards.push(auditCard("Core Web Vitals", perf && perfScore !== null
+    ? (() => {
+        const status = scoreFrom(perfScore) || "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: perfScore,
+          verdict: `${perfScore}/100 average CWV score across ${perf.checked ?? 0} page(s) — field + lab data via PageSpeed Insights.`,
+          detail: (perf.errors || []).slice(0, 3).join(" · ") || undefined,
+        };
+      })()
+    : perf && perf.errors && perf.errors.length
+      ? { status: "notconfigured", label: "Not measured", verdict: `PageSpeed Insights unavailable: ${escapeHtml(perf.errors[0])}`, score: null }
+      : { status: "notconfigured", label: "Not measured", verdict: "Core Web Vitals not measured for this job (needs PageSpeed Insights).", score: null }));
 
-  return html;
+  const offTopic = geo?.off_topic_pages ?? 0;
+  cards.push(auditCard("Industry Alignment (GEO)", geo
+    ? {
+        status: offTopic === 0 ? "pass" : "attention",
+        label: offTopic === 0 ? "Pass" : "Attention",
+        score: offTopic === 0 ? 100 : Math.max(0, 100 - offTopic * 10),
+        verdict: offTopic === 0
+          ? `All ${geo.pages_analyzed ?? 0} analyzed page(s) match the core industry topic.`
+          : `${offTopic} of ${geo.pages_analyzed ?? 0} page(s) look off-topic — align titles/body with core industry keywords.`,
+        detail: `Core keywords: ${(geo.industry_keywords || []).join(", ") || "none"}`,
+        checks: (geo.pages || []).filter(p => p.off_topic).slice(0, 10).map(p => ({ passed: false, label: p.title || p.page_url, detail: "alignment " + (p.alignment ?? 0).toFixed(2) })),
+      }
+    : { status: "na", label: "Not run", verdict: "Industry-alignment audit not run for this job." }));
+
+  const orphanCount = orphans?.orphan_pages ?? 0;
+  cards.push(auditCard("Orphan Pages", orphans
+    ? {
+        status: orphanCount === 0 ? "pass" : "attention",
+        label: orphanCount === 0 ? "Pass" : "Attention",
+        score: orphanCount === 0 ? 100 : Math.max(0, 100 - orphanCount * 3),
+        verdict: orphanCount === 0
+          ? "Every crawled page has at least one internal link pointing to it."
+          : `${orphanCount} page(s) have no internal links — add links from related pages to make them crawlable.`,
+        checks: (orphans.pages || []).slice(0, 15).map(p => ({ passed: false, label: p.page_url, detail: (p.suggested_link_sources || []).slice(0, 2).join(", ") })),
+      }
+    : { status: "na", label: "Not run", verdict: "Orphan-page audit not run for this job." }));
+
+  cards.push(auditCard("Content Decay", decay && decay.pages_with_last_modified > 0
+    ? (() => {
+        const stale = decay.stale_pages ?? 0;
+        return {
+          status: stale === 0 ? "pass" : "attention",
+          label: stale === 0 ? "Pass" : "Attention",
+          score: stale === 0 ? 100 : Math.max(0, 100 - stale * 3),
+          verdict: stale === 0
+            ? `${decay.pages_with_last_modified} page(s) send Last-Modified; none are stale.`
+            : `${stale} of ${decay.pages_with_last_modified} page(s) are stale (>${decay.stale_after_days ?? 180} days since last modified) — refresh outdated content.`,
+          checks: (decay.pages || []).slice(0, 10).map(p => ({ passed: false, label: p.page_url, detail: `${p.stale_days} days old` })),
+        };
+      })()
+    : { status: "na", label: "No data", verdict: "Site does not send Last-Modified headers, so content decay cannot be measured.", score: null }));
+
+  const geoReadiness = nested.geo_readiness || {};
+  cards.push(auditCard("AI Search (GEO) Readiness", geoReadiness.status
+    ? (() => {
+        const status = scoreFrom(geoReadiness.score) || "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: geoReadiness.score,
+          verdict: `robots.txt: ${geoReadiness.robots_txt_found ? "found" : "missing"} · blocked AI crawlers: ${(geoReadiness.blocked_ai_crawlers || []).join(", ") || "none"} · checked: ${(geoReadiness.ai_agents_scanned || []).join(", ") || "none"}`,
+          checks: (geoReadiness.blocked_ai_crawlers || []).map(c => ({ passed: false, label: c, detail: "blocked in robots.txt" })),
+        };
+      })()
+    : { status: "na", label: "No data", verdict: "AI-search readiness data not available for this job.", score: null }));
+
+  cards.push(auditCard("International SEO (hreflang)", hl && hl.applicable === false
+    ? { status: "na", label: "Not applicable", verdict: "Site appears monolingual — hreflang not needed.", score: null, detail: `${hl.total_pages ?? 0} pages checked` }
+    : hl && hl.score !== null && hl.score !== undefined
+      ? (() => {
+          const status = scoreFrom(hl.score) || "attention";
+          return {
+            status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+            score: hl.score,
+            verdict: `${hl.locales && hl.locales.length ? hl.locales.join(", ") + " locales · " : ""}${hl.hreflang_errors ?? 0} hreflang error(s) across ${hl.total_pages ?? 0} pages.`,
+            checks: (hl.errors || []).slice(0, 10).map(e => ({ passed: false, label: String(e.message || e), detail: String(e.url || "") })),
+          };
+        })()
+      : { status: "na", label: "Not run", verdict: "Hreflang audit not run for this job.", score: null }));
+
+  cards.push(auditCard("URL Hygiene", uh && uh.score !== undefined && uh.score !== null
+    ? (() => {
+        const status = scoreFrom(uh.score) || "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: uh.score,
+          verdict: `Parameter pages: ${uh.param_pages ?? 0} · long slugs: ${uh.long_slugs ?? 0} · uppercase/underscore paths: ${(uh.uppercase_paths ?? 0) + (uh.underscore_paths ?? 0)}`,
+          checks: Object.entries(uh.top_params || {}).slice(0, 5).map(([k, v]) => ({ passed: false, label: `?${k} (${v} pages)` })),
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "URL-hygiene audit not run for this job.", score: null }));
+
+  cards.push(auditCard("Indexation", idx && idx.status === "unmeasured"
+    ? { status: "notconfigured", label: "Not measured", verdict: idx.message || "Indexation estimate requires SERP credits — not run for this job.", score: null, detail: `${idx.crawled_pages ?? 0} pages crawled locally` }
+    : idx && idx.status === "measured"
+      ? {
+          status: "pass", label: "Measured", score: null,
+          verdict: `Estimated indexed pages: ${idx.indexed_estimate ?? "n/a"} via live SERP sample.`,
+          checks: (idx.top_indexed_pages || []).slice(0, 5).map(p => ({ passed: true, label: p.url || String(p) })),
+        }
+      : { status: "na", label: "Not run", verdict: "Indexation check not run for this job.", score: null }));
+
+  const imgScore = imgOpt?.score;
+  cards.push(auditCard("Image Optimization", imgOpt && imgOpt.score !== undefined && imgOpt.score !== null
+    ? (() => {
+        const status = scoreFrom(imgScore) || "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: imgScore,
+          verdict: `${imgOpt.total_images ?? 0} unique image(s) (${imgOpt.image_occurrences ?? imgOpt.total_images ?? 0} occurrences) · ${imgOpt.modern_images ?? 0} WebP/AVIF · ${imgOpt.lazy_images ?? 0} lazy-loaded · ${imgOpt.missing_dimensions ?? 0} missing dimensions.`,
+          checks: (imgOpt.checks || []).map(c => ({ passed: !!c.passed, label: c.label, detail: c.detail })),
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "Image-optimization audit not run for this job.", score: null }));
+
+  const sm = sitemap || nested.sitemap || {};
+  cards.push(auditCard("Sitemap", sitemap || nested.sitemap
+    ? (() => {
+        const found = sm.sitemap_found ?? sm.found ?? false;
+        const valid = sm.sitemap_valid ?? sm.valid ?? false;
+        const coverage = sm.crawled_coverage ?? (sm.crawled_in_sitemap && sm.pages_in_sitemap ? Math.round(100 * sm.crawled_in_sitemap / sm.pages_in_sitemap) : null);
+        const status = !found ? "fail" : !valid ? "attention" : coverage !== null && coverage < 60 ? "attention" : "pass";
+        return {
+          status, label: !found ? "Fail" : status === "pass" ? "Pass" : "Attention",
+          score: !found ? 0 : valid ? (coverage ?? 100) : 40,
+          verdict: !found
+            ? "No XML sitemap found — create one and submit it in Search Console."
+            : `${sm.url_count ?? sm.pages_in_sitemap ?? 0} URL(s) listed${coverage !== null ? ` · ${coverage}% crawled coverage` : ""}${valid ? "" : " · sitemap markup invalid"}.`,
+          detail: `${sm.uncrawled_urls_count ?? 0} listed URL(s) not crawled`,
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "Sitemap audit not run for this job.", score: null }));
+
+  const aiScore = aiVis?.score;
+  cards.push(auditCard("AI Visibility", aiVis && aiScore !== undefined && aiScore !== null
+    ? (() => {
+        const status = scoreFrom(aiScore) || "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: aiScore,
+          verdict: `${(aiVis.blocked_ai_agents || []).length} AI crawler(s) blocked · llms.txt: ${aiVis.llms_txt_present ? "present" : "absent"} · sitemap: ${aiVis.sitemap_valid ? "valid" : "invalid/missing"}.`,
+          checks: (aiVis.checks || []).slice(0, 8).map(c => ({ passed: !!c.passed, label: c.label || c.check, detail: c.detail })),
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "AI-visibility audit not run for this job.", score: null }));
+
+  const localScore = local?.score;
+  cards.push(auditCard("Local SEO", local && localScore !== undefined && localScore !== null
+    ? (() => {
+        const status = scoreFrom(localScore) || "attention";
+        return {
+          status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
+          score: localScore,
+          verdict: `LocalBusiness schema: ${local.local_business_on_homepage ? "on homepage" : "not on homepage"} · NAP consistent: ${local.nap_inconsistent ? "no" : "yes"} · geo signals: ${(local.geo_pages ?? 0)} page(s).`,
+          checks: (local.checks || []).slice(0, 8).map(c => ({ passed: !!c.passed, label: c.label || c.check, detail: c.detail })),
+        };
+      })()
+    : { status: "na", label: "Not run", verdict: "Local-SEO audit not run for this job.", score: null }));
+
+  const cannibGroups = cannib?.groups ?? 0;
+  cards.push(auditCard("Keyword Cannibalization", cannib
+    ? {
+        status: cannibGroups === 0 ? "pass" : "attention",
+        label: cannibGroups === 0 ? "Pass" : "Attention",
+        score: cannibGroups === 0 ? 100 : Math.max(0, 100 - cannibGroups * 10),
+        verdict: cannibGroups === 0
+          ? "No pages competing for the same keyword detected."
+          : `${cannibGroups} keyword group(s) have multiple competing pages — split or merge to avoid rank cannibalization.`,
+        checks: (cannib.cannibalized_keywords || []).slice(0, 8).map(k => ({ passed: false, label: k })),
+      }
+    : { status: "na", label: "Not run", verdict: "Cannibalization check not run for this job.", score: null }));
+
+  const blChecked = links?.total_links_scanned ?? links?.links_checked ?? 0;
+  const blBroken = links?.broken_link_count ?? 0;
+  const blRate = blChecked ? Math.round(100 * blBroken / blChecked) : null;
+  cards.push(auditCard("Broken Links", links && blChecked
+    ? {
+        status: blBroken === 0 ? "pass" : blRate > 10 ? "fail" : "attention",
+        label: blBroken === 0 ? "Pass" : blRate > 10 ? "Fail" : "Attention",
+        score: blRate !== null ? Math.max(0, 100 - blRate * 2) : null,
+        verdict: blBroken === 0
+          ? `All ${blChecked} checked links resolve.`
+          : `${blBroken} of ${blChecked} checked link(s) are broken (${blRate}%) — fix or redirect them.`,
+        detail: `${links.total_link_occurrences ?? blChecked} total link occurrences on the site`,
+      }
+    : { status: "na", label: "Not checked", verdict: "Link health not checked for this job.", score: null }));
+
+  return `<div class="audit-grid">${cards.join("")}</div>`;
 }
 
 async function loadSeoInsights(jobId) {
