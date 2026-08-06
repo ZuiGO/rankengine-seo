@@ -167,6 +167,13 @@ ul.evidence { color: #64748b; font-size: 12px; }
 .drive { font-weight: 600; color: #111827; }
 .rec-note { font-size: 12px; color: #64748b; }
 .page-break { page-break-before: always; }
+.bar { height: 6px; border-radius: 3px; background: #e2e8f0; overflow: hidden; margin: 4px 0 10px; max-width: 480px; }
+.bar div { height: 100%; border-radius: 3px; }
+.checks { margin: 8px 0; }
+.checks .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef2f7; }
+.checks .row .mark { font-weight: 700; flex: 0 0 18px; }
+.checks .row.ok .mark { color: #16a34a; }
+.checks .row.bad .mark { color: #dc2626; }
 footer { margin-top: 26px; padding-top: 10px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 11px; }
 @media print { .cover { page-break-after: avoid; } }
 """
@@ -415,6 +422,118 @@ async def _report_html(job_id: str):
             "<table><tr><th>Query</th><th>Clicks</th><th>Position</th></tr>%s</table>" % q_rows
         )
 
+    def _bar(score, max_score=100):
+        if score is None or max_score <= 0:
+            return ""
+        pct = max(0, min(100, int(score / max_score * 100)))
+        color = "#16a34a" if pct >= 70 else "#d97706" if pct >= 40 else "#dc2626"
+        return '<div class="bar"><div style="width:%d%%;background:%s"></div></div>' % (pct, color)
+
+    def _checks_html(checks):
+        if not checks:
+            return ""
+        rows = "".join(
+            '<div class="row %s"><span class="mark">%s</span><div><b>%s</b>%s</div></div>'
+            % ("ok" if c.get("passed") else "bad", "✔" if c.get("passed") else "✘",
+               _esc(c.get("label", "")),
+               ('<div class="muted">%s</div>' % _esc(c.get("detail", "")) if c.get("detail") else ""))
+            for c in checks
+        )
+        return '<div class="checks">%s</div>' % rows
+
+    sitemap_audit = await db.sitemap_audits.find_one({"job_id": job_id})
+    ai_vis = await db.ai_visibility_summaries.find_one({"job_id": job_id})
+    local_seo = await db.local_seo_summaries.find_one({"job_id": job_id})
+
+    sitemap_html = ""
+    if sitemap_audit:
+        cov = sitemap_audit.get("crawled_coverage")
+        uncrawled = sitemap_audit.get("uncrawled_urls_count") or 0
+        sitemap_html = (
+            "<h2 class='section-title'>Sitemap</h2>"
+            "<table><tr><th>Found</th><th>Valid</th><th>URLs listed</th><th>Pages crawled</th><th>Coverage</th></tr>"
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr></table>"
+            % (_esc(sitemap_audit.get("sitemap_found")), _esc(sitemap_audit.get("sitemap_valid")),
+               _esc(sitemap_audit.get("pages_in_sitemap", "N/A")),
+               _esc(sitemap_audit.get("pages_crawled", "N/A")),
+               _esc(cov if cov is not None else "N/A"))
+            + _bar(cov)
+            + ('<p class="muted">%s listed URL(s) were not crawled, and %s URL(s) lack a<code>lastmod</code> date. '
+                'Missing dates weaken freshness signals but indexing is unaffected.</p>'
+               % (uncrawled, _esc(sitemap_audit.get("missing_lastmod", 0)))
+               if uncrawled or sitemap_audit.get("missing_lastmod") else "")
+        )
+
+    ai_html = ""
+    if ai_vis:
+        subs = ai_vis.get("subscores") or {}
+        agents = ai_vis.get("ai_agents") or []
+        blocked = ai_vis.get("blocked_ai_agents") or []
+        schema_types = ai_vis.get("schema_types") or {}
+        agent_rows = "".join(
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+            % (_esc(a.get("agent")), _esc(a.get("status")), _esc(a.get("disallow_rules", 0)),
+               _esc(a.get("crawl_delay") or "—"))
+            for a in agents
+        ) or '<tr><td colspan="4" class="muted">No agent rules found.</td></tr>'
+        ai_html = (
+            "<h2 class='section-title'>AI-Search Visibility</h2>"
+            "<p>Score: <b>%s</b> / 100%s</p>"
+            % (_esc(ai_vis.get("score")), _bar(ai_vis.get("score")))
+            + "<table><tr><th>Sitemap</th><th>llms.txt</th><th>Structured data</th><th>Extractable</th></tr>"
+            "<tr><td>%s / 25</td><td>%s / 25</td><td>%s / 25</td><td>%s / 25</td></tr></table>"
+            % (_esc(subs.get("sitemap") or 0), _esc(subs.get("llms_txt") or 0),
+               _esc(subs.get("structured_data") or 0), _esc(subs.get("extractable_content") or 0))
+            + ("<p>robots.txt: <b>%s</b> · llms.txt: <b>%s</b> · structured data on <b>%s</b> of <b>%s</b> pages · "
+               "extractable content on <b>%s</b> of <b>%s</b> pages</p>"
+               % (_esc(ai_vis.get("robots_status") or ("found" if ai_vis.get("robots_txt_found") else "missing")),
+                  _esc(ai_vis.get("llms_txt_present") and "present" or "missing"),
+                  _esc(ai_vis.get("structured_data_pages", 0)), _esc(ai_vis.get("total_pages", 0)),
+                  _esc(ai_vis.get("extractable_pages", 0)), _esc(ai_vis.get("total_pages", 0))))
+            + (('<p class="muted">robots.txt fully blocks: %s</p>' % _esc(", ".join(blocked))) if blocked else "")
+            + ('<p class="muted">Schema types: %s</p>' % _esc(" · ".join("%s (%d)" % (k, v) for k, v in list(schema_types.items())[:8]))
+               if schema_types else "")
+            + "<p>AI agent robots.txt stance</p><table><tr><th>Agent</th><th>Status</th><th>Disallow rules</th><th>Crawl delay</th></tr>%s</table>" % agent_rows
+            + _checks_html(ai_vis.get("checks"))
+        )
+
+    local_html = ""
+    if local_seo:
+        subs = local_seo.get("subscores") or {}
+        nap = (local_seo.get("naps_found") or [{}])[0]
+        signals = [("Geo,", local_seo.get("geo_pages")), ("Opening hours", local_seo.get("opening_hours_pages")),
+                   ("Phone", local_seo.get("phone_pages")), ("Reviews", local_seo.get("reviews_pages")),
+                   ("Address", local_seo.get("address_pages"))]
+        sig_txt = " · ".join("%s: %d page(s)" % (l, n) for l, n in signals if n) or "none found"
+        local_html = (
+            "<h2 class='section-title'>Local SEO Readiness</h2>"
+            "<p>Score: <b>%s</b> / 100%s</p>"
+            % (_esc(local_seo.get("score")), _bar(local_seo.get("score")))
+            + "<table><tr><th>LocalBusiness schema</th><th>On homepage</th><th>NAP consistent</th><th>Contact page</th></tr>"
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr></table>"
+            % (_esc("✅" if local_seo.get("local_business_schema") else "❌"),
+               _esc("✅" if local_seo.get("local_business_on_homepage") else "❌"),
+               _esc("✅" if not local_seo.get("nap_inconsistent") else "⚠ mismatched"),
+               _esc("✅" if local_seo.get("contact_page_present") else "❌"))
+            + (('<p class="muted">NAP: <b>%s</b> · %s · %s</p>'
+                % (_esc(nap.get("name") or "?"), _esc(nap.get("street_address") or nap.get("address") or "?"),
+                   _esc(nap.get("telephone") or "?"))) if nap else "")
+            + ('<p class="muted" style="color:#dc2626">⚠ Multiple differing NAP values across pages — keep one consistent Name, Address, Phone.</p>'
+               if local_seo.get("nap_inconsistent") else "")
+            + "<p class='muted'>Signals: %s</p>" % _esc(sig_txt)
+            + "<table><tr><th>Area</th><th>Points</th><th>Max</th></tr>"
+            "<tr><td>LocalBusiness schema</td><td>%s</td><td>40</td></tr>"
+            "<tr><td>NAP data</td><td>%s</td><td>20</td></tr>"
+            "<tr><td>Contact page</td><td>%s</td><td>15</td></tr>"
+            "<tr><td>Address signals</td><td>%s</td><td>10</td></tr>"
+            "<tr><td>Geo signals</td><td>%s</td><td>10</td></tr>"
+            "<tr><td>Reviews</td><td>%s</td><td>5</td></tr></table>"
+            % (_esc(subs.get("local_business_schema") or 0), _esc(subs.get("nap") or 0),
+               _esc(subs.get("contact_page") or 0), _esc(subs.get("address_signals") or 0),
+               _esc(subs.get("geo_signals") or 0), _esc(subs.get("reviews") or 0))
+            + _checks_html(local_seo.get("checks"))
+        )
+
     html = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
         "<title>ZuiGO Engine SEO Audit — %s</title><style>%s</style></head><body>"
@@ -440,6 +559,7 @@ async def _report_html(job_id: str):
         + '<h2 class="section-title">Page-Type Breakdown</h2>'
         '<table><tr><th>Page type</th><th>Count</th></tr>%s</table>' % page_type_rows
         + insights_html + ov_html + gsc_html
+        + sitemap_html + ai_html + local_html
         + '<h2 class="section-title">User Flows</h2>'
         '<table><tr><th>Target type</th><th>Depth</th><th>Visits</th><th>Target URL</th></tr>%s</table>'
         % flow_rows

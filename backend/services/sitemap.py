@@ -35,28 +35,51 @@ async def _fetch(url: str) -> str | None:
 
 async def _parse_sitemap_urls(xml_text: str) -> list[str] | None:
     """Return URL list, or None if the body is not valid XML; [] if valid but empty."""
+    entries = await _fetch_sitemap_entries(xml_text)
+    if entries is None:
+        return None
+    return [e["loc"] for e in entries]
+
+
+async def _fetch_sitemap_entries(xml_text: str, _nested: set[str] | None = None) -> list[dict] | None:
+    """Parse sitemap XML into [{loc, lastmod}]. Returns None if not valid XML.
+
+    Nested sitemap indexes are expanded recursively (each child fetched once).
+    """
+    if _nested is None:
+        _nested = set()
     try:
         root = ElementTree.fromstring(xml_text)
     except Exception:
         return None
     tag = root.tag.split("}")[-1].lower()
-    urls: list[str] = []
+    entries: list[dict] = []
     if tag == "urlset":
         for child in root:
             name = child.tag.split("}")[-1].lower()
             if name == "url":
                 loc = child.findtext("{*}loc")
                 if loc:
-                    urls.append(loc.strip())
+                    entries.append({
+                        "loc": loc.strip(),
+                        "lastmod": (child.findtext("{*}lastmod") or "").strip(),
+                    })
     elif tag in ("sitemapindex", "sitemap"):
         for child in root:
             if child.tag.split("}")[-1].lower() == "sitemap":
                 loc = child.findtext("{*}loc")
-                if loc:
-                    nested = await _fetch(loc.strip())
-                    if nested:
-                        urls.extend(await _parse_sitemap_urls(nested) or [])
-    return urls
+                if not loc:
+                    continue
+                loc = loc.strip()
+                if loc in _nested:
+                    continue
+                _nested.add(loc)
+                nested = await _fetch(loc)
+                if nested:
+                    entries.extend(await _fetch_sitemap_entries(nested, _nested) or [])
+    else:
+        return None
+    return entries
 
 
 async def _robots_sitemap_urls(origin: str) -> list[str]:
@@ -84,6 +107,9 @@ async def audit_sitemap(job_id: str, target_url: str) -> dict:
 
     results = []
     seen = set()
+    all_urls: set[str] = set()
+    lastmod_missing = 0
+    http_plain = 0
     for cand in candidates:
         if cand in seen:
             continue
@@ -92,33 +118,52 @@ async def audit_sitemap(job_id: str, target_url: str) -> dict:
         if text is None:
             results.append({"url": cand, "found": False})
             continue
-        urls = await _parse_sitemap_urls(text)
-        if urls is None:
+        entries = await _fetch_sitemap_entries(text)
+        if entries is None:
             results.append({"url": cand, "found": True, "valid": False})
-        else:
-            results.append({"url": cand, "found": True, "valid": True, "url_count": len(urls)})
+            continue
+        locs = {normalize_url(e["loc"]) for e in entries if normalize_url(e["loc"])}
+        missing = sum(1 for e in entries if not e.get("lastmod"))
+        results.append({
+            "url": cand,
+            "found": True,
+            "valid": True,
+            "url_count": len(locs),
+            "lastmod_missing": missing,
+        })
+        for e in entries:
+            nu = normalize_url(e["loc"])
+            if nu:
+                all_urls.add(nu)
+            if e["loc"].lower().startswith("http://"):
+                http_plain += 1
+        if missing:
+            lastmod_missing += missing
 
     pages = await db.pages.find({"job_id": job_id}, {"url": 1}).to_list(length=None)
     crawled = {normalize_url(p.get("url", "")) for p in pages if normalize_url(p.get("url", ""))}
 
+    crawled_in_sitemap = len(all_urls & crawled)
     uncrawled = []
-    for r in results:
-        if r.get("valid"):
-            text = await _fetch(r["url"])
-            if text:
-                for u in (await _parse_sitemap_urls(text) or []):
-                    nu = normalize_url(u)
-                    if nu and nu not in crawled and nu not in uncrawled:
-                        uncrawled.append(nu)
-                        if len(uncrawled) >= 200:
-                            break
+    for u in all_urls:
+        if u not in crawled and u not in uncrawled:
+            uncrawled.append(u)
+            if len(uncrawled) >= 200:
+                break
 
+    pages_in_sitemap = len(all_urls)
     summary = {
         "job_id": job_id,
         "sitemap_found": any(r.get("found") for r in results),
         "sitemap_valid": any(r.get("valid") for r in results),
         "sitemap_count": len(results),
-        "url_count": sum(r.get("url_count", 0) for r in results),
+        "url_count": pages_in_sitemap,
+        "pages_in_sitemap": pages_in_sitemap,
+        "crawled_in_sitemap": crawled_in_sitemap,
+        "crawled_coverage": round(100 * crawled_in_sitemap / pages_in_sitemap, 1) if pages_in_sitemap else 0,
+        "missing_lastmod": lastmod_missing,
+        "http_plain_urls": http_plain,
+        "pages_crawled": len(pages),
         "uncrawled_urls_count": len(uncrawled),
         "uncrawled_urls": uncrawled[:20],
         "results": results,
@@ -129,5 +174,5 @@ async def audit_sitemap(job_id: str, target_url: str) -> dict:
         {"$set": summary},
         upsert=True,
     )
-    logger.info("Sitemap audit job=%s found=%s valid=%s urls=%s", job_id, summary["sitemap_found"], summary["sitemap_valid"], summary["url_count"])
+    logger.info("Sitemap audit job=%s found=%s valid=%s urls=%s coverage=%s", job_id, summary["sitemap_found"], summary["sitemap_valid"], summary["pages_in_sitemap"], summary["crawled_coverage"])
     return summary

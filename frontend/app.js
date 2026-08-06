@@ -136,7 +136,13 @@ document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.add("active");
     document.querySelectorAll(".tab-content").forEach(tc => tc.classList.add("hidden"));
     const target = document.getElementById(`tab-${tab.dataset.tab}`);
-    if (target) target.classList.remove("hidden");
+    if (target) {
+      target.classList.remove("hidden");
+      target.style.animation = 'none';
+      void target.offsetWidth;
+      target.style.animation = '';
+      applyCounts(target);
+    }
     currentTab = tab.dataset.tab;
 
     if (currentJobId) {
@@ -298,12 +304,19 @@ function loadOverview(summary) {
     ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${geo.blocked_ai_crawlers?.length ? "⛔ " + escapeHtml(geo.blocked_ai_crawlers.join(", ")) : "✅ AI crawlers OK"}</div><div class="stat-label">AI Search Readiness${geo.score !== undefined && geo.score !== null ? " (" + geo.score + "/100)" : ""}</div></div>`
     : "";
   const ai = summary.ai_visibility || {};
+  const scoreBar = s => (s !== undefined && s !== null)
+    ? `<div style="height:5px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden"><div style="width:${Math.max(0, Math.min(100, s))}%;height:100%;background:${s >= 70 ? "#16a34a" : s >= 40 ? "#d97706" : "#dc2626"}"></div></div>`
+    : "";
   const aiCard = ai.score !== undefined && ai.score !== null
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${ai.score}/100</div><div class="stat-label">AI Visibility${ai.blocked_ai_agents?.length ? " ⛔ blocked" : ""}${ai.llms_txt_present ? " · llms.txt" : ""}</div></div>`
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${ai.score}/100</div><div class="stat-label">AI Visibility${ai.blocked_ai_agents?.length ? " ⛔ blocked" : ""}${ai.llms_txt_present ? " · llms.txt" : ""}</div>${scoreBar(ai.score)}</div>`
     : "";
   const local = summary.local_seo || {};
   const localCard = local.score !== undefined && local.score !== null
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${local.score}/100</div><div class="stat-label">Local SEO${local.local_business_schema ? " ✅" : ""}</div></div>`
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${local.score}/100</div><div class="stat-label">Local SEO${local.local_business_schema ? " ✅" : ""}${local.nap_inconsistent ? " · NAP mismatch" : ""}</div>${scoreBar(local.score)}</div>`
+    : "";
+  const crawl = summary.summary || {};
+  const failedCard = crawl.failed_urls_count
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;color:#dc2626">${crawl.failed_urls_count}</div><div class="stat-label">Pages Failed to Fetch</div></div>`
     : "";
   const cannib = summary.cannibalization_groups || 0;
   const cannibCard = cannib
@@ -314,7 +327,7 @@ function loadOverview(summary) {
     <div class="stat-card"><div class="stat-value" data-count="${summary.total_content_items}">0</div><div class="stat-label">Content Items</div></div>
     <div class="stat-card"><div class="stat-value" data-count="${summary.total_action_items}">0</div><div class="stat-label">SEO Action Items</div></div>
     <div class="stat-card"><div class="stat-value" data-count="${summary.summary?.total_links || 0}">0</div><div class="stat-label">Total Links Found</div></div>
-    ${geoCard}${aiCard}${localCard}${cannibCard}
+    ${geoCard}${aiCard}${localCard}${failedCard}${cannibCard}
   `;
   applyCounts(stats);
 
@@ -1324,47 +1337,116 @@ async function loadReport(jobId) {
 
 async function loadReportExtras(jobId, preview) {
   const kv = (label, value) => `<div class="stat-card"><div class="stat-value" style="font-size:14px">${value}</div><div class="stat-label">${label}</div></div>`;
+  const bar = (label, score, max = 100) => {
+    const pct = Math.max(0, Math.min(100, max ? (score / max) * 100 : 0));
+    return `
+      <div style="margin:8px 0">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+          <span style="color:var(--text-secondary)">${label}</span><strong>${score}${max !== 100 ? "/" + max : ""}</strong>
+        </div>
+        <div style="height:6px;border-radius:3px;background:var(--border);overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${pct >= 70 ? "#16a34a" : pct >= 40 ? "#d97706" : "#dc2626"}"></div>
+        </div>
+      </div>`;
+  };
+  const checksList = checks => (checks || []).length
+    ? `<div style="margin-top:10px">${checks.map(c => `
+        <div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <span style="flex:0 0 18px;text-align:center;color:${c.passed ? "#16a34a" : "#dc2626"}">${c.passed ? "✓" : "✗"}</span>
+          <div><div>${escapeHtml(c.label)}</div>
+          ${c.detail ? `<div style="color:var(--text-secondary);font-size:12px;margin-top:2px">${linkifyText(c.detail, 140)}</div>` : ""}</div>
+        </div>`).join("")}</div>`
+    : "";
   try {
     const sm = await fetch(`${API_BASE}/quality/${jobId}/sitemap`);
     if (sm.ok) {
       const d = await sm.json();
+      const coverage = d.crawled_coverage ?? null;
+      const pagesIn = d.pages_in_sitemap ?? d.url_count ?? "N/A";
+      const uncrawledList = (d.uncrawled_urls || []).slice(0, 8);
       preview.insertAdjacentHTML("beforeend", `
         <h4 style="margin:20px 0 10px">Sitemap</h4>
         <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
           ${kv("Found", d.sitemap_found ? "✅" : "❌")}
           ${kv("Valid", d.sitemap_valid ? "✅" : "❌")}
-          ${kv("URLs", d.url_count ?? "N/A")}
-          ${kv("Uncrawled URLs", d.uncrawled_urls_count ?? 0)}
+          ${kv("URLs in sitemap", pagesIn)}
+          ${kv("Pages crawled", d.pages_crawled ?? "N/A")}
+          ${kv("Coverage", coverage !== null ? coverage + "%" : "N/A")}
+          ${kv("No lastmod", d.missing_lastmod ?? "N/A")}
         </div>
-        ${d.uncrawled_urls?.length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Sample: ${d.uncrawled_urls.slice(0, 5).map(escapeHtml).join(", ")}</p>` : ""}`);
+        ${coverage !== null ? bar("Sitemap coverage (crawled / listed)", coverage) : ""}
+        ${(d.http_plain_urls || []).length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">⚠ Non-HTTPS URLs in sitemap: ${d.http_plain_urls.length} (<code>${escapeHtml(d.http_plain_urls.slice(0, 4).join(", "))}</code>${d.http_plain_urls.length > 4 ? "…" : ""})</p>` : ""}
+        ${(d.missing_lastmod || 0) > 0 ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">⚠ ${d.missing_lastmod} URL(s) lack a <code>lastmod</code> date — search engines can still index them, but freshness signals are weaker.</p>` : ""}
+        ${uncrawledList.length ? `
+          <p style="font-size:12px;color:var(--text-secondary);margin-top:6px"><strong>${d.uncrawled_urls_count || uncrawledList.length} URL(s) not crawled</strong>: ${uncrawledList.map(escapeHtml).join(", ")}${(d.uncrawled_urls_count || 0) > uncrawledList.length ? ` +${(d.uncrawled_urls_count || 0) - uncrawledList.length} more` : ""}</p>` : ""}`);
     }
   } catch (_) {}
   try {
     const ai = await fetch(`${API_BASE}/quality/${jobId}/ai-visibility`);
     if (ai.ok) {
       const d = await ai.json();
+      const subs = d.subscores || {};
+      const types = d.schema_types || {};
       preview.insertAdjacentHTML("beforeend", `
         <h4 style="margin:20px 0 10px">AI-Search Visibility</h4>
         <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
           ${kv("Score", (d.score ?? "N/A") + "/100")}
-          ${kv("llms.txt", d.llms_txt_present ? "✅" : "❌")}
+          ${kv("robots.txt", d.robots_txt_found ? (d.robots_status || "OK") : "missing")}
+          ${kv("llms.txt", d.llms_txt_present ? "✅ published" : "❌ missing")}
+          ${kv("Structured data pages", (d.structured_data_pages ?? 0) + "/" + (d.total_pages ?? "N/A"))}
           ${kv("Blocked AI agents", d.blocked_ai_agents?.length ? d.blocked_ai_agents.join(", ") : "none")}
-          ${kv("Pages w/ structured data", d.structured_data_pages + "/" + d.total_pages)}
-        </div>`);
+          ${kv("Extractable content", (d.extractable_pages ?? 0) + "/" + (d.total_pages ?? "N/A") + " pages")}
+        </div>
+        <div style="max-width:460px">
+          ${bar("XML sitemap", subs.sitemap ?? 0, 25)}
+          ${bar("llms.txt", subs.llms_txt ?? 0, 25)}
+          ${bar("Structured data", subs.structured_data ?? 0, 25)}
+          ${bar("Extractable content", subs.extractable_content ?? 0, 25)}
+        </div>
+        ${(d.ai_agents || []).length ? `
+        <table class="data-table" style="margin-top:10px">
+          <thead><tr><th>AI Agent</th><th>Status</th><th>Disallow rules</th><th>Crawl delay</th></tr></thead>
+          <tbody>${d.ai_agents.map(a => `
+            <tr>
+              <td>${escapeHtml(a.agent)}</td>
+              <td>${a.status === "blocked" ? "⛔ blocked" : a.status === "partial" ? "⚠ partial" : "✅ allowed"}</td>
+              <td>${a.disallow_rules || 0}</td>
+              <td>${a.crawl_delay ? a.crawl_delay + "s" : "—"}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>` : ""}
+        ${Object.keys(types).length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Schema types: ${Object.entries(types).map(([t, n]) => `${escapeHtml(t)} (${n})`).join(" · ")}</p>` : ""}
+        ${checksList(d.checks)}`);
     }
   } catch (_) {}
   try {
     const lo = await fetch(`${API_BASE}/quality/${jobId}/local-seo`);
     if (lo.ok) {
       const d = await lo.json();
+      const subs = d.subscores || {};
+      const nap = (d.naps_found || [])[0];
       preview.insertAdjacentHTML("beforeend", `
         <h4 style="margin:20px 0 10px">Local SEO Readiness</h4>
         <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
           ${kv("Score", (d.score ?? "N/A") + "/100")}
           ${kv("LocalBusiness schema", d.local_business_schema ? "✅" : "❌")}
-          ${kv("NAP schema", d.nap_schema_present ? "✅" : "❌")}
+          ${kv("On homepage", d.local_business_on_homepage ? "✅" : "❌")}
+          ${kv("NAP consistency", d.nap_inconsistent ? "⚠ mismatched" : "✅ consistent")}
           ${kv("Contact page", d.contact_page_present ? "✅" : "❌")}
-        </div>`);
+          ${kv("Schema pages", d.pages_with_local_schema ?? 0)}
+        </div>
+        <div style="max-width:460px">
+          ${bar("LocalBusiness schema", subs.local_business_schema ?? 0, 40)}
+          ${bar("NAP data", subs.nap ?? 0, 20)}
+          ${bar("Contact page", subs.contact_page ?? 0, 15)}
+          ${bar("Address signals", subs.address_signals ?? 0, 10)}
+          ${bar("Geo signals", subs.geo_signals ?? 0, 10)}
+          ${bar("Reviews", subs.reviews ?? 0, 5)}
+        </div>
+        ${d.nap_inconsistent ? `<p style="font-size:12px;color:#dc2626;margin-top:6px">⚠ Multiple different business names / phone numbers / addresses were found in structured data — keep one consistent NAP across all pages.</p>` : ""}
+        ${nap ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">NAP: <strong>${escapeHtml(nap.name || "?")}</strong> · ${escapeHtml(nap.street_address || nap.address || "?")} · ${escapeHtml(nap.telephone || "?")}</p>` : ""}
+        <p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Signals: ${[["geo", d.geo_pages], ["opening hours", d.opening_hours_pages], ["phone", d.phone_pages], ["reviews", d.reviews_pages], ["address", d.address_pages]].filter(([, n]) => n).map(([l, n]) => `${l}: ${n} page(s)`).join(" · ") || "none found"}</p>
+        ${checksList(d.checks)}`);
     }
   } catch (_) {}
   try {

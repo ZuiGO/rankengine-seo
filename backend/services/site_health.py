@@ -216,7 +216,8 @@ async def compute_site_health(job_id: str) -> dict:
     if local:
         metrics["local_seo_score"] = local.get("score")
         if local.get("score", 0) < 60:
-            missing = ", ".join(local.get("checks", [])[:3])
+            failed = [c.get("label", "") for c in (local.get("checks") or []) if not c.get("passed")][:3]
+            missing = ", ".join(failed) if failed else f"score {local.get('score')}/100"
             issues.append({"severity": "low", "message": f"Local-SEO signals weak ({local.get('score')}/100): {missing}"})
 
     can = await db.cannibalization_summaries.find_one({"job_id": job_id})

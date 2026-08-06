@@ -10,8 +10,70 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: external-service resilience + fallback UI)
-- All rounds DELIVERED. Latest commits pushed:
+## Status (last update: professional audit extras round — accurate full-site
+  crawls + rich sitemap / AI-visibility / local-SEO sections)
+- Professional audit extras round (working tree, committed as one round):
+  fixes "0 pages crawled" plus professional Report/Overview/PDF sections.
+  - `services/crawler.py`: normal analyses now call
+    `crawl_site(seed_sitemap=True, unlimited=True)` -> BFS + XML-sitemap seed of
+    every listed URL (fluidcontrols.com: 238 sitemap URLs seeded, 261 crawled),
+    safety cap `competitor_crawl_max_pages` (5000); politeness delay honored;
+    `page.goto` None/failure now falls back to an httpx plain fetch (records
+    `failed_urls_count`/`failed_urls`), "Download is starting" pages are
+    skipped (not fatal), module-level `_chromium_slots` Semaphore(2) caps
+    concurrent Chromium instances so a big concurrent job can't starve another;
+    last-modified/status use whichever fetch won. `run_analysis_pipeline` fails
+    the job with a clear `error_message` instead of silently completing with
+    0 pages crawled.
+  - `services/sitemap.py`: rewritten — `_fetch_sitemap_entries(xml)` -> records
+    `{loc,lastmod}`, expands nested sitemap indexes recursively (each child
+    fetched once, dedup set), returns `[]` for empty urlset, `None` for
+    non-valid / unknown-root XML; `audit_sitemap` builds a cross-file
+    unique-URL set -> new stored keys `pages_in_sitemap`, `crawled_in_sitemap`,
+    `crawled_coverage` (%), `missing_lastmod`, `http_plain_urls`,
+    `pages_crawled`, `uncrawled_urls_count`/`uncrawled_urls`,
+    per-file `results` with `lastmod_missing` (single fetch per candidate).
+  - `services/ai_visibility.py`: rewritten — section-aware `_parse_robots`
+    (multi-line directives, grouped User-agent lists, crawl-delay), agent
+    `status` is only `blocked` for exact `/ | /* | /?` (partial otherwise) —
+    kills the fake red flag from `Disallow: /wp-admin/`; structured data counted
+    ONLY from `<script type="application/ld+json">` blocks (`_ld_types`);
+    per-agent `ai_agents` rows, `subscores` (sitemap/llms_txt/structured_data/
+    extractable_content each 0/25), `checks` (dicts), `schema_types`,
+    `robots_status`/`llms_txt_status`; sitemap subscore falls back to an inline
+    robots-sitemap probe when the `sitemap_audits` doc isn't written yet
+    (wave1 ordering race fix).
+  - `services/local_seo.py`: rewritten — JSON-LD parsed via `_iter_schema_objects`
+    (handles @graph + nested dicts/lists), `_find_key` nested key search,
+    NAP from LocalBusiness/Organization with contact info, geo detected ONLY
+    from real `geo.*`/GeoCoordinates/latitude schema (no more "george" /
+    "biogeography" false positives), `checks`, `subscores`, new stored keys
+    `local_business_on_homepage`, `nap_inconsistent` + `naps_found`,
+    `pages_with_local_schema`, `phone_pages`/`email_pages`/`geo_pages`/
+    `opening_hours_pages`/`reviews_pages`.
+  - `services/site_health.py`: local-SEO issue message now builds from
+    `checks[i].label` of failed checks (old code did `", ".join` on strings —
+    crashed the report once checks became dicts).
+  - Report tab + Overview cards + branded PDF (all three sections): `app.js`
+    `loadOverview` adds score mini-bars + "Pages Failed to Fetch" card and
+    "NAP mismatch" hint; `loadReportExtras` renders sitemap coverage %
+    + per-file table + uncrawled/lastmod/http-plain notes, AI score + subscore
+    bars + agents table + checks ✓/✗, local score + subscore bars + NAP +
+    signals + consistency warning; `routes/reports.py` `_report_html` gains
+    "Sitemap", "AI-Search Visibility" and "Local SEO Readiness" sections with
+    score bars and checks (CSS: `.bar`, `.checks`).
+  - Tests: `backend/tests/test_audit_extras.py` (19 new; full suite 198/198):
+    sitemap urlset/index dedup/nested-expansion/invalid-xml, robots
+    exact-block vs partial vs allowed + crawl-delay, ld+json-only counting,
+    local JSON-LD graph/nap/nested-key/homepage/geo-regex guards.
+  - Live-verified on a fresh fluidcontrols.com job (`24ebac16`): 261 pages
+    crawled (was 0), sitemap coverage 65% (195/300), AI score 50 (sitemap
+    subscore fixed, `blocked_ai_agents: []`), local SEO 30 (no LocalBusiness
+    schema — honest), Playwright Report tab shows all 3 sections with zero
+    console errors, `/api/reports/{job}/pdf` = HTTP 200 ~2.7MB.
+- All prior rounds DELIVERED (external-service resilience, GSC, SaaS front
+  door, competitor-audit, complete-audit, professional report template). Latest
+  commits pushed.
   - Resilience round (working tree): no more red "External service unavailable"
     banners above valid fallback data; retries + blacklist + SERP cache.
     - Probes (live, ~1 credit each): `keywords_data/google/keywords_for_site`,

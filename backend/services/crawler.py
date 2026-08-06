@@ -22,6 +22,9 @@ logger = get_logger("crawler")
 MAX_HTML_STORED = 300_000
 USER_AGENT = "ZuiGO-Engine/1.0 (+https://zuigo.ai)"
 
+CHROMIUM_SLOTS = 2
+_chromium_slots = asyncio.Semaphore(CHROMIUM_SLOTS)
+
 
 async def _robots_delay(origin: str) -> float:
     """Crawl-delay from robots.txt (clamped), falling back to the configured default."""
@@ -63,16 +66,6 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
     parsed = urlparse(target_url)
     base_domain = parsed.netloc.lower()
 
-    if unlimited:
-        ceiling = settings.competitor_crawl_max_pages
-        progress_denom = ceiling
-    elif max_pages is None:
-        ceiling = settings.crawl_max_pages
-        progress_denom = settings.crawl_max_pages
-    else:
-        ceiling = max_pages
-        progress_denom = max_pages
-
     visited = set()
     queue = [target_url]
     depth_map = {target_url: 0}
@@ -81,6 +74,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
     total_external = 0
     unique_internal: set[str] = set()
     unique_external: set[str] = set()
+    failed_urls: set[str] = set()
     lock = asyncio.Lock()
     semaphore = asyncio.Semaphore(concurrency)
     downloaded_urls = set()
@@ -89,6 +83,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
     gate = asyncio.Lock()
     logger.info("Crawl politeness job=%s delay=%.2fs", job_id, delay)
 
+    sitemap_urls: list[str] = []
     if seed_sitemap:
         try:
             from backend.services.sitemap import _robots_sitemap_urls, _fetch, _parse_sitemap_urls
@@ -111,10 +106,28 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                         depth_map.setdefault(norm, depth_map.get(target_url, 0) + 1)
                         if norm not in queue:
                             queue.append(norm)
-                logger.info("Sitemap seed job=%s added=%s", job_id, len(urls))
+                            sitemap_urls.append(norm)
+                logger.info("Sitemap seed job=%s added=%s", job_id, len(sitemap_urls))
                 break
         except Exception as e:
             logger.warning("Sitemap seeding failed job=%s: %s", job_id, e)
+
+    if unlimited:
+        hard_cap = settings.competitor_crawl_max_pages
+        if sitemap_urls:
+            ceiling = min(max(len(sitemap_urls) + max(10, int(len(sitemap_urls) * 0.1)), max_pages or 0), hard_cap)
+        else:
+            ceiling = hard_cap
+    elif max_pages is None:
+        ceiling = settings.crawl_max_pages
+        if sitemap_urls:
+            ceiling = min(max(ceiling, len(sitemap_urls)), settings.competitor_crawl_max_pages)
+    else:
+        ceiling = max_pages
+        if sitemap_urls:
+            ceiling = min(max(ceiling, len(sitemap_urls) + max(10, int(len(sitemap_urls) * 0.1))), settings.competitor_crawl_max_pages)
+    progress_denom = ceiling
+    logger.info("Crawl ceiling job=%s ceiling=%s sitemap=%s unlimited=%s", job_id, ceiling, len(sitemap_urls), unlimited)
 
     async def update_progress(crawled: int, msg: str):
         await db.analysis_jobs.update_one(
@@ -133,21 +146,48 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                 await page.set_extra_http_headers({
                     "User-Agent": USER_AGENT
                 })
-                resp = await _goto_polite(page, url, gate, delay)
-                if resp is None:
-                    await page.close()
-                    return None
+                resp = None
+                try:
+                    resp = await _goto_polite(page, url, gate, delay)
+                except Exception as e:
+                    if "Download is starting" in str(e):
+                        logger.info("Skip download URL %s", url)
+                        await page.close()
+                        return None
+                    logger.warning("goto failed for %s: %s; falling back to plain fetch", url, e)
 
-                html = await page.content()
-                await page.close()
-
-                soup = BeautifulSoup(html, "lxml")
-                redirect_count = 0
                 if resp is not None:
+                    html = await page.content()
+                    await page.close()
+                    status_code = resp.status
+                    headers = resp.headers
+                    redirect_count = 0
                     req = resp.request
                     while req and req.redirected_from:
                         redirect_count += 1
                         req = req.redirected_from
+                else:
+                    await page.close()
+                    async with gate:
+                        await asyncio.sleep(delay)
+                    try:
+                        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                            r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                    except Exception as e:
+                        logger.warning("Plain fetch failed for %s: %s", url, e)
+                        failed_urls.add(url)
+                        return None
+                    html = r.text
+                    status_code = r.status_code
+                    headers = r.headers
+                    redirect_count = 0
+
+                if not html or not html.strip():
+                    logger.warning("Empty HTML for %s", url)
+                    failed_urls.add(url)
+                    return None
+
+                soup = BeautifulSoup(html, "lxml")
 
                 title_tag = soup.find("title")
                 title = title_tag.get_text(strip=True) if title_tag else ""
@@ -185,7 +225,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
 
                 last_modified = None
                 try:
-                    lm = resp.headers.get("last-modified") if resp and resp.headers else None
+                    lm = headers.get("last-modified")
                     if lm:
                         last_modified = datetime.fromtimestamp(email.utils.parsedate_to_datetime(lm).timestamp())
                 except Exception:
@@ -251,7 +291,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                     "page_type": page_type,
                     "page_role": page_role(page_type),
                     "word_count": word_count,
-                    "status_code": resp.status,
+                    "status_code": status_code,
                     "h1_count": h1_count,
                     "image_count": image_count,
                     "images_missing_alt": images_missing_alt,
@@ -271,95 +311,97 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                 return None
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        async with _chromium_slots:
+            browser = await pw.chromium.launch(headless=True)
 
-        crawled = 0
-        while queue and crawled < ceiling:
-            batch_size = min(concurrency, ceiling - crawled)
-            batch = queue[:batch_size]
-            queue[:] = queue[concurrency:]
+            crawled = 0
+            while queue and crawled < ceiling:
+                batch_size = min(concurrency, ceiling - crawled)
+                batch = queue[:batch_size]
+                queue[:] = queue[concurrency:]
 
-            tasks = []
-            urls_to_crawl = []
-            for u in batch:
-                if u not in visited:
-                    visited.add(u)
-                    urls_to_crawl.append(u)
+                tasks = []
+                urls_to_crawl = []
+                for u in batch:
+                    if u not in visited:
+                        visited.add(u)
+                        urls_to_crawl.append(u)
 
-            for u in urls_to_crawl:
-                tasks.append(crawl_and_process(browser, u))
+                for u in urls_to_crawl:
+                    tasks.append(crawl_and_process(browser, u))
 
-            results = await asyncio.gather(*tasks)
+                results = await asyncio.gather(*tasks)
 
-            for result in results:
-                if result:
-                    crawled += 1
-                    crawled_pages.append(result)
+                for result in results:
+                    if result:
+                        crawled += 1
+                        crawled_pages.append(result)
 
-                    new_urls = []
-                    parent_depth = depth_map.get(result["url"], 0)
-                    for link in result.get("internal_link_urls", []):
-                        clean = normalize_url(link)
-                        if not clean:
-                            continue
-                        if clean not in visited and clean not in queue:
-                            new_urls.append(clean)
-                            if clean not in depth_map:
-                                depth_map[clean] = parent_depth + 1
-                    queue.extend(new_urls)
+                        new_urls = []
+                        parent_depth = depth_map.get(result["url"], 0)
+                        for link in result.get("internal_link_urls", []):
+                            clean = normalize_url(link)
+                            if not clean:
+                                continue
+                            if clean not in visited and clean not in queue:
+                                new_urls.append(clean)
+                                if clean not in depth_map:
+                                    depth_map[clean] = parent_depth + 1
+                        queue.extend(new_urls)
 
-                    page_for_db = dict(result)
-                    page_for_db.pop("internal_link_urls", None)
-                    page_for_db.pop("external_link_urls", None)
-                    await db.pages.insert_one({"job_id": job_id, **page_for_db})
+                        page_for_db = dict(result)
+                        page_for_db.pop("internal_link_urls", None)
+                        page_for_db.pop("external_link_urls", None)
+                        await db.pages.insert_one({"job_id": job_id, **page_for_db})
 
-                    await db.page_links.insert_one({
-                        "job_id": job_id,
-                        "url": result["url"],
-                        "internal_link_urls": result.get("internal_link_urls", []),
-                        "external_link_urls": result.get("external_link_urls", []),
-                    })
+                        await db.page_links.insert_one({
+                            "job_id": job_id,
+                            "url": result["url"],
+                            "internal_link_urls": result.get("internal_link_urls", []),
+                            "external_link_urls": result.get("external_link_urls", []),
+                        })
 
-                    await update_progress(crawled, f"Crawled {urlparse(result['url']).path or '/'}")
+                        await update_progress(crawled, f"Crawled {urlparse(result['url']).path or '/'}")
 
-        await browser.close()
+            await browser.close()
 
         mobile_ok = 0
         try:
-            mobile_browser = await pw.chromium.launch(headless=True)
-            iphone = pw.devices["iPhone 13"]
-            mobile_sem = asyncio.Semaphore(settings.mobile_crawl_concurrency)
-            mobile_lock = asyncio.Lock()
+            async with _chromium_slots:
+                mobile_browser = await pw.chromium.launch(headless=True)
+                iphone = pw.devices["iPhone 13"]
+                mobile_sem = asyncio.Semaphore(settings.mobile_crawl_concurrency)
+                mobile_lock = asyncio.Lock()
 
-            async def mobile_pass(url: str):
-                nonlocal mobile_ok
-                async with mobile_sem:
-                    try:
-                        page = await mobile_browser.new_page(**iphone)
-                        await page.set_extra_http_headers({"User-Agent": USER_AGENT})
-                        resp = await _goto_polite(page, url, gate, delay)
-                        mhtml = await page.content()
-                        await page.close()
-                        status = resp.status if resp is not None else None
-                        soup = BeautifulSoup(mhtml, "lxml")
-                        viewport = soup.find("meta", attrs={"name": "viewport"})
-                        mobile_friendly = viewport is not None and viewport.get("content", "").lower().strip() != ""
-                        await db.pages.update_one(
-                            {"job_id": job_id, "url": url},
-                            {"$set": {
-                                "html_mobile": mhtml[:MAX_HTML_STORED],
-                                "mobile_status_code": status,
-                                "viewport": "mobile",
-                                "mobile_friendly": mobile_friendly,
-                            }},
-                        )
-                        async with mobile_lock:
-                            mobile_ok += 1
-                    except Exception as me:
-                        logger.error("Mobile crawl error for %s: %s", url, me)
+                async def mobile_pass(url: str):
+                    nonlocal mobile_ok
+                    async with mobile_sem:
+                        try:
+                            page = await mobile_browser.new_page(**iphone)
+                            await page.set_extra_http_headers({"User-Agent": USER_AGENT})
+                            resp = await _goto_polite(page, url, gate, delay)
+                            mhtml = await page.content()
+                            await page.close()
+                            status = resp.status if resp is not None else None
+                            soup = BeautifulSoup(mhtml, "lxml")
+                            viewport = soup.find("meta", attrs={"name": "viewport"})
+                            mobile_friendly = viewport is not None and viewport.get("content", "").lower().strip() != ""
+                            await db.pages.update_one(
+                                {"job_id": job_id, "url": url},
+                                {"$set": {
+                                    "html_mobile": mhtml[:MAX_HTML_STORED],
+                                    "mobile_status_code": status,
+                                    "viewport": "mobile",
+                                    "mobile_friendly": mobile_friendly,
+                                }},
+                            )
+                            async with mobile_lock:
+                                mobile_ok += 1
+                        except Exception as me:
+                            logger.error("Mobile crawl error for %s: %s", url, me)
 
-            await asyncio.gather(*[mobile_pass(result["url"]) for result in crawled_pages])
-            await mobile_browser.close()
+                await asyncio.gather(*[mobile_pass(result["url"]) for result in crawled_pages])
+                await mobile_browser.close()
         except Exception as mb_err:
             logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)
 
@@ -382,6 +424,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
         "max_click_depth": max(depths) if depths else 0,
         "https_pages": sum(1 for p in crawled_pages if p.get("https_entry")),
         "redirected_pages": sum(1 for p in crawled_pages if p.get("redirect_count")),
+        "failed_urls_count": len(failed_urls),
+        "failed_urls": sorted(failed_urls)[:50],
     }
 
     return summary

@@ -697,8 +697,8 @@ body {
 
 .chat-widget {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  top: 76px;
+  right: 24px;
   z-index: 1000;
   display: flex;
   flex-direction: column;
@@ -710,25 +710,37 @@ body {
   color: white;
   border: none;
   border-radius: 999px;
-  padding: 13px 22px;
-  font-size: 14px;
+  padding: 11px 20px;
+  font-size: 13.5px;
   font-weight: 700;
   cursor: pointer;
   box-shadow: var(--shadow-lg);
-  transition: transform 0.15s, filter 0.2s;
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), filter 0.2s, box-shadow 0.2s;
 }
 
-.chat-toggle:hover { filter: brightness(1.05); transform: translateY(-2px); }
+.chat-toggle:hover { filter: brightness(1.08); transform: translateY(-2px) scale(1.02); box-shadow: 0 12px 32px rgba(99, 102, 241, 0.35); }
 
 .chat-panel {
-  width: 380px;
-  max-width: calc(100vw - 40px);
+  width: 390px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 100px);
   background: var(--card);
   border-radius: 16px;
-  box-shadow: 0 16px 48px rgba(16, 24, 40, 0.28);
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.28);
   border: 1px solid var(--border);
-  margin-bottom: 12px;
+  margin-top: 10px;
+  margin-bottom: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transform-origin: top right;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+}
+
+.chat-panel.hidden {
+  display: none !important;
+  opacity: 0;
+  transform: scale(0.95) translateY(-8px);
 }
 
 .chat-panel-header {
@@ -1432,6 +1444,47 @@ body {
 }
 .empty-state h4 { font-size: 15px; color: var(--text); margin: 0; }
 .empty-state p { font-size: 13px; margin: 0; max-width: 420px; }
+
+/* Micro-animations, entrance effects & card polish */
+.stagger-in > * {
+  animation: fadeInUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger-in > *:nth-child(1) { animation-delay: 0.04s; }
+.stagger-in > *:nth-child(2) { animation-delay: 0.08s; }
+.stagger-in > *:nth-child(3) { animation-delay: 0.12s; }
+.stagger-in > *:nth-child(4) { animation-delay: 0.16s; }
+.stagger-in > *:nth-child(5) { animation-delay: 0.20s; }
+.stagger-in > *:nth-child(6) { animation-delay: 0.24s; }
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stat-card, .insights-card, .chart-card, .action-card, .content-type-card, .logs-section {
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.stat-card:hover, .insights-card:hover, .chart-card:hover, .action-card:hover, .content-type-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px rgba(16, 24, 40, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+[data-theme="dark"] .stat-card:hover,
+[data-theme="dark"] .insights-card:hover,
+[data-theme="dark"] .chart-card:hover,
+[data-theme="dark"] .action-card:hover,
+[data-theme="dark"] .content-type-card:hover {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  border-color: rgba(129, 140, 248, 0.4);
+}
 
 /* Button variants */
 .btn-sm { padding: 8px 16px; font-size: 13px; }

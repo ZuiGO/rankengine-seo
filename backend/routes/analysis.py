@@ -82,9 +82,15 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             {"$set": {"status": "running", "progress_message": "Starting crawl..."}}
         )
 
-        summary = await crawl_site(job_id, url, max_pages)
+        summary = await crawl_site(job_id, url, max_pages, seed_sitemap=True, unlimited=True)
         if not summary:
             raise Exception("Crawl returned no results")
+        if summary.get("total_pages", 0) == 0:
+            raise Exception(
+                "Crawled 0 pages. The site did not respond to headless browser or HTTP requests; "
+                "no URLs were seeded from its sitemap. Check that the site is reachable and "
+                "does not block the ZuiGO Engine user-agent."
+            )
 
         content_count = await db.content_items.count_documents({"job_id": job_id})
         domain = url.split("//")[-1].split("/")[0]
