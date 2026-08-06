@@ -10,8 +10,37 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: M4 SE Ranking provider round — live-verified on job
-  `24fd33f6`, committed `289434c`)
+## Status (last update: M6 apply-actions round — committed `94d961f`, pushed)
+- M6 (LAST milestone of the M1-M6 plan) `94d961f` (pushed): apply-actions flow
+  replaces the dummy-site demo. 263/263 tests.
+  - `POST /api/actions/{job}/apply`: builds approved changes via shared
+    `_collect_changes` (refactored out of `export_patch`), pushes a GitHub PR
+    when a token is configured (`notifications.create_github_pr`), otherwise
+    returns an in-repo markdown guide (`build_apply_guide` — export patch,
+    branch, replace before->after per approved change, push, merge). Reasons:
+    `no_approved` / `no_token` / `github_pr` / `pr_failed`; `log_audit`
+    `actions_applied` on PR attempts.
+  - GitHub settings: `GET/PUT /api/settings/github` (masked token,
+    `token_set`); Settings tab section (repo-scope PAT, repo named after
+    domain e.g. `example-com`); `get_github_config()` in notifications.py
+    (DB-first app_settings doc key `github`, `.env` fallback);
+    `create_github_pr(domain, changes, token=None)` — explicit token param.
+  - Dummy-site UI entry points REMOVED (M1d): Links tab "Dummy Parallel
+    Site" section + `loadDummySite()`/call + approve-all/hard-delete text.
+    Backend `/api/dummy` routes + `services/dummy_site.py` KEPT (smoke +
+    test_phase4/test_patch still use them); the 3 `regenerate_after_change`
+    hooks in actions.py were left in place.
+  - Actions tab: "Apply via GitHub PR" button + guide card
+    (`renderApplyGuide`); `escapeHtml`-safe <pre> guide.
+  - Tests: `backend/tests/test_apply_changes.py` (13 new; suite 250 -> 263):
+    build_apply_guide (approved-only, empty), apply endpoint all 4 branches
+    (FakeDb from test_patch + monkeypatched notif.get_github_config /
+    create_github_pr), github settings read/put/empty-noop (masked), DB-first
+    vs env-fallback config, explicit-token PR uses Bearer ghp_explicit.
+  - Live-verified on `24fd33f6`: apply -> `no_approved` (1000 pending),
+    patch md/json export unchanged after refactor, Settings tab shows GitHub
+    section ("Not configured yet"), Actions tab apply button + hidden guide
+card render, no dummy references, Playwright zero console errors.
 - M1+M2+M3 round `c8aac33`, M5 round `1062bf9` (both pushed): honest counts
   (unique images/occurrences, video_embed classification), metadata-only
   crawl (~10 min vs 16.6 for fluidcontrols 261 pages), competitor reliability
@@ -535,13 +564,16 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
-- M6 (LAST milestone of the M1-M6 plan): apply-actions flow replacing the
-  dummy-site demo — use `backend/routes/actions.py` patch endpoint
-  (`GET /api/actions/{job}/patch?format=json|md`), apply via GitHub PR
-  (`notifications.create_github_pr`) + in-repo guide, remove dummy-site UI
-  entry points from index.html/app.js (~lines 212-213 tab + ~985-1030
-  generate/dummy-site handlers). M1d (remove dummy-site entry points) is
-  merged into M6.
+- M1–M6 plan COMPLETE (last milestone M6 landed `94d961f`). Follow-ups:
+- Apply-flow hardening: approve at least one action on `24fd33f6` and run
+  `POST /api/actions/{job}/apply` end-to-end with a real GitHub token
+  (repo `example-com` must exist under the token's owner); verify PR title/
+  body + `actions_applied` audit row. Consider writing the PR with actual
+  file contents (contents API) instead of body-only text.
+- The dummy-site backend (`/api/dummy`, `services/dummy_site.py`,
+  compare_service, the 3 `regenerate_after_change` hooks in actions.py) is
+  now unreachable from the UI; either delete it (update smoke + test_phase4/
+  test_patch which still exercise it) or keep as an API-only demo.
 - The app lives at `/app` (index.html); `/` serves the marketing landing page
   (landing.html). Deep links `/#job/<id>` redirect to `/app#job/<id>`.
 - Full smoke run with the new audits (long crawl) — books.toscrape is
