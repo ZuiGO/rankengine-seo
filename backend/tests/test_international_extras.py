@@ -309,3 +309,54 @@ class TestChatGuidance:
         assert issue_key_from_message("hreflang errors found") == "hreflang_errors"
         assert issue_key_from_message("faceted URL parameters") == "url_param_issues"
         assert issue_key_from_message("image optimization weak") == "image_optimization"
+
+
+class TestChatContexts:
+    @pytest.mark.asyncio
+    async def test_url_hygiene_context_dict_top_params(self, monkeypatch):
+        db = FakeDb()
+        monkeypatch.setattr(chat_service, "get_db", lambda: db)
+        db._stores["url_hygiene_audits"] = {"j1": {
+            "job_id": "j1", "score": 40,
+            "top_params": {"page_id": 99},
+            "param_pages": 99, "facet_pages": 0, "lang_param_pages": 0,
+            "uppercase_paths": 1, "underscore_paths": 4, "long_slugs": 17,
+            "checks": [],
+        }}
+        ctx = await chat_service._url_hygiene_context("j1")
+        assert "score: 40" in ctx
+        assert "page_id (99)" in ctx
+
+    @pytest.mark.asyncio
+    async def test_image_opt_context_stored_keys(self, monkeypatch):
+        db = FakeDb()
+        monkeypatch.setattr(chat_service, "get_db", lambda: db)
+        db._stores["image_optimization_audits"] = {"j1": {
+            "job_id": "j1", "score": 15,
+            "total_images": 9424, "modern_images": 0, "lazy_images": 0,
+            "missing_dimensions": 2932, "checks": [],
+        }}
+        ctx = await chat_service._image_opt_context("j1")
+        assert "images=9424" in ctx
+        assert "missing_dimensions" not in ctx
+
+    @pytest.mark.asyncio
+    async def test_indexation_context_unmeasured(self, monkeypatch):
+        db = FakeDb()
+        monkeypatch.setattr(chat_service, "get_db", lambda: db)
+        db._stores["indexation_audits"] = {"j1": {
+            "job_id": "j1", "status": "unmeasured",
+            "crawled_pages": 300, "message": "no key",
+        }}
+        ctx = await chat_service._indexation_context("j1")
+        assert "not measured" in ctx
+
+    @pytest.mark.asyncio
+    async def test_hreflang_context_not_applicable(self, monkeypatch):
+        db = FakeDb()
+        monkeypatch.setattr(chat_service, "get_db", lambda: db)
+        db._stores["hreflang_audits"] = {"j1": {
+            "job_id": "j1", "applicable": False,
+        }}
+        ctx = await chat_service._hreflang_context("j1")
+        assert "not applicable" in ctx

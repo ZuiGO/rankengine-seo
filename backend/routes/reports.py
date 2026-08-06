@@ -587,7 +587,13 @@ async def _report_html(job_id: str):
     url_hygiene_html = ""
     if url_hygiene:
         subs = url_hygiene.get("subscores") or {}
-        top_params = (url_hygiene.get("top_params") or [])
+        tp_raw = url_hygiene.get("top_params") or {}
+        if isinstance(tp_raw, dict):
+            top_params = list(tp_raw.items())
+        elif isinstance(tp_raw, list):
+            top_params = [(p if isinstance(p, tuple) else (p, None)) for p in tp_raw]
+        else:
+            top_params = []
         url_hygiene_html = (
             "<h2 class='section-title'>URL Hygiene</h2>"
             "<p>Score: <b>%s</b> / 100%s</p>"
@@ -595,9 +601,11 @@ async def _report_html(job_id: str):
             + "<p class='muted'>%s page(s) with URL parameters (%s faceted/pagination, %s language-parameter) · "
             "%s uppercase-slug · %s underscore-slug · %s long-slug pages%s</p>"
             % (_esc(url_hygiene.get("param_pages", 0)), _esc(url_hygiene.get("facet_pages", 0)),
-               _esc(url_hygiene.get("lang_param_pages", 0)), _esc(url_hygiene.get("uppercase_slugs", 0)),
-               _esc(url_hygiene.get("underscore_slugs", 0)), _esc(url_hygiene.get("long_slugs", 0)),
-               (' · top parameters: %s' % _esc(", ".join("%s (%d)" % (k, v) for k, v in top_params[:6]))) if top_params else "")
+               _esc(url_hygiene.get("lang_param_pages", 0)),
+               _esc(url_hygiene.get("uppercase_paths", url_hygiene.get("uppercase_slugs", 0))),
+               _esc(url_hygiene.get("underscore_paths", url_hygiene.get("underscore_slugs", 0))),
+               _esc(url_hygiene.get("long_slugs", 0)),
+               (' · top parameters: %s' % _esc(", ".join("%s (%d)" % (k, v or 0) for k, v in top_params[:6]))) if top_params else "")
             + "<table><tr><th>Area</th><th>Points</th><th>Max</th></tr>"
             "<tr><td>Parameter control</td><td>%s</td><td>40</td></tr>"
             "<tr><td>Readable paths</td><td>%s</td><td>20</td></tr>"
@@ -635,8 +643,10 @@ async def _report_html(job_id: str):
             "<p>Score: <b>%s</b> / 100%s</p>"
             % (_esc(image_opt.get("score")), _bar(image_opt.get("score")))
             + "<p class='muted'>%s images on page · %s WebP/AVIF · %s lazy-loaded · %s missing explicit dimensions</p>"
-            % (_esc(image_opt.get("total_imgs", 0)), _esc(image_opt.get("modern", 0)),
-               _esc(image_opt.get("lazy", 0)), _esc(image_opt.get("dims_missing", 0)))
+            % (_esc(image_opt.get("total_images", image_opt.get("total_imgs", 0))),
+               _esc(image_opt.get("modern_images", image_opt.get("modern", 0))),
+               _esc(image_opt.get("lazy_images", image_opt.get("lazy", 0))),
+               _esc(image_opt.get("missing_dimensions", image_opt.get("dims_missing", 0))))
             + "<table><tr><th>Area</th><th>Points</th><th>Max</th></tr>"
             "<tr><td>Modern formats (WebP/AVIF)</td><td>%s</td><td>40</td></tr>"
             "<tr><td>Lazy loading</td><td>%s</td><td>30</td></tr>"

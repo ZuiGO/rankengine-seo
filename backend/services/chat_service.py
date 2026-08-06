@@ -308,7 +308,14 @@ async def _url_hygiene_context(job_id: str) -> str:
     if not doc:
         return "No URL hygiene audit yet."
     failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
-    top = ", ".join("%s (%d)" % (k, v) for k, v in (doc.get("top_params") or [])[:6]) or "none"
+    tp_raw = doc.get("top_params") or {}
+    if isinstance(tp_raw, dict):
+        tp_items = list(tp_raw.items())
+    elif isinstance(tp_raw, list):
+        tp_items = [(p if isinstance(p, tuple) else (p, None)) for p in tp_raw]
+    else:
+        tp_items = []
+    top = ", ".join("%s (%s)" % (k, v or "?") for k, v in tp_items[:6]) or "none"
     lines = [
         "URL hygiene score: %s/100" % (doc.get("score"),),
         "param_pages=%s facet_pages=%s lang_param_pages=%s uppercase_slugs=%s underscore_slugs=%s long_slugs=%s"
@@ -341,8 +348,10 @@ async def _image_opt_context(job_id: str) -> str:
     failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
     lines = [
         "Image optimization score: %s/100" % (doc.get("score"),),
-        "images=%s modern=%s lazy=%s dims_missing=%s" % (doc.get("total_imgs", 0), doc.get("modern", 0),
-                                                         doc.get("lazy", 0), doc.get("dims_missing", 0)),
+        "images=%s modern=%s lazy=%s dims_missing=%s" % (doc.get("total_images", doc.get("total_imgs", 0)),
+                                                         doc.get("modern_images", doc.get("modern", 0)),
+                                                         doc.get("lazy_images", doc.get("lazy", 0)),
+                                                         doc.get("missing_dimensions", doc.get("dims_missing", 0))),
     ]
     if failed:
         lines.append("Failed checks: " + ", ".join(failed[:6]))

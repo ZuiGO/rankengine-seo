@@ -1487,13 +1487,13 @@ async function loadReportExtras(jobId, preview) {
         <div class="stat-grid">
           ${kv("Parameter pages", d.param_pages ?? 0)}
           ${kv("Faceted / pagination pages", d.facet_pages ?? 0)}
-          ${kv("Distinct parameters", (d.top_params || []).length)}
-          ${kv("Uppercase slugs", d.uppercase_slugs ?? 0)}
-          ${kv("Underscore slugs", d.underscore_slugs ?? 0)}
+          ${kv("Distinct parameters", (d.top_params ? Object.keys(d.top_params).length : 0))}
+          ${kv("Uppercase slugs", d.uppercase_paths ?? d.uppercase_slugs ?? 0)}
+          ${kv("Underscore slugs", d.underscore_paths ?? d.underscore_slugs ?? 0)}
           ${kv("Long slugs (>80)", d.long_slugs ?? 0)}
           ${kv("Lang parameter pages", d.lang_param_pages ?? 0)}
         </div>
-        ${(d.top_params || []).length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Top URL parameters: ${d.top_params.map(t => `${escapeHtml(t[0])} (${t[1]})`).join(" · ")}</p>` : ""}
+        ${(() => { const tp = d.top_params; if (!tp) return ""; const pairs = Array.isArray(tp) ? tp : Object.entries(tp); if (!pairs.length) return ""; return `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Top URL parameters: ${pairs.slice(0, 6).map(t => `${escapeHtml(t[0])} (${t[1]})`).join(" · ")}</p>`; })()}
         ${bar("Parameter control", d.subscores && d.subscores.parameter_control)}
         ${bar("Readable paths", d.subscores && d.subscores.readable_paths)}
         ${bar("Slug length", d.subscores && d.subscores.slug_length)}
@@ -1520,10 +1520,10 @@ async function loadReportExtras(jobId, preview) {
       preview.insertAdjacentHTML("beforeend", `
         <h4 style="margin:20px 0 10px">Image Optimization (${d.score}/100)</h4>
         <div class="stat-grid">
-          ${kv("Images on page", d.total_imgs ?? d.img_total ?? 0)}
-          ${kv("WebP / AVIF", d.modern ?? 0)}
-          ${kv("Without dimensions", d.dims_missing ?? 0)}
-          ${kv("Lazy-loaded", d.lazy ?? 0)}
+          ${kv("Images on page", d.total_images ?? d.total_imgs ?? 0)}
+          ${kv("WebP / AVIF", d.modern_images ?? d.modern ?? 0)}
+          ${kv("Without dimensions", d.missing_dimensions ?? d.dims_missing ?? 0)}
+          ${kv("Lazy-loaded", d.lazy_images ?? d.lazy ?? 0)}
         </div>
         ${bar("Modern formats (WebP/AVIF)", d.subscores && d.subscores.modern_formats)}
         ${bar("Lazy loading", d.subscores && d.subscores.lazy_loading)}
