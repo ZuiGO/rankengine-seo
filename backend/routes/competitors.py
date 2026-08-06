@@ -19,6 +19,38 @@ class GapRequest(BaseModel):
     competitors: list[str] = []
 
 
+def _normalize_domain(value: str) -> str:
+    d = value.strip().lower()
+    if "//" in d:
+        d = d.split("//")[-1]
+    d = d.split("/")[0].split("?")[0].split("#")[0]
+    while d.startswith("www."):
+        d = d[4:]
+    return d
+
+
+async def _migrate_stale_key(db, target_job_id: str, norm: str, raw_forms: list[str]):
+    """Rename old rows stored under the raw input string to the normalized key."""
+    for stale in raw_forms:
+        if not stale or stale == norm:
+            continue
+        old = await db.competitor_gap_analyses.find_one(
+            {"target_job_id": target_job_id, "competitor": stale}
+        )
+        if not old:
+            continue
+        old_id = old.get("_id")
+        # never clobber a live row under the normalized key
+        normalized = await db.competitor_gap_analyses.find_one(
+            {"target_job_id": target_job_id, "competitor": norm}
+        )
+        if not normalized:
+            old["competitor"] = norm
+            old.pop("_id", None)
+            await db.competitor_gap_analyses.insert_one(old)
+        await db.competitor_gap_analyses.delete_one({"_id": old_id})
+
+
 @router.post("/{target_job_id}/analyze")
 async def competitor_analyze(target_job_id: str, req: GapRequest):
     if not req.competitors:
@@ -29,19 +61,32 @@ async def competitor_analyze(target_job_id: str, req: GapRequest):
     if not job:
         raise HTTPException(404, "Job not found")
 
-    competitors = [c.strip() for c in req.competitors if c.strip()]
+    competitors = []
+    seen = set()
+    raw_forms = []
+    for c in req.competitors:
+        norm = _normalize_domain(c)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        competitors.append(norm)
+        raw_forms.append(c.strip().lower())
+
+    for comp, raw in zip(competitors, raw_forms):
+        await _migrate_stale_key(db, target_job_id, comp, [comp, raw])
 
     for comp in competitors:
         existing = await db.competitor_gap_analyses.find_one(
             {"target_job_id": target_job_id, "competitor": comp}
         )
-        if existing and existing.get("status") == "running":
+        if existing and existing.get("status") in ("queued", "running"):
             continue
         await db.competitor_gap_analyses.update_one(
             {"target_job_id": target_job_id, "competitor": comp},
             {
                 "$set": {
                     "competitor": comp,
+                    "url": comp,
                     "target_job_id": target_job_id,
                     "status": "queued",
                     "updated_at": datetime.utcnow(),

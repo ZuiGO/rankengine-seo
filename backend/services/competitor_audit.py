@@ -81,6 +81,7 @@ async def _crawl_competitor(comp_job: str, url: str) -> dict:
         concurrency=settings.crawl_concurrency,
         seed_sitemap=True,
         unlimited=True,
+        mobile=False,
     )
 
 
@@ -341,14 +342,30 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
     comp_domain = _domain(comp_url)
     comp_job = await _create_competitor_job(target_job_id, comp_url)
 
+    async def _mark_error(message: str):
+        await db.competitor_gap_analyses.update_one(
+            {"target_job_id": target_job_id, "competitor": comp_domain},
+            {"$set": {"status": "error", "errors": [message], "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+
     async def run():
         try:
+            await db.competitor_gap_analyses.update_one(
+                {"target_job_id": target_job_id, "competitor": comp_domain},
+                {"$set": {"status": "running", "updated_at": datetime.utcnow()}},
+                upsert=True,
+            )
             await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"status": "running", "progress_message": "Crawling competitor..."}})
             crawl = await _crawl_competitor(comp_job, comp_url)
             pages = await db.pages.find({"job_id": comp_job}, {"html": 0, "html_mobile": 0}).to_list(length=None)
             if not pages:
                 raise Exception("Competitor crawl returned no pages")
 
+            await db.competitor_gap_analyses.update_one(
+                {"target_job_id": target_job_id, "competitor": comp_domain},
+                {"$set": {"status": "running", "pages_crawled": crawl.get("total_pages", len(pages)), "updated_at": datetime.utcnow()}},
+            )
             await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"progress_message": "Analyzing competitor pages..."}})
             from backend.services.seo_analyzer import analyze_pages
             await analyze_pages(comp_job)
@@ -360,7 +377,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
             comp_health = await compute_site_health(comp_job)
 
             from backend.services.performance_service import fetch_performance
-            psi_max = len(pages) if settings.competitor_psi_all_pages else 1
+            psi_max = min(len(pages), settings.competitor_psi_sample)
             try:
                 await fetch_performance(comp_job, max_pages=psi_max)
             except Exception as pe:
@@ -434,9 +451,28 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "generated_at": datetime.utcnow(),
             }
             return result
+        except asyncio.TimeoutError as e:
+            logger.error("Competitor audit timed out target=%s comp=%s", target_job_id, competitor)
+            result = {
+                "competitor": comp_domain,
+                "url": comp_url,
+                "target_job_id": target_job_id,
+                "status": "error",
+                "pages_crawled": 0,
+                "gap_count": 0,
+                "errors": [f"Timed out (overall job limit): {e}"],
+                "generated_at": datetime.utcnow(),
+            }
+            await _mark_error(result["errors"][0])
+            return result
+        except asyncio.CancelledError:
+            logger.warning("Competitor audit cancelled target=%s comp=%s", target_job_id, competitor)
+            await _mark_error("Audit cancelled (worker restart or timeout)")
+            raise
         except Exception as e:
             logger.error("Competitor audit failed target=%s comp=%s: %s", target_job_id, competitor, e)
-            return {
+            await _mark_error(str(e))
+            result = {
                 "competitor": comp_domain,
                 "url": comp_url,
                 "target_job_id": target_job_id,
@@ -446,6 +482,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "errors": [str(e)],
                 "generated_at": datetime.utcnow(),
             }
+            return result
         finally:
             await _delete_competitor_job(comp_job)
 

@@ -62,14 +62,25 @@ async def run_competitor_pipeline(target_job_id: str, competitors: list[str]):
 
     db = get_db()
     logger.info("Competitor audit started target=%s competitors=%s", target_job_id, competitors)
-    try:
-        await audit_competitors(target_job_id, competitors)
-    except Exception as e:
-        logger.error("Competitor audit failed target=%s: %s", target_job_id, e)
+
+    async def _mark_errors(message: str):
         await db.competitor_gap_analyses.update_many(
             {"target_job_id": target_job_id, "status": {"$in": ["queued", "running"]}},
-            {"$set": {"status": "error", "errors": [str(e)]}},
+            {"$set": {"status": "error", "errors": [message], "updated_at": datetime.utcnow()}},
         )
+
+    try:
+        await audit_competitors(target_job_id, competitors)
+    except asyncio.CancelledError:
+        logger.warning("Competitor audit cancelled target=%s", target_job_id)
+        await _mark_errors("Audit cancelled (worker restart or timeout)")
+        raise
+    except asyncio.TimeoutError:
+        logger.error("Competitor audit timed out target=%s", target_job_id)
+        await _mark_errors("Timed out (overall job limit)")
+    except Exception as e:
+        logger.error("Competitor audit failed target=%s: %s", target_job_id, e)
+        await _mark_errors(str(e))
 
 
 async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
@@ -294,6 +305,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_vectors": vector_count,
                     "total_user_flows": flow_count,
                     "total_backlinks": backlink_count,
+                    "failed_urls_count": summary.get("failed_urls_count", 0),
                     "links_checked": link_health.get("checked", 0),
                     "broken_links": link_health.get("broken_link_count", link_health.get("broken", 0)),
                     "broken_link_count": link_health.get("broken_link_count", link_health.get("broken", 0)),

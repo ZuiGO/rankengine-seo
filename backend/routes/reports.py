@@ -107,6 +107,24 @@ def _esc(value) -> str:
     return _html_esc.escape(str(value if value is not None else ""), quote=True)
 
 
+_CONTENT_LABELS = {
+    "image": "Images",
+    "pdf": "PDFs",
+    "video": "Videos",
+    "video_embed": "Video embeds (YouTube/Vimeo)",
+    "doc": "Documents",
+    "xlsx": "Spreadsheets",
+    "presentation": "Presentations",
+    "audio": "Audio",
+    "text": "Text",
+    "iframe": "Iframes",
+}
+
+
+def _content_label(key: str) -> str:
+    return _CONTENT_LABELS.get(key, key.replace("_", " ").title())
+
+
 def _sev_badge(impact: str) -> str:
     label = {"high": "High", "medium": "Medium", "low": "Low"}.get(impact, "Info")
     cls = "high" if impact == "high" else "medium" if impact == "medium" else "low"
@@ -381,7 +399,7 @@ async def _report_html(job_id: str):
     ])
 
     content_rows = "".join(
-        "<tr><td>%s</td><td>%s</td></tr>" % (_esc(k), _esc(v)) for k, v in sorted(content_breakdown.items())
+        "<tr><td>%s</td><td>%s</td></tr>" % (_esc(_content_label(k)), _esc(v)) for k, v in sorted(content_breakdown.items())
     ) or '<tr><td colspan="2">-</td></tr>'
     page_type_rows = "".join(
         "<tr><td>%s</td><td>%s</td></tr>" % (_esc(k), _esc(v)) for k, v in sorted(page_type_breakdown.items())
@@ -642,8 +660,10 @@ async def _report_html(job_id: str):
             "<h2 class='section-title'>Image Optimization</h2>"
             "<p>Score: <b>%s</b> / 100%s</p>"
             % (_esc(image_opt.get("score")), _bar(image_opt.get("score")))
-            + "<p class='muted'>%s images on page · %s WebP/AVIF · %s lazy-loaded · %s missing explicit dimensions</p>"
+            + "<p class='muted'>%s unique images (across %s pages; %s total occurrences) · %s WebP/AVIF · %s lazy-loaded · %s missing explicit dimensions</p>"
             % (_esc(image_opt.get("total_images", image_opt.get("total_imgs", 0))),
+               _esc(image_opt.get("pages_with_images", 0)),
+               _esc(image_opt.get("image_occurrences", image_opt.get("total_images", 0))),
                _esc(image_opt.get("modern_images", image_opt.get("modern", 0))),
                _esc(image_opt.get("lazy_images", image_opt.get("lazy", 0))),
                _esc(image_opt.get("missing_dimensions", image_opt.get("dims_missing", 0))))

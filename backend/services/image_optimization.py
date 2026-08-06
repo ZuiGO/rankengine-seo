@@ -17,6 +17,15 @@ logger = get_logger("image_optimization")
 MODERN_EXT = {".webp", ".avif"}
 
 
+def _unique_key(src: str) -> str:
+    key = (src or "").strip().lower()
+    if "?" in key:
+        key = key.split("?", 1)[0]
+    if "#" in key:
+        key = key.split("#", 1)[0]
+    return key
+
+
 async def audit_image_optimization(job_id: str) -> dict:
     db = get_db()
     pages = await db.pages.find({"job_id": job_id}, {"html": 1, "url": 1}).to_list(length=None)
@@ -26,6 +35,8 @@ async def audit_image_optimization(job_id: str) -> dict:
     lazy_imgs = 0
     dims_missing = 0
     pages_with_imgs = 0
+    occurrences = 0
+    seen: set[str] = set()
 
     for p in pages:
         html = p.get("html") or ""
@@ -36,14 +47,21 @@ async def audit_image_optimization(job_id: str) -> dict:
         if not imgs:
             continue
         pages_with_imgs += 1
+        occurrences += len(imgs)
         for img in imgs:
-            total_imgs += 1
             src = (img.get("src") or "").strip().lower()
+            key = _unique_key(src)
+            if not key:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            total_imgs += 1
             srcset = (img.get("srcset") or "").strip().lower()
             loading = (img.get("loading") or "").strip().lower()
             if loading == "lazy":
                 lazy_imgs += 1
-            if any(src.endswith(ext) or ext in srcset for ext in MODERN_EXT):
+            if any(key.endswith(ext) or ext in srcset for ext in MODERN_EXT):
                 modern_imgs += 1
                 continue
             picture = next(
@@ -74,18 +92,18 @@ async def audit_image_optimization(job_id: str) -> dict:
         {
             "passed": modern_share >= 0.7,
             "label": "Modern image formats (WebP/AVIF)",
-            "detail": (f"{modern_imgs} of {total_imgs} image(s) use WebP/AVIF."
+            "detail": (f"{modern_imgs} of {total_imgs} unique image(s) use WebP/AVIF."
                        if total_imgs else "No images found to evaluate."),
         },
         {
             "passed": lazy_share >= 0.5,
             "label": "Lazy loading on below-the-fold images",
-            "detail": f"{lazy_imgs} of {total_imgs} image(s) load lazily.",
+            "detail": f"{lazy_imgs} of {total_imgs} unique image(s) load lazily.",
         },
         {
             "passed": dim_share <= 0.3,
             "label": "Width/height attributes set (CLS reduction)",
-            "detail": f"{dims_missing} of {total_imgs} image(s) lack explicit dimensions.",
+            "detail": f"{dims_missing} of {total_imgs} unique image(s) lack explicit dimensions.",
         },
     ]
 
@@ -95,6 +113,7 @@ async def audit_image_optimization(job_id: str) -> dict:
         "subscores": subscores,
         "checks": checks,
         "total_images": total_imgs,
+        "image_occurrences": occurrences,
         "modern_images": modern_imgs,
         "lazy_images": lazy_imgs,
         "missing_dimensions": dims_missing,

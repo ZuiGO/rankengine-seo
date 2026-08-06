@@ -37,7 +37,7 @@ async def _cached_insights(db, job_id: str, domain: str):
         and cached.get("fetched_at", datetime.min) > datetime.utcnow() - timedelta(minutes=CACHE_TTL_MINUTES)
     )
     if fresh:
-        return {"job_id": job_id, "domain": domain, "cached": True, **cached["data"]}
+        return {"job_id": job_id, "domain": domain, "cached": True, "last_fetched": cached.get("fetched_at"), **cached["data"]}
     return None
 
 
@@ -63,7 +63,7 @@ async def get_insights(job_id: str):
 
     insights = await fetch_all_insights(domain, job_id)
     await _store_insights(db, job_id, insights)
-    return {"job_id": job_id, "domain": domain, "cached": False, **insights}
+    return {"job_id": job_id, "domain": domain, "cached": False, "last_fetched": None, **insights}
 
 
 @router.post("/refresh/{job_id}")
@@ -75,7 +75,7 @@ async def refresh_insights(job_id: str):
     domain = _domain_from_url(job.get("url", ""))
     insights = await fetch_all_insights(domain, job_id)
     await _store_insights(db, job_id, insights)
-    return {"job_id": job_id, "domain": domain, "cached": False, **insights}
+    return {"job_id": job_id, "domain": domain, "cached": False, "last_fetched": None, **insights}
 
 
 @router.post("/keyword-search")

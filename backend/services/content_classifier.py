@@ -27,9 +27,9 @@ def classify_url(href: str) -> str | None:
     parsed = urlparse(href)
     domain = parsed.netloc.lower()
     if domain in YOUTUBE_DOMAINS:
-        return "video"
+        return "video_embed"
     if domain in VIMEO_DOMAINS:
-        return "video"
+        return "video_embed"
     if domain in GOOGLE_DOCS_DOMAINS:
         path = parsed.path.lower()
         if "/document/" in path:
@@ -114,9 +114,9 @@ def detect_content_types(page_url: str, html: str) -> list[dict]:
             full = urljoin(page_url, src)
             parsed = urlparse(full)
             domain = parsed.netloc.lower()
-            ctype = "video" if any(d in domain for d in (*YOUTUBE_DOMAINS, *VIMEO_DOMAINS)) else None
+            is_embed = any(d in domain for d in (*YOUTUBE_DOMAINS, *VIMEO_DOMAINS))
             items.append({
-                "type": ctype or "iframe",
+                "type": "video_embed" if is_embed else "iframe",
                 "source_url": full,
                 "tag": "iframe",
             })

@@ -15,6 +15,7 @@ from backend.services import indexation as idx_mod, image_optimization as img_mo
 from backend.services.sitemap import _fetch_sitemap_entries
 from backend.services.service_errors import ServiceError
 from backend.services import chat_service
+from backend.services.content_classifier import classify_url, detect_content_types
 
 
 class FakeCollection:
@@ -251,6 +252,26 @@ class TestImageOptimization:
         assert summary["subscores"]["modern_formats"] == 15
         assert summary["score"] < 100
 
+    @pytest.mark.asyncio
+    async def test_unique_images_dedupe(self, monkeypatch):
+        html = (
+            "<img src='/logo.png'>"          # same src on both pages -> 1 unique
+            "<img src='/logo.png?w=100'>"    # query stripped -> same key
+            "<img src='/hero.jpg#frag'>"     # fragment stripped -> distinct file
+        )
+        db = FakeDb()
+        monkeypatch.setattr(img_mod, "get_db", lambda: db)
+        db._stores["pages"] = {
+            "https://x.example/": _page("https://x.example/", html),
+            "https://x.example/about": _page("https://x.example/about",
+                                             "<img src='/logo.png'><img src='/hero.jpg'>"),
+        }
+        summary = await img_mod.audit_image_optimization("j1")
+        assert summary["total_images"] == 2          # logo + hero, unique
+        assert summary["image_occurrences"] == 5     # 3 + 2 raw <img> tags
+        assert summary["missing_dimensions"] == 2
+        assert "unique" in str(summary["checks"][0]["detail"])
+
 
 class TestIndexation:
     @pytest.mark.asyncio
@@ -333,12 +354,13 @@ class TestChatContexts:
         monkeypatch.setattr(chat_service, "get_db", lambda: db)
         db._stores["image_optimization_audits"] = {"j1": {
             "job_id": "j1", "score": 15,
-            "total_images": 9424, "modern_images": 0, "lazy_images": 0,
+            "total_images": 704, "image_occurrences": 9424,
+            "modern_images": 0, "lazy_images": 0,
             "missing_dimensions": 2932, "checks": [],
         }}
         ctx = await chat_service._image_opt_context("j1")
-        assert "images=9424" in ctx
-        assert "missing_dimensions" not in ctx
+        assert "unique_images=704" in ctx
+        assert "occurrences=9424" in ctx
 
     @pytest.mark.asyncio
     async def test_indexation_context_unmeasured(self, monkeypatch):
@@ -360,3 +382,26 @@ class TestChatContexts:
         }}
         ctx = await chat_service._hreflang_context("j1")
         assert "not applicable" in ctx
+
+
+class TestVideoEmbedClassification:
+    def test_youtube_link_is_video_embed(self):
+        assert classify_url("https://www.youtube.com/watch?v=abc123") == "video_embed"
+        assert classify_url("https://youtu.be/abc123") == "video_embed"
+
+    def test_mp4_file_still_video(self):
+        assert classify_url("https://cdn.example.com/railway.mp4") == "video"
+        assert classify_url("https://vimeo.com/12345") == "video_embed"
+
+    def test_iframe_embeds_detected(self):
+        html = (
+            '<iframe src="https://www.youtube.com/embed/abc123"></iframe>'
+            '<iframe src="https://player.vimeo.com/video/42"></iframe>'
+            '<iframe src="/plain.html"></iframe>'
+            '<video src="/clip.mp4"></video>'
+        )
+        items = detect_content_types("https://x.example/", html)
+        types = {(i["type"], i["tag"]) for i in items}
+        assert ("video_embed", "iframe") in types
+        assert ("iframe", "iframe") in types
+        assert ("video", "video") in types

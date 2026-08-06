@@ -12,7 +12,7 @@ from backend.config import settings
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 from backend.services.content_classifier import detect_content_types
-from backend.services.content_downloader import download_content
+from backend.services.content_downloader import download_content, probe_content
 from backend.services.seo_analyzer import analyze_content_item
 from backend.services.page_classifier import classify_page_type, page_role
 from backend.services.url_normalizer import normalize_url
@@ -60,7 +60,7 @@ async def _goto_polite(page, url: str, gate: asyncio.Lock, delay: float, timeout
     return resp
 
 
-async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None, concurrency: int = 5, seed_sitemap: bool = False, unlimited: bool = False):
+async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None, concurrency: int = 5, seed_sitemap: bool = False, unlimited: bool = False, mobile: bool = True):
     db = get_db()
     target_url = normalize_url(target_url) or target_url
     parsed = urlparse(target_url)
@@ -240,6 +240,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                     source = item.get("source_url", "")
                     if source.lower().startswith("data:"):
                         return None
+                    if item.get("type") == "video_embed":
+                        return (item, None)
                     async with dedup_lock:
                         if source in downloaded_urls:
                             return None
@@ -247,7 +249,10 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                     dl = None
                     try:
                         async with download_sem:
-                            dl = await download_content(source, job_id, url)
+                            if settings.metadata_only:
+                                dl = await probe_content(source, job_id, url)
+                            else:
+                                dl = await download_content(source, job_id, url)
                     finally:
                         if not dl:
                             async with dedup_lock:
@@ -366,44 +371,45 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
             await browser.close()
 
         mobile_ok = 0
-        try:
-            async with _chromium_slots:
-                mobile_browser = await pw.chromium.launch(headless=True)
-                iphone = pw.devices["iPhone 13"]
-                mobile_sem = asyncio.Semaphore(settings.mobile_crawl_concurrency)
-                mobile_lock = asyncio.Lock()
+        if mobile:
+            try:
+                async with _chromium_slots:
+                    mobile_browser = await pw.chromium.launch(headless=True)
+                    iphone = pw.devices["iPhone 13"]
+                    mobile_sem = asyncio.Semaphore(settings.mobile_crawl_concurrency)
+                    mobile_lock = asyncio.Lock()
 
-                async def mobile_pass(url: str):
-                    nonlocal mobile_ok
-                    async with mobile_sem:
-                        try:
-                            page = await mobile_browser.new_page(**iphone)
-                            await page.set_extra_http_headers({"User-Agent": USER_AGENT})
-                            resp = await _goto_polite(page, url, gate, delay)
-                            mhtml = await page.content()
-                            await page.close()
-                            status = resp.status if resp is not None else None
-                            soup = BeautifulSoup(mhtml, "lxml")
-                            viewport = soup.find("meta", attrs={"name": "viewport"})
-                            mobile_friendly = viewport is not None and viewport.get("content", "").lower().strip() != ""
-                            await db.pages.update_one(
-                                {"job_id": job_id, "url": url},
-                                {"$set": {
-                                    "html_mobile": mhtml[:MAX_HTML_STORED],
-                                    "mobile_status_code": status,
-                                    "viewport": "mobile",
-                                    "mobile_friendly": mobile_friendly,
-                                }},
-                            )
-                            async with mobile_lock:
-                                mobile_ok += 1
-                        except Exception as me:
-                            logger.error("Mobile crawl error for %s: %s", url, me)
+                    async def mobile_pass(url: str):
+                        nonlocal mobile_ok
+                        async with mobile_sem:
+                            try:
+                                page = await mobile_browser.new_page(**iphone)
+                                await page.set_extra_http_headers({"User-Agent": USER_AGENT})
+                                resp = await _goto_polite(page, url, gate, delay)
+                                mhtml = await page.content()
+                                await page.close()
+                                status = resp.status if resp is not None else None
+                                soup = BeautifulSoup(mhtml, "lxml")
+                                viewport = soup.find("meta", attrs={"name": "viewport"})
+                                mobile_friendly = viewport is not None and viewport.get("content", "").lower().strip() != ""
+                                await db.pages.update_one(
+                                    {"job_id": job_id, "url": url},
+                                    {"$set": {
+                                        "html_mobile": mhtml[:MAX_HTML_STORED],
+                                        "mobile_status_code": status,
+                                        "viewport": "mobile",
+                                        "mobile_friendly": mobile_friendly,
+                                    }},
+                                )
+                                async with mobile_lock:
+                                    mobile_ok += 1
+                            except Exception as me:
+                                logger.error("Mobile crawl error for %s: %s", url, me)
 
-                await asyncio.gather(*[mobile_pass(result["url"]) for result in crawled_pages])
-                await mobile_browser.close()
-        except Exception as mb_err:
-            logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)
+                    await asyncio.gather(*[mobile_pass(result["url"]) for result in crawled_pages])
+                    await mobile_browser.close()
+            except Exception as mb_err:
+                logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)
 
     depths = [p.get("click_depth", 0) for p in crawled_pages]
     mobile_friendly_count = 0

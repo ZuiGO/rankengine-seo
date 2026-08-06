@@ -35,3 +35,22 @@ async def download_content(source_url: str, job_id: str, page_url: str) -> dict 
             }
     except Exception:
         return None
+
+
+async def probe_content(source_url: str, job_id: str, page_url: str) -> dict | None:
+    """Metadata-only probe: size + mime via HEAD (GET-stream fallback), no body stored."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.head(source_url)
+            if resp.status_code >= 400:
+                resp = await client.get(source_url)
+            mime = resp.headers.get("content-type", "")
+            size_hdr = resp.headers.get("content-length")
+            return {
+                "file_path": None,
+                "file_size": int(size_hdr) if size_hdr and size_hdr.isdigit() else None,
+                "mime_type": mime,
+                "filename": None,
+            }
+    except Exception:
+        return None

@@ -348,10 +348,11 @@ async def _image_opt_context(job_id: str) -> str:
     failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
     lines = [
         "Image optimization score: %s/100" % (doc.get("score"),),
-        "images=%s modern=%s lazy=%s dims_missing=%s" % (doc.get("total_images", doc.get("total_imgs", 0)),
-                                                         doc.get("modern_images", doc.get("modern", 0)),
-                                                         doc.get("lazy_images", doc.get("lazy", 0)),
-                                                         doc.get("missing_dimensions", doc.get("dims_missing", 0))),
+        "unique_images=%s occurrences=%s modern=%s lazy=%s dims_missing=%s" % (doc.get("total_images", doc.get("total_imgs", 0)),
+                                                                               doc.get("image_occurrences", doc.get("total_images", 0)),
+                                                                               doc.get("modern_images", doc.get("modern", 0)),
+                                                                               doc.get("lazy_images", doc.get("lazy", 0)),
+                                                                               doc.get("missing_dimensions", doc.get("dims_missing", 0))),
     ]
     if failed:
         lines.append("Failed checks: " + ", ".join(failed[:6]))

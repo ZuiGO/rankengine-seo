@@ -299,26 +299,26 @@ async function showResults(jobId, opts = {}) {
 
 function loadOverview(summary) {
   const stats = document.getElementById("overview-stats");
-  const geo = summary.geo_readiness || {};
+  const nested = summary.summary || {};
+  const geo = (summary.summary?.geo_readiness) || {};
   const geoCard = geo.status
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${geo.blocked_ai_crawlers?.length ? "⛔ " + escapeHtml(geo.blocked_ai_crawlers.join(", ")) : "✅ AI crawlers OK"}</div><div class="stat-label">AI Search Readiness${geo.score !== undefined && geo.score !== null ? " (" + geo.score + "/100)" : ""}</div></div>`
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${geo.blocked_ai_crawlers?.length ? "Blocked: " + escapeHtml(geo.blocked_ai_crawlers.join(", ")) : "AI crawlers OK"}</div><div class="stat-label">AI Search Readiness${geo.score !== undefined && geo.score !== null ? " (" + geo.score + "/100)" : ""}</div></div>`
     : "";
-  const ai = summary.ai_visibility || {};
+  const ai = (summary.summary?.ai_visibility) || {};
   const scoreBar = s => (s !== undefined && s !== null)
     ? `<div style="height:5px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden"><div style="width:${Math.max(0, Math.min(100, s))}%;height:100%;background:${s >= 70 ? "#16a34a" : s >= 40 ? "#d97706" : "#dc2626"}"></div></div>`
     : "";
   const aiCard = ai.score !== undefined && ai.score !== null
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${ai.score}/100</div><div class="stat-label">AI Visibility${ai.blocked_ai_agents?.length ? " ⛔ blocked" : ""}${ai.llms_txt_present ? " · llms.txt" : ""}</div>${scoreBar(ai.score)}</div>`
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${ai.score}/100</div><div class="stat-label">AI Visibility${ai.blocked_ai_agents?.length ? " · blocked" : ""}${ai.llms_txt_present ? " · llms.txt" : ""}</div>${scoreBar(ai.score)}</div>`
     : "";
-  const local = summary.local_seo || {};
+  const local = (summary.summary?.local_seo) || {};
   const localCard = local.score !== undefined && local.score !== null
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${local.score}/100</div><div class="stat-label">Local SEO${local.local_business_schema ? " ✅" : ""}${local.nap_inconsistent ? " · NAP mismatch" : ""}</div>${scoreBar(local.score)}</div>`
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${local.score}/100</div><div class="stat-label">Local SEO${local.local_business_schema ? " ✓" : ""}${local.nap_inconsistent ? " · NAP mismatch" : ""}</div>${scoreBar(local.score)}</div>`
     : "";
-  const crawl = summary.summary || {};
-  const failedCard = crawl.failed_urls_count
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;color:#dc2626">${crawl.failed_urls_count}</div><div class="stat-label">Pages Failed to Fetch</div></div>`
+  const failedCard = nested.failed_urls_count
+    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;color:#dc2626">${nested.failed_urls_count}</div><div class="stat-label">Pages Failed to Fetch</div></div>`
     : "";
-  const cannib = summary.cannibalization_groups || 0;
+  const cannib = nested.cannibalization_groups || 0;
   const cannibCard = cannib
     ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${cannib}</div><div class="stat-label">Cannibalized Keywords</div></div>`
     : "";
@@ -333,8 +333,8 @@ function loadOverview(summary) {
 
   const breakdown = document.getElementById("content-breakdown");
   const types = summary.content_breakdown || {};
-  const icons = { image: "🖼", pdf: "📄", video: "🎬", doc: "📝", xlsx: "📊", presentation: "📽", audio: "🎵", text: "📃" };
-  const colors = { image: "#fef3c7", pdf: "#dbeafe", video: "#ede9fe", doc: "#d1fae5", xlsx: "#fce7f3", presentation: "#e0e7ff", audio: "#fae8ff", text: "#f1f5f9" };
+  const icons = { image: "🖼", pdf: "📄", video: "🎬", video_embed: "🎬", doc: "📝", xlsx: "📊", presentation: "📽", audio: "🎵", text: "📃" };
+  const colors = { image: "#fef3c7", pdf: "#dbeafe", video: "#ede9fe", video_embed: "#e9d5ff", doc: "#d1fae5", xlsx: "#fce7f3", presentation: "#e0e7ff", audio: "#fae8ff", text: "#f1f5f9" };
   breakdown.innerHTML = Object.entries(types).map(([type, count]) => `
     <div class="content-type-card">
       <div class="content-type-icon" style="background:${colors[type] || '#f1f5f9'}">${icons[type] || "📄"}</div>
@@ -741,7 +741,7 @@ async function loadContent(jobId) {
     return;
   }
 
-  const typeIcons = { image: "🖼", pdf: "📄", video: "🎬", doc: "📝", xlsx: "📊", presentation: "📽", audio: "🎵", text: "📃" };
+  const typeIcons = { image: "🖼", pdf: "📄", video: "🎬", video_embed: "🎬", doc: "📝", xlsx: "📊", presentation: "📽", audio: "🎵", text: "📃", iframe: "🖼" };
 
   table.innerHTML = `
     <table class="data-table">
@@ -1520,7 +1520,8 @@ async function loadReportExtras(jobId, preview) {
       preview.insertAdjacentHTML("beforeend", `
         <h4 style="margin:20px 0 10px">Image Optimization (${d.score}/100)</h4>
         <div class="stat-grid">
-          ${kv("Images on page", d.total_images ?? d.total_imgs ?? 0)}
+          ${kv("Unique images", d.total_images ?? d.total_imgs ?? 0)}
+          ${kv("Occurrences", d.image_occurrences ?? d.total_images ?? 0)}
           ${kv("WebP / AVIF", d.modern_images ?? d.modern ?? 0)}
           ${kv("Without dimensions", d.missing_dimensions ?? d.dims_missing ?? 0)}
           ${kv("Lazy-loaded", d.lazy_images ?? d.lazy ?? 0)}
@@ -1662,7 +1663,19 @@ function insightErrorHtml(error) {
   if (k.kind === "credits") {
     return `<div class="service-error" style="background:#fffbeb;border-color:#fde68a">
       <div class="service-error-title" style="color:#92400e">DataForSEO unavailable (no credits)</div>
-      <div class="service-error-msg" style="color:#78350f">This data couldn't be fetched and no local fallback is available. Add credits to DataForSEO to enable live keyword, backlink and domain data.</div>
+      <div class="service-error-msg" style="color:#78350f">This data couldn't be fetched and no local fallback is available. Add credits to DataForSEO (or connect SE Ranking) to enable live keyword, backlink and domain data.</div>
+    </div>`;
+  }
+  if (k.kind === "disabled") {
+    return `<div class="service-error" style="background:#fefce8;border-color:#fde047">
+      <div class="service-error-title" style="color:#713f12">DataForSEO endpoint not enabled on this plan</div>
+      <div class="service-error-msg" style="color:#713f12">Your current DataForSEO plan does not include this endpoint, so live data isn't available for it. It's not an error — upgrade the plan or connect an alternative provider (SE Ranking) to fill it in.</div>
+    </div>`;
+  }
+  if (k.kind === "rate" || k.kind === "retry") {
+    return `<div class="service-error" style="background:#fefce8;border-color:#fde047">
+      <div class="service-error-title" style="color:#713f12">${escapeHtml(k.title)}</div>
+      <div class="service-error-msg" style="color:#713f12">This is temporary — use Refresh Insights to retry in a minute and the data should come back.</div>
     </div>`;
   }
   return serviceErrorHtml(k.title, String(error || "Unknown error"));
@@ -1706,7 +1719,7 @@ async function loadQuality(jobId) {
     clientGet(`${API_BASE}/analysis/${jobId}/summary`),
     clientGet(`${API_BASE}/quality/${jobId}/decay?months=6`),
   ]);
-  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, summary?.geo_readiness, decay) + renderSpend(spend);
+  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, summary?.summary?.geo_readiness, decay) + renderSpend(spend);
 }
 
 function renderSpend(spend) {
@@ -1813,6 +1826,12 @@ async function loadSeoInsights(jobId) {
     }
     const data = await resp.json();
     if (data.cached) showToast("Insights loaded from cache");
+    const lastChecked = document.getElementById("insights-last-checked");
+    if (lastChecked) {
+      lastChecked.textContent = data.last_fetched
+        ? "Last checked: " + new Date(data.last_fetched).toLocaleString()
+        : "Last checked: just now";
+    }
     renderKeywords(data.keywords || [], data.keywords_error, data.keywords_source);
     renderBacklinks(data.backlinks, data.backlinks_error, data.backlinks_source);
     renderDomainOverview(data.overview, data.overview_error, data.overview_source);
@@ -2125,7 +2144,7 @@ function renderCompetitorGaps(data, isSingle) {
     const status = c.status || "queued";
     if (status === "queued") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Queued for full-page crawl...</div></div>`;
     if (status === "running") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div></div>`;
-    if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div></div>`;
+    if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
 
     const kwGaps = (c.keyword_gap && c.keyword_gap.gaps || []).length;
     const contentGaps = c.content_gap ? c.content_gap.missing_count : 0;
@@ -2170,6 +2189,13 @@ function renderCompetitorGaps(data, isSingle) {
 
 function renderCompetitorStatus(rows) {
   return rows.some(r => ["queued", "running"].includes(r.status));
+}
+
+function retryCompetitor(domain) {
+  if (!currentJobId) return;
+  const input = document.getElementById("competitor-input");
+  if (input) input.value = domain;
+  document.getElementById("competitor-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
 async function loadCompetitors(jobId) {
