@@ -60,9 +60,18 @@ async def _fetch_sitemap_entries(xml_text: str, _nested: set[str] | None = None)
             if name == "url":
                 loc = child.findtext("{*}loc")
                 if loc:
+                    alternates: dict[str, str] = {}
+                    for sub in child:
+                        sub_name = sub.tag.split("}")[-1].lower()
+                        if sub_name == "link" and "alternate" in (sub.get("rel") or ""):
+                            code = (sub.get("hreflang") or "").strip().lower()
+                            href = (sub.get("href") or "").strip()
+                            if code and href:
+                                alternates[code] = href
                     entries.append({
                         "loc": loc.strip(),
                         "lastmod": (child.findtext("{*}lastmod") or "").strip(),
+                        "alternates": alternates,
                     })
     elif tag in ("sitemapindex", "sitemap"):
         for child in root:
@@ -110,6 +119,10 @@ async def audit_sitemap(job_id: str, target_url: str) -> dict:
     all_urls: set[str] = set()
     lastmod_missing = 0
     http_plain = 0
+    sitemap_alt_entries = 0
+    sitemap_alt_codes: set[str] = set()
+    sitemap_missing_self_ref = 0
+    sitemap_invalid_alt_codes = 0
     for cand in candidates:
         if cand in seen:
             continue
@@ -137,6 +150,15 @@ async def audit_sitemap(job_id: str, target_url: str) -> dict:
                 all_urls.add(nu)
             if e["loc"].lower().startswith("http://"):
                 http_plain += 1
+            alts = e.get("alternates") or {}
+            if alts:
+                sitemap_alt_entries += 1
+                sitemap_alt_codes.update(alts)
+                from backend.services.international_seo import is_valid_hreflang_code
+                if any(not is_valid_hreflang_code(c) for c in alts):
+                    sitemap_invalid_alt_codes += 1
+                if nu and nu not in {normalize_url(a) for a in alts.values()}:
+                    sitemap_missing_self_ref += 1
         if missing:
             lastmod_missing += missing
 
@@ -166,6 +188,10 @@ async def audit_sitemap(job_id: str, target_url: str) -> dict:
         "pages_crawled": len(pages),
         "uncrawled_urls_count": len(uncrawled),
         "uncrawled_urls": uncrawled[:20],
+        "sitemap_alt_entries": sitemap_alt_entries,
+        "sitemap_alt_codes": sorted(sitemap_alt_codes),
+        "sitemap_missing_self_ref": sitemap_missing_self_ref,
+        "sitemap_invalid_alt_codes": sitemap_invalid_alt_codes,
         "results": results,
         "generated_at": datetime.utcnow(),
     }

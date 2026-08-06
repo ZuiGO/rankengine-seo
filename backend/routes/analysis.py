@@ -182,6 +182,26 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             from backend.services.orphan_detection import detect_orphan_pages
             return await detect_orphan_pages(job_id)
 
+        async def _hreflang():
+            await _progress("Auditing international SEO / hreflang...")
+            from backend.services.international_seo import check_international_seo
+            return await check_international_seo(job_id, url)
+
+        async def _url_hygiene():
+            await _progress("Checking URL hygiene and crawl budget...")
+            from backend.services.url_hygiene import audit_url_hygiene
+            return await audit_url_hygiene(job_id)
+
+        async def _indexation():
+            await _progress("Checking indexation status...")
+            from backend.services.indexation import check_indexation
+            return await check_indexation(job_id, url)
+
+        async def _image_opt():
+            await _progress("Auditing image optimization...")
+            from backend.services.image_optimization import audit_image_optimization
+            return await audit_image_optimization(job_id)
+
         w1 = dict(await asyncio.gather(*[
             _stage("user_flows", _user_flows, fallback=0),
             _stage("extraction", _extraction, fallback={}),
@@ -196,6 +216,10 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             _stage("ai_visibility", _ai_visibility, fallback={}),
             _stage("local_seo", _local_seo, fallback={}),
             _stage("orphans", _orphans, fallback={}),
+            _stage("hreflang", _hreflang, fallback={}),
+            _stage("url_hygiene", _url_hygiene, fallback={}),
+            _stage("indexation", _indexation, fallback={}),
+            _stage("image_opt", _image_opt, fallback={}),
         ]))
 
         flow_count = w1["user_flows"]

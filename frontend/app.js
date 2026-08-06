@@ -1450,6 +1450,88 @@ async function loadReportExtras(jobId, preview) {
     }
   } catch (_) {}
   try {
+    const hr = await fetch(`${API_BASE}/quality/${jobId}/hreflang`);
+    if (hr.ok) {
+      const d = await hr.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">International SEO / hreflang ${d.score != null ? `(${d.score}/100)` : ""}</h4>
+        ${d.applicable === false
+          ? `<p style="font-size:12px;color:var(--text-secondary)">Not applicable — no localized URL structure detected on this site.</p>`
+          : `
+        <div class="stat-grid">
+          ${kv("Locales", (d.locales || []).join(", ") || "none")}
+          ${kv("Pages with hreflang", d.pages_with_hreflang ?? 0)}
+          ${kv("Missing self-references", d.missing_self_ref ?? 0)}
+          ${kv("Missing x-default", d.missing_xdefault ?? 0)}
+          ${kv("Invalid language codes", d.invalid_codes ?? 0)}
+          ${kv("One-way pairs", d.one_way_pairs_count ?? 0)}
+          ${kv("Canonical conflicts", d.canonical_conflicts_count ?? 0)}
+          ${kv("Lang-parameter pages", d.lang_param_pages ?? 0)}
+          <div class="stat-card"><div class="stat-label">Sitemap "alternate" entries / codes</div><div class="stat-value" style="font-size:14px">${d.sitemap_alt_entries ?? 0} / ${(d.sitemap_alt_codes || []).length}</div></div>
+          </div>
+          ${bar("Self-referencing pages", d.subscores && d.subscores.self_reference)}
+          ${bar("x-default declared", d.subscores && d.subscores.x_default)}
+          ${bar("Valid language/region codes", d.subscores && d.subscores.valid_codes)}
+          ${bar("Reciprocal pairs", d.subscores && d.subscores.reciprocal)}
+          ${bar("Locale-based URL structure", d.subscores && d.subscores.locale_urls)}
+          ${checksList(d.checks)}`}
+      `);
+    }
+  } catch (_) {}
+  try {
+    const uh = await fetch(`${API_BASE}/quality/${jobId}/url-hygiene`);
+    if (uh.ok) {
+      const d = await uh.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">URL Hygiene (${d.score}/100)</h4>
+        <div class="stat-grid">
+          ${kv("Parameter pages", d.param_pages ?? 0)}
+          ${kv("Faceted / pagination pages", d.facet_pages ?? 0)}
+          ${kv("Distinct parameters", (d.top_params || []).length)}
+          ${kv("Uppercase slugs", d.uppercase_slugs ?? 0)}
+          ${kv("Underscore slugs", d.underscore_slugs ?? 0)}
+          ${kv("Long slugs (>80)", d.long_slugs ?? 0)}
+          ${kv("Lang parameter pages", d.lang_param_pages ?? 0)}
+        </div>
+        ${(d.top_params || []).length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Top URL parameters: ${d.top_params.map(t => `${escapeHtml(t[0])} (${t[1]})`).join(" · ")}</p>` : ""}
+        ${bar("Parameter control", d.subscores && d.subscores.parameter_control)}
+        ${bar("Readable paths", d.subscores && d.subscores.readable_paths)}
+        ${bar("Slug length", d.subscores && d.subscores.slug_length)}
+        ${bar("Slash consistency", d.subscores && d.subscores.slash_consistency)}
+        ${checksList(d.checks)}`);
+    }
+  } catch (_) {}
+  try {
+    const idx = await fetch(`${API_BASE}/quality/${jobId}/indexation`);
+    if (idx.ok) {
+      const d = await idx.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">Indexation ${d.status === "measured" ? `(≈${d.indexed_estimate ?? "?"} of ${d.crawled_pages ?? d.crawled ?? "?"} pages indexed)` : "(not measured)"}</h4>
+        ${d.status === "unmeasured"
+          ? `<p style="font-size:12px;color:var(--text-secondary)">SERP indexation check is not available (no SERP API key configured / no spend left).</p>`
+          : `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Adwords-indexed estimate from a live SERP sample${d.message ? ` — ${escapeHtml(d.message)}` : ""}.</p>
+             ${(d.top_indexed_pages || []).length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Top indexed: ${d.top_indexed_pages.slice(0, 5).map(p => escapeHtml(p.url || p)).join(" · ")}</p>` : ""}`}`);
+    }
+  } catch (_) {}
+  try {
+    const im = await fetch(`${API_BASE}/quality/${jobId}/image-optimization`);
+    if (im.ok) {
+      const d = await im.json();
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">Image Optimization (${d.score}/100)</h4>
+        <div class="stat-grid">
+          ${kv("Images on page", d.total_imgs ?? d.img_total ?? 0)}
+          ${kv("WebP / AVIF", d.modern ?? 0)}
+          ${kv("Without dimensions", d.dims_missing ?? 0)}
+          ${kv("Lazy-loaded", d.lazy ?? 0)}
+        </div>
+        ${bar("Modern formats (WebP/AVIF)", d.subscores && d.subscores.modern_formats)}
+        ${bar("Lazy loading", d.subscores && d.subscores.lazy_loading)}
+        ${bar("Explicit dimensions", d.subscores && d.subscores.dimensions)}
+        ${checksList(d.checks)}`);
+    }
+  } catch (_) {}
+  try {
     const ca = await fetch(`${API_BASE}/quality/${jobId}/cannibalization`);
     if (ca.ok) {
       const d = await ca.json();

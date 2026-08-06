@@ -534,6 +534,118 @@ async def _report_html(job_id: str):
             + _checks_html(local_seo.get("checks"))
         )
 
+    hreflang_audit = await db.hreflang_audits.find_one({"job_id": job_id})
+    url_hygiene = await db.url_hygiene_audits.find_one({"job_id": job_id})
+    indexation = await db.indexation_audits.find_one({"job_id": job_id})
+    image_opt = await db.image_optimization_audits.find_one({"job_id": job_id})
+
+    hreflang_html = ""
+    if hreflang_audit:
+        subs = hreflang_audit.get("subscores") or {}
+        if hreflang_audit.get("applicable") is False:
+            hreflang_html = (
+                "<h2 class='section-title'>International SEO / hreflang</h2>"
+                "<p class='muted'>Not applicable — no localized URL structure detected.</p>"
+            )
+        else:
+            hreflang_html = (
+                "<h2 class='section-title'>International SEO / hreflang</h2>"
+                "<p>Score: <b>%s</b> / 100%s</p>"
+                % (_esc(hreflang_audit.get("score")), _bar(hreflang_audit.get("score")))
+                + "<p class='muted'>Locales: <b>%s</b> · pages with hreflang: <b>%s</b> · "
+                "missing self-references: <b>%s</b> · missing x-default: <b>%s</b> · "
+                "invalid codes: <b>%s</b> · one-way pairs: <b>%s</b> · canonical conflicts: <b>%s</b></p>"
+                % (_esc(", ".join(hreflang_audit.get("locales") or []) or "none"),
+                   _esc(hreflang_audit.get("pages_with_hreflang", 0)),
+                   _esc(hreflang_audit.get("missing_self_ref", 0)),
+                   _esc(hreflang_audit.get("missing_xdefault", 0)),
+                   _esc(hreflang_audit.get("invalid_codes", 0)),
+                   _esc(hreflang_audit.get("one_way_pairs_count", 0)),
+                   _esc(hreflang_audit.get("canonical_conflicts_count", 0)))
+                + "<table><tr><th>Area</th><th>Points</th><th>Max</th></tr>"
+                "<tr><td>Self-referencing pages</td><td>%s</td><td>30</td></tr>"
+                "<tr><td>x-default declared</td><td>%s</td><td>15</td></tr>"
+                "<tr><td>Valid language/region codes</td><td>%s</td><td>15</td></tr>"
+                "<tr><td>Reciprocal pairs</td><td>%s</td><td>25</td></tr>"
+                "<tr><td>Locale-based URL structure</td><td>%s</td><td>15</td></tr></table>"
+                % (_esc(subs.get("self_reference") or 0), _esc(subs.get("x_default") or 0),
+                   _esc(subs.get("valid_codes") or 0), _esc(subs.get("reciprocal") or 0),
+                   _esc(subs.get("locale_urls") or 0))
+                + (('<p class="muted">Sitemap: %s "alternate" entries, codes: %s%s</p>'
+                    % (_esc(hreflang_audit.get("sitemap_alt_entries", 0)),
+                       _esc(", ".join(hreflang_audit.get("sitemap_alt_codes") or []) or "none",
+                            ),
+                       (' · <b>%s</b> invalid code(s), <b>%s</b> page(s) missing a self-reference in the sitemap'
+                        % (_esc(hreflang_audit.get("sitemap_invalid_alt_codes", 0)),
+                           _esc(hreflang_audit.get("sitemap_missing_self_ref", 0)))
+                        if hreflang_audit.get("sitemap_invalid_alt_codes") or hreflang_audit.get("sitemap_missing_self_ref")
+                        else "")))
+                   if hreflang_audit.get("sitemap_alt_entries") else "")
+                + _checks_html(hreflang_audit.get("checks"))
+            )
+
+    url_hygiene_html = ""
+    if url_hygiene:
+        subs = url_hygiene.get("subscores") or {}
+        top_params = (url_hygiene.get("top_params") or [])
+        url_hygiene_html = (
+            "<h2 class='section-title'>URL Hygiene</h2>"
+            "<p>Score: <b>%s</b> / 100%s</p>"
+            % (_esc(url_hygiene.get("score")), _bar(url_hygiene.get("score")))
+            + "<p class='muted'>%s page(s) with URL parameters (%s faceted/pagination, %s language-parameter) · "
+            "%s uppercase-slug · %s underscore-slug · %s long-slug pages%s</p>"
+            % (_esc(url_hygiene.get("param_pages", 0)), _esc(url_hygiene.get("facet_pages", 0)),
+               _esc(url_hygiene.get("lang_param_pages", 0)), _esc(url_hygiene.get("uppercase_slugs", 0)),
+               _esc(url_hygiene.get("underscore_slugs", 0)), _esc(url_hygiene.get("long_slugs", 0)),
+               (' · top parameters: %s' % _esc(", ".join("%s (%d)" % (k, v) for k, v in top_params[:6]))) if top_params else "")
+            + "<table><tr><th>Area</th><th>Points</th><th>Max</th></tr>"
+            "<tr><td>Parameter control</td><td>%s</td><td>40</td></tr>"
+            "<tr><td>Readable paths</td><td>%s</td><td>20</td></tr>"
+            "<tr><td>Slug length</td><td>%s</td><td>20</td></tr>"
+            "<tr><td>Slash consistency</td><td>%s</td><td>20</td></tr></table>"
+            % (_esc(subs.get("parameter_control") or 0), _esc(subs.get("readable_paths") or 0),
+               _esc(subs.get("slug_length") or 0), _esc(subs.get("slash_consistency") or 0))
+            + _checks_html(url_hygiene.get("checks"))
+        )
+
+    indexation_html = ""
+    if indexation:
+        if indexation.get("status") == "unmeasured":
+            indexation_html = (
+                "<h2 class='section-title'>Indexation</h2>"
+                "<p class='muted'>SERP indexation check not measured (no SERP API key configured or spend exhausted).</p>"
+            )
+        else:
+            top_pages = (indexation.get("top_indexed_pages") or [])
+            indexation_html = (
+                "<h2 class='section-title'>Indexation</h2>"
+                "<p>Estimate: <b>%s</b> of <b>%s</b> crawled pages indexed (adwords-indexed sample).</p>"
+                % (_esc(indexation.get("indexed_estimate")),
+                   _esc(indexation.get("crawled_pages") if indexation.get("crawled_pages") is not None else indexation.get("crawled", "N/A")))
+                + (('<p class="muted">%s</p>' % _esc(indexation.get("message"))) if indexation.get("message") else "")
+                + (('<p class="muted">Sample indexed pages: %s</p>'
+                    % _esc(", ".join(str((p.get("url") if isinstance(p, dict) else p)) for p in top_pages[:10]))) if top_pages else "")
+            )
+
+    image_opt_html = ""
+    if image_opt:
+        subs = image_opt.get("subscores") or {}
+        image_opt_html = (
+            "<h2 class='section-title'>Image Optimization</h2>"
+            "<p>Score: <b>%s</b> / 100%s</p>"
+            % (_esc(image_opt.get("score")), _bar(image_opt.get("score")))
+            + "<p class='muted'>%s images on page · %s WebP/AVIF · %s lazy-loaded · %s missing explicit dimensions</p>"
+            % (_esc(image_opt.get("total_imgs", 0)), _esc(image_opt.get("modern", 0)),
+               _esc(image_opt.get("lazy", 0)), _esc(image_opt.get("dims_missing", 0)))
+            + "<table><tr><th>Area</th><th>Points</th><th>Max</th></tr>"
+            "<tr><td>Modern formats (WebP/AVIF)</td><td>%s</td><td>40</td></tr>"
+            "<tr><td>Lazy loading</td><td>%s</td><td>30</td></tr>"
+            "<tr><td>Explicit dimensions</td><td>%s</td><td>30</td></tr></table>"
+            % (_esc(subs.get("modern_formats") or 0), _esc(subs.get("lazy_loading") or 0),
+               _esc(subs.get("dimensions") or 0))
+            + _checks_html(image_opt.get("checks"))
+        )
+
     html = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
         "<title>ZuiGO Engine SEO Audit — %s</title><style>%s</style></head><body>"
@@ -559,7 +671,7 @@ async def _report_html(job_id: str):
         + '<h2 class="section-title">Page-Type Breakdown</h2>'
         '<table><tr><th>Page type</th><th>Count</th></tr>%s</table>' % page_type_rows
         + insights_html + ov_html + gsc_html
-        + sitemap_html + ai_html + local_html
+        + sitemap_html + ai_html + local_html + hreflang_html + url_hygiene_html + indexation_html + image_opt_html
         + '<h2 class="section-title">User Flows</h2>'
         '<table><tr><th>Target type</th><th>Depth</th><th>Visits</th><th>Target URL</th></tr>%s</table>'
         % flow_rows

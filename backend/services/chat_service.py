@@ -4,6 +4,28 @@ from backend.config import settings
 from backend.services.vector_service import search_similar
 from backend.db.mongo import get_db
 
+# Guidance vendored from the seo-audit skill (marketing-skills, MIT licensed) and condensed
+# into the assistant's standing instructions.
+SEO_AUDIT_GUIDANCE = """SEO audit guidance (vendored from the seo-audit skill, marketing-skills, MIT licensed):
+- Crawl checks: inspect page HTTP status, canonical tags, meta robots and X-Robots-Tag. Report
+  only what the crawl observed; never invent counts.
+- hreflang: every localized page needs a self-referencing hreflang entry; every alternate link
+  must be mirrored back (reciprocity); declare x-default; language tags must be valid
+  ISO 639-1 language codes (region part ISO 3166-1 alpha-2) — "en-uk" and "es-419" are invalid;
+  canonicals must stay inside the hreflang set; a locale URL structure (/fr/, /de-de/ or gTLD
+  subfolders) makes clusters crawlable. If a site has no localized URL structure, hreflang does
+  not apply.
+- URL parameters: faceted filters (sort, color, size) and pagination params create near-duplicate
+  URLs; recommend canonicalization, noindex for unbounded combinations, and keeping canonical +
+  hreflang tags crawlable. Clean paths (hyphens, no underscores or uppercase, consistent
+  trailing slash, slugs under ~80 chars) help readability and indexing.
+- Indexation: site: queries return an adwords-indexed estimate of how many pages Google has
+  indexed; treat it as an estimate, not an exact count, and pair it with crawled totals.
+- Images: WebP/AVIF over legacy formats, explicit width/height attributes prevent layout shift,
+  lazy-load below-the-fold images.
+- Language: be specific and honest. Cite URLs and observed values from the analysis context.
+  If a metric was not measured, say so instead of guessing."""
+
 SYSTEM_PROMPT = """You are an SEO analysis assistant. Answer questions about the crawled website based on the provided context.
 
 Rules:
@@ -11,7 +33,9 @@ Rules:
 - If the context doesn't contain the answer, say you don't have that information.
 - Be concise and specific.
 - Reference specific URLs and content types when relevant.
-- When answering questions about backlinks, keyword rankings, or domain metrics, use the "External SEO Insights" section of the context."""
+- When answering questions about backlinks, keyword rankings, or domain metrics, use the "External SEO Insights" section of the context.
+
+""" + SEO_AUDIT_GUIDANCE
 
 SECTION_PROMPTS = {
     "overview": (
@@ -49,9 +73,10 @@ SECTION_PROMPTS = {
 FULL_SITE_PROMPT = (
     "You are discussing the ENTIRE site analysis covering all sections at once: overview, pages, "
     "content items, links & backlinks, SEO actions (impact/issues/improvements/approvals), user "
-    "flows, external SEO insights, and site health. The user does not need to pick a section - "
-    "answer their question using whichever parts of the context are relevant. If the answer is "
-    "not in the context, say so plainly."
+    "flows, external SEO insights, site health, hreflang/international, URL hygiene, indexation "
+    "and image optimization. The user does not need to pick a section - answer their question "
+    "using whichever parts of the context are relevant. If the answer is not in the context, "
+"say so plainly."
 )
 
 GROQ_MODEL = settings.groq_model
@@ -230,6 +255,10 @@ async def _full_site_context(job_id: str) -> str:
     health = await _site_health_context(job_id)
     if health:
         parts.append("=== SITE HEALTH ===\n" + health)
+    parts.append("=== HREFLANG / INTERNATIONAL ===\n" + await _hreflang_context(job_id))
+    parts.append("=== URL HYGIENE ===\n" + await _url_hygiene_context(job_id))
+    parts.append("=== INDEXATION ===\n" + await _indexation_context(job_id))
+    parts.append("=== IMAGE OPTIMIZATION ===\n" + await _image_opt_context(job_id))
     return "\n".join(parts)
 
 
@@ -246,6 +275,80 @@ async def _site_health_context(job_id: str) -> str:
     return "\n".join(parts)
 
 
+async def _hreflang_context(job_id):
+    db = get_db()
+    doc = await db.hreflang_audits.find_one({"job_id": job_id})
+    if not doc:
+        return "No hreflang/international audit yet."
+    if doc.get("applicable") is False:
+        return "International audit: not applicable — no localized URL structure detected."
+    failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
+    parts = [
+        "hreflang score: %s/100, locales: %s" % (doc.get("score"), ", ".join(doc.get("locales") or []) or "none"),
+        "pages_with_hreflang=%s missing_self_ref=%s missing_xdefault=%s invalid_codes=%s "
+        "one_way_pairs=%s canonical_conflicts=%s lang_param_pages=%s"
+        % (doc.get("pages_with_hreflang", 0), doc.get("missing_self_ref", 0),
+           doc.get("missing_xdefault", 0), doc.get("invalid_codes", 0),
+           doc.get("one_way_pairs_count", 0), doc.get("canonical_conflicts_count", 0),
+           doc.get("lang_param_pages", 0)),
+    ]
+    if doc.get("sitemap_alt_entries"):
+        parts.append(
+            "sitemap: %s alternate entries, codes %s, invalid_codes=%s missing_self_ref=%s"
+            % (doc.get("sitemap_alt_entries"), ", ".join(doc.get("sitemap_alt_codes") or []) or "none",
+               doc.get("sitemap_invalid_alt_codes", 0), doc.get("sitemap_missing_self_ref", 0)))
+    if failed:
+        parts.append("Failed checks: " + ", ".join(failed[:6]))
+    return "hreflang/international:\n" + "\n".join(parts)
+
+
+async def _url_hygiene_context(job_id: str) -> str:
+    db = get_db()
+    doc = await db.url_hygiene_audits.find_one({"job_id": job_id})
+    if not doc:
+        return "No URL hygiene audit yet."
+    failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
+    top = ", ".join("%s (%d)" % (k, v) for k, v in (doc.get("top_params") or [])[:6]) or "none"
+    lines = [
+        "URL hygiene score: %s/100" % (doc.get("score"),),
+        "param_pages=%s facet_pages=%s lang_param_pages=%s uppercase_slugs=%s underscore_slugs=%s long_slugs=%s"
+        % (doc.get("param_pages", 0), doc.get("facet_pages", 0), doc.get("lang_param_pages", 0),
+           doc.get("uppercase_slugs", 0), doc.get("underscore_slugs", 0), doc.get("long_slugs", 0)),
+        "top parameters: " + top,
+    ]
+    if failed:
+        lines.append("Failed checks: " + ", ".join(failed[:6]))
+    return "URL hygiene:\n" + "\n".join(lines)
+
+
+async def _indexation_context(job_id: str) -> str:
+    db = get_db()
+    doc = await db.indexation_audits.find_one({"job_id": job_id})
+    if not doc:
+        return "No indexation audit yet."
+    if doc.get("status") == "unmeasured":
+        return "Indexation: not measured (SERP API key missing or spend exhausted)."
+    sample = ", ".join(str((p.get("url") if isinstance(p, dict) else p)) for p in (doc.get("top_indexed_pages") or [])[:5]) or "empty"
+    return "Indexation: approx %s of %s crawled pages indexed (site: sample)\nSample: %s" % (
+        doc.get("indexed_estimate"), doc.get("crawled_pages", doc.get("crawled", "N/A")), sample)
+
+
+async def _image_opt_context(job_id: str) -> str:
+    db = get_db()
+    doc = await db.image_optimization_audits.find_one({"job_id": job_id})
+    if not doc:
+        return "No image optimization audit yet."
+    failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
+    lines = [
+        "Image optimization score: %s/100" % (doc.get("score"),),
+        "images=%s modern=%s lazy=%s dims_missing=%s" % (doc.get("total_imgs", 0), doc.get("modern", 0),
+                                                         doc.get("lazy", 0), doc.get("dims_missing", 0)),
+    ]
+    if failed:
+        lines.append("Failed checks: " + ", ".join(failed[:6]))
+    return "Image optimization:\n" + "\n".join(lines)
+
+
 async def _context_for_section(job_id: str, section: str | None) -> str:
     if section is None or section == "all":
         return await _full_site_context(job_id)
@@ -259,6 +362,14 @@ async def _context_for_section(job_id: str, section: str | None) -> str:
         return await _graph_context(job_id)
     if section in ("report",):
         return await _report_context(job_id)
+    if section in ("hreflang", "international"):
+        return await _hreflang_context(job_id)
+    if section in ("url-hygiene", "url_hygiene", "url"):
+        return await _url_hygiene_context(job_id)
+    if section in ("indexation", "indexing"):
+        return await _indexation_context(job_id)
+    if section in ("image-optimization", "images", "image"):
+        return await _image_opt_context(job_id)
     return await _overview_context(job_id)
 
 
@@ -340,7 +451,8 @@ GENERAL_SYSTEM_PROMPT = (
     "You are the ZuiGO Engine SEO assistant. Answer general questions about SEO, website "
     "analysis, Core Web Vitals, page speed, backlinks, keyword research, content strategy, "
     "and how to use the ZuiGO Engine app. Be concise, practical, and accurate. If the question "
-    "is about a specific analyzed website, ask the user to open that site in ZuiGO Engine first."
+    "is about a specific analyzed website, ask the user to open that site in ZuiGO Engine first.\n\n"
+    + SEO_AUDIT_GUIDANCE
 )
 
 

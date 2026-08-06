@@ -226,6 +226,35 @@ async def compute_site_health(job_id: str) -> dict:
         if can.get("groups", 0) > 0:
             issues.append({"severity": "high", "message": f"{can.get('groups')} keyword(s) are targeted by {can.get('affected_pages')} competing page(s) (cannibalization)."})
 
+    hreflang = await db.hreflang_audits.find_one({"job_id": job_id})
+    if hreflang:
+        metrics["hreflang_score"] = hreflang.get("score")
+        metrics["hreflang_locales"] = hreflang.get("locales") or []
+        if hreflang.get("applicable"):
+            failed = [c.get("label", "") for c in (hreflang.get("checks") or []) if not c.get("passed")]
+            if hreflang.get("pages_with_hreflang", 0) == 0:
+                issues.append({"severity": "high", "message": f"Multi-locale site ({len(hreflang.get('locales') or [])} locales) with no hreflang tags — wrong-language pages may index."})
+            elif failed:
+                issues.append({"severity": "medium", "message": f"hreflang errors ({hreflang.get('score')}/100): {', '.join(failed[:3])}"})
+
+    uh = await db.url_hygiene_audits.find_one({"job_id": job_id})
+    if uh:
+        metrics["url_hygiene_score"] = uh.get("score")
+        metrics["param_pages"] = uh.get("param_pages", 0)
+        if uh.get("facet_pages", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{uh.get('facet_pages')} page(s) use faceted/pagination URL parameters — crawl budget + duplicate risk."})
+
+    idx = await db.indexation_audits.find_one({"job_id": job_id})
+    if idx:
+        metrics["indexation_status"] = idx.get("status")
+        metrics["indexed_estimate"] = idx.get("indexed_estimate")
+
+    img = await db.image_optimization_audits.find_one({"job_id": job_id})
+    if img:
+        metrics["image_opt_score"] = img.get("score")
+        if img.get("score", 100) < 60:
+            issues.append({"severity": "low", "message": f"Image optimization weak ({img.get('score')}/100): modern formats and dimensions affect CWV/LCP."})
+
     health = {
         "job_id": job_id,
         "grade": _grade(score),

@@ -112,6 +112,50 @@ async def cannibalization(job_id: str):
     return doc
 
 
+@router.get("/{job_id}/hreflang")
+async def hreflang(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.hreflang_audits.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "International-SEO check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.get("/{job_id}/url-hygiene")
+async def url_hygiene(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.url_hygiene_audits.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "URL-hygiene check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.get("/{job_id}/indexation")
+async def indexation(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.indexation_audits.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "Indexation check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
+@router.get("/{job_id}/image-optimization")
+async def image_optimization(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.image_optimization_audits.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "Image-optimization check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
 @router.get("/{job_id}/decay")
 async def content_decay(job_id: str, months: int = 6):
     await _ensure_job(job_id)

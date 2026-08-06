@@ -51,6 +51,9 @@ EFFORT = {
     "local_signals_missing": ("medium", "Add LocalBusiness + NAP schema"),
     "toxic_links": ("high", "Disavow toxic backlinks"),
     "ai_visibility_low": ("medium", "Improve AI-search mention readiness"),
+    "hreflang_errors": ("medium", "Fix hreflang self-reference / reciprocity / codes"),
+    "url_param_issues": ("low", "Clean faceted and pagination URL parameters"),
+    "image_optimization": ("low", "Use WebP/AVIF and explicit image dimensions"),
     "pending_actions": ("low", "Review and act on open action items"),
     "site_issue": ("medium", "Investigate the flagged site issue"),
 }
@@ -93,6 +96,9 @@ TITLES = {
     "local_signals_missing": "Missing local signals",
     "toxic_links": "Toxic backlinks",
     "ai_visibility_low": "Low AI-search visibility",
+    "hreflang_errors": "Hreflang / international errors",
+    "url_param_issues": "Faceted URL parameters",
+    "image_optimization": "Image optimization gaps",
     "pending_actions": "Unresolved actions",
     "site_issue": "Site issue",
 }
@@ -108,6 +114,10 @@ ISSUE_KEY_FROM_MESSAGE = [
     ("mobile", "mobile_not_friendly"),
     ("local", "local_signals_missing"),
     ("ai", "ai_visibility_low"),
+    ("hreflang", "hreflang_errors"),
+    ("faceted", "url_param_issues"),
+    ("pagination url", "url_param_issues"),
+    ("image optimization", "image_optimization"),
     ("e-e-a-t", "eaat_signals_missing"),
     ("extractable", "no_extractable_format"),
     ("alt text", "image_alt_missing"),
@@ -164,6 +174,9 @@ EXPLANATIONS = {
     "local_signals_missing": "Without LocalBusiness/NAP signals, local packs and map results are out of reach.",
     "toxic_links": "Toxic backlinks can trigger manual penalties; disavowing them protects the profile.",
     "ai_visibility_low": "AI search and LLM answers cite pages they can read and find; blocked or unformatted pages get no mentions.",
+    "hreflang_errors": "Broken hreflang clusters make Google ignore your language annotations or index the wrong locale variant.",
+    "url_param_issues": "Faceted and pagination parameters create near-duplicate URLs that split signals and burn crawl budget.",
+    "image_optimization": "Legacy image formats and missing dimensions inflate page weight and LCP, hurting Core Web Vitals.",
     "pending_actions": "Open action items represent confirmed fixes that are not yet applied - each one is captured traffic risk.",
     "site_issue": "A flagged site-level issue may affect many pages at once and should be investigated first.",
 }
@@ -207,6 +220,9 @@ HOW_TO_FIX = {
     "toxic_links": ["Export the backlink profile", "Identify spam/low-quality domains", "Disavow the toxic links and re-fetch"],
     "ai_visibility_low": ["Unblock AI crawlers in robots.txt", "Add llms.txt and extractable formats", "Keep content open and structured"],
     "pending_actions": ["Review open action items", "Approve the high-impact ones and apply the changes"],
+    "hreflang_errors": ["Add a self-referencing hreflang entry to every localized page", "Mirror every alternate link back (reciprocity)", "Declare x-default and validate language-region codes", "Keep canonicals inside the hreflang set"],
+    "url_param_issues": ["Canonicalize faceted URLs to their clean variant", "Noindex or remove unbounded filter combinations", "Keep pagination crawlable with self-referencing canonicals"],
+    "image_optimization": ["Convert images to WebP/AVIF", "Add explicit width/height attributes", "Lazy-load below-the-fold images"],
     "site_issue": ["Investigate the flagged issue", "Fix the root cause", "Re-run the audit to confirm"],
 }
 
