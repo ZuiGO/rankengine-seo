@@ -15,7 +15,7 @@ MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
   sibling live), geo_alignment `page_iter` NameError fix, link_checker
   speedup, analytics single-point bar charts.
   Full suite 298/298; `node --check` clean.
-- Committed last as `412d33d`; this round is uncommitted.
+- Committed last as `412d33d`; this round was pushed as `1cd70c4`.
 
 ### SE Ranking competitor gap report (this round)
   - `competitor_audit.py::_se_rich_gap(target_domain, comp_domain,
@@ -781,9 +781,6 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
-- This round (SE Ranking gap report, geo/link/analytics fixes, 298 tests)
-  is uncommitted — commit + push (`cd /Users/macbook/RankEngine-AI-Simple &&
-  git add -A && git commit && git push`). Prior round pushed as `412d33d`.
 - Optional competitor polish: also surface `seo_insights_cache`-based target
   keyword overlap per competitor in the report's "overlap" table when SE
   Ranking data is missing (currently shows "no data" honestly).
