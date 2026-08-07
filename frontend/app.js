@@ -1343,10 +1343,12 @@ async function loadVersions(jobId) {
           <span class="action-type">${v.content_type}</span>
           <span style="font-size:12px;color:${v.status === 'approved' ? 'var(--success)' : 'var(--danger)'};font-weight:600;text-transform:capitalize">${v.status === 'approved' ? 'Applied' : 'Rejected'}</span>
           <span style="font-size:12px;color:var(--text-secondary)">${v.field}</span>
+          ${v.status === 'approved' && v.after ? `<span style="font-size:11px;color:var(--text-secondary)">${v.qa === 'suggestion' ? '(suggestion)' : v.qa === 'fallback' ? '(template fallback)' : ''} ${v.generated_by || ''}</span>` : ""}
         </div>
         <div class="action-issues"><strong>Before:</strong> <span style="color:var(--danger)">${escapeHtml((v.before || "-").substring(0, 200))}</span></div>
-        <div class="action-improvements"><strong>After:</strong> <span style="color:var(--success)">${escapeHtml((v.after || "Not generated (rejected)").substring(0, 200))}</span></div>
+        <div class="action-improvements"><strong>After:</strong> <span style="color:var(--success)">${v.status === 'approved' ? escapeHtml((v.after || "").substring(0, 200) || "No content generated") : "Not generated (rejected)"}</span></div>
         <div style="font-size:12px;color:var(--text-secondary);margin-top:6px">${linkify(v.page_url || "", 80)} · ${v.generated_by || ""}</div>
+        ${v.status === 'approved' && v.qa === 'suggestion' ? `<button class="btn-secondary" style="font-size:12px;padding:4px 10px;margin-top:8px" onclick="regenerateVersion('${v.action_id || v.id}')">Regenerate</button>` : ""}
       </div>
     `).join("");
   } catch (err) {
@@ -1514,6 +1516,21 @@ async function approveAction(actionId, status) {
   } catch (err) {
     showToast("Error: " + err.message);
     if (currentJobId) loadActions(currentJobId);
+  }
+}
+
+async function regenerateVersion(actionId) {
+  showToast("Regenerating change content...");
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${actionId}/regenerate`, {
+      method: "POST",
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    showToast(data.version?.after ? `Regenerated: ${data.version.after.substring(0, 60)}...` : "Regenerated - still empty");
+    if (currentJobId) loadActions(currentJobId);
+  } catch (err) {
+    showToast("Regenerate failed: " + err.message);
   }
 }
 

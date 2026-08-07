@@ -864,7 +864,13 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "se_rich": se_rich,
                 "errors": [],
                 "generated_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
             }
+            await db.competitor_gap_analyses.update_one(
+                {"target_job_id": target_job_id, "competitor": comp_domain},
+                {"$set": result},
+                upsert=True,
+            )
             return result
         except asyncio.TimeoutError as e:
             logger.error("Competitor audit timed out target=%s comp=%s", target_job_id, competitor)
@@ -917,16 +923,34 @@ async def audit_competitors(target_job_id: str, competitors: list[str]) -> dict:
 
     async def run_one(comp):
         async with sema:
-            return await _analyze_one(target_job_id, target_url, comp)
+            try:
+                return await asyncio.wait_for(
+                    _analyze_one(target_job_id, target_url, comp),
+                    timeout=900,
+                )
+            except asyncio.TimeoutError:
+                comp_domain = _domain(comp)
+                err_msg = "Competitor audit timed out (15-minute limit)"
+                logger.error("Competitor audit timed out target=%s comp=%s", target_job_id, comp)
+                await db.competitor_gap_analyses.update_one(
+                    {"target_job_id": target_job_id, "competitor": comp_domain},
+                    {"$set": {"status": "error", "errors": [err_msg], "updated_at": datetime.utcnow()}},
+                    upsert=True,
+                )
+                return {
+                    "competitor": comp_domain,
+                    "url": comp if "//" in comp else "https://" + comp,
+                    "target_job_id": target_job_id,
+                    "status": "error",
+                    "pages_crawled": 0,
+                    "gap_count": 0,
+                    "errors": [err_msg],
+                    "generated_at": datetime.utcnow(),
+                }
 
-    for entry in await asyncio.gather(*(run_one(c) for c in competitors)):
-        update = dict(entry)
-        update["updated_at"] = datetime.utcnow()
-        await db.competitor_gap_analyses.update_one(
-            {"target_job_id": target_job_id, "competitor": entry["competitor"]},
-            {"$set": update},
-            upsert=True,
-        )
-        results.append(entry)
+    raw_results = await asyncio.gather(*(run_one(c) for c in competitors), return_exceptions=True)
+    for entry in raw_results:
+        if isinstance(entry, dict) and "competitor" in entry:
+            results.append(entry)
 
     return {"target": target_url, "results": results, "source": "free-tools"}

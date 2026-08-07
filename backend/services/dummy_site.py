@@ -153,7 +153,8 @@ async def _apply_changes(soup: BeautifulSoup, job_id: str, page_url: str) -> tup
             continue
         field = FIELD_BY_TYPE.get(a.get("content_type", "text"), "text")
         filename = (a.get("source_url", "") or "").split("/")[-1]
-        after = FALLBACK_AFTER.get(field, "{page_title}").format(page_title="", filename=filename)
+        suggestion = (a.get("improvement_suggestions") or [""])[0] or (a.get("page_url", "") or filename)
+        after = FALLBACK_AFTER.get(field, "{page_title}").format(page_title=a.get("page_url", ""), filename=filename, suggestion=suggestion)
         if after:
             specs.append((field, after, a.get("source_url", ""), "SEO_SUGGESTION_APPLIED"))
 

@@ -24,11 +24,29 @@ FIELD_BY_TYPE = {
     "audio": "link_text",
 }
 
+FIELD_BY_ISSUE = {
+    "meta_description_missing": "meta_description",
+    "meta_description_duplicate": "meta_description",
+    "title_missing": "title",
+    "title_duplicate": "title",
+    "title_too_short": "title",
+    "title_too_long": "title",
+    "no_structured_data": "structured_data",
+    "entity_coverage_low": "structured_data",
+    "eaat_signals_missing": "eaat",
+    "image_alt_missing": "alt_text",
+    "image_oversized": "alt_text",
+    "page_images_missing_alt": "alt_text",
+}
+
 FALLBACK_AFTER = {
     "alt_text": "Image: {filename}",
-    "meta_description": "{page_title} - learn more in this detailed guide",
+    "meta_description": "{suggestion}",
     "link_text": "Download {filename}",
-    "title": "{page_title}",
+    "title": "{suggestion}",
+    "structured_data": "{suggestion}",
+    "eaat": "{suggestion}",
+    "text": "{page_title}",
 }
 
 PROMPT_BY_FIELD = {
@@ -48,6 +66,20 @@ PROMPT_BY_FIELD = {
         "Write an SEO-optimized HTML title tag (50-60 characters) for the page below. "
         "Put the primary keyword near the beginning."
     ),
+    "structured_data": (
+        "Write a concise JSON-LD schema.org snippet (e.g. WebPage, Product, Organization or "
+        "BreadcrumbList) that best represents the page below. Respond with the JSON-LD JSON "
+        "object only (no script wrapper), omitting id/@id. Keep it factual based on the context."
+    ),
+    "eaat": (
+        "Write a short concrete recommendation (max 120 words) for improving E-E-A-T signals "
+        "on the page below: author byline, last-updated date, and organization/author schema. "
+        "Base it strictly on the identified issues and suggested fixes provided."
+    ),
+    "text": (
+        "Using only the identified issues and suggested fixes below, write the concrete "
+        "replacement content block the site owner should apply (a real next step, max 150 words)."
+    ),
 }
 
 GROQ_MODEL = settings.groq_model
@@ -59,13 +91,17 @@ async def _build_context(item: dict) -> str:
     title = (page or {}).get("title", "")
     meta = (page or {}).get("meta_description", "")
     filename = (item.get("source_url", "") or "").split("/")[-1]
+    issues = item.get("identified_issues") or []
+    suggestions = item.get("improvement_suggestions") or []
     return (
         f"Content type: {item.get('content_type', '')}\n"
         f"Page URL: {item.get('page_url', '')}\n"
         f"Page title: {title}\n"
         f"Page meta description: {meta}\n"
         f"Resource URL: {item.get('source_url', '')}\n"
-        f"Resource filename: {filename}"
+        f"Resource filename: {filename}\n"
+        f"Identified issues: {'; '.join(str(i) for i in issues) if issues else 'none'}\n"
+        f"Suggested fixes: {'; '.join(str(s) for s in suggestions) if suggestions else 'none'}"
     )
 
 
@@ -135,11 +171,26 @@ async def _before_value(item: dict, field: str) -> str:
     return item.get("page_url", "")
 
 
-def _fallback_after(item: dict, field: str) -> str:
+def _field_for(item: dict) -> str:
+    issue = item.get("issue_key", "")
+    by_issue = FIELD_BY_ISSUE.get(issue)
+    if by_issue:
+        return by_issue
+    return FIELD_BY_TYPE.get(item.get("content_type", ""), "text")
+
+
+async def _fallback_after(item: dict, field: str) -> str:
+    db = get_db()
+    page = await db.pages.find_one({"job_id": item.get("job_id"), "url": item.get("page_url")})
+    page_title = (page or {}).get("title", "") or item.get("page_url", "")
     filename = (item.get("source_url", "") or "").split("/")[-1]
-    page_title = ""
+    suggestions = item.get("improvement_suggestions") or []
+    suggestion = str(suggestions[0]) if suggestions else page_title
     template = FALLBACK_AFTER.get(field, "{page_title}")
-    return template.format(page_title=page_title, filename=filename)
+    val = template.format(page_title=page_title, filename=filename, suggestion=suggestion).strip()
+    if not val:
+        return page_title or filename or "Optimized content"
+    return val
 
 
 def _make_diff(before: str, after: str) -> list[str]:
@@ -206,7 +257,7 @@ async def create_version_for_action(item: dict, status: str) -> dict | None:
     """Generate the improved content for an approved action and store a before/after version."""
     db = get_db()
     ctype = item.get("content_type", "text")
-    field = FIELD_BY_TYPE.get(ctype, "text")
+    field = _field_for(item)
 
     before = await _before_value(item, field)
 
@@ -217,11 +268,11 @@ async def create_version_for_action(item: dict, status: str) -> dict | None:
             if await _qa_check(item, before, after):
                 qa_status = "passed"
             else:
-                after = _fallback_after(item, field)
+                after = await _fallback_after(item, field)
                 qa_status = "fallback"
         else:
-            after = _fallback_after(item, field)
-            qa_status = "template"
+            after = await _fallback_after(item, field)
+            qa_status = "suggestion" if (item.get("improvement_suggestions") or []) else "template"
         generated_by = "groq:" + GROQ_MODEL if settings.groq_api_key else "fallback"
     else:
         after = None

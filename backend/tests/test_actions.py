@@ -20,6 +20,14 @@ class FakeCursor:
     def sort(self, *args, **kwargs):
         return self
 
+    def skip(self, offset):
+        if offset:
+            self.docs = self.docs[offset:]
+        return self
+
+    def limit(self, limit):
+        return self
+
     async def to_list(self, length):
         return self.docs[:length]
 
