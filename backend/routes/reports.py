@@ -462,6 +462,7 @@ async def _report_html(job_id: str):
     sitemap_audit = await db.sitemap_audits.find_one({"job_id": job_id})
     ai_vis = await db.ai_visibility_summaries.find_one({"job_id": job_id})
     local_seo = await db.local_seo_summaries.find_one({"job_id": job_id})
+    pseo = await db.programmatic_seo_audits.find_one({"job_id": job_id})
 
     sitemap_html = ""
     if sitemap_audit:
@@ -509,6 +510,16 @@ async def _report_html(job_id: str):
                   _esc(ai_vis.get("structured_data_pages", 0)), _esc(ai_vis.get("total_pages", 0)),
                   _esc(ai_vis.get("extractable_pages", 0)), _esc(ai_vis.get("total_pages", 0))))
             + (('<p class="muted">robots.txt fully blocks: %s</p>' % _esc(", ".join(blocked))) if blocked else "")
+            + (('<p class="muted">training-only crawlers blocked (business choice): %s</p>' % _esc(", ".join(ai_vis.get("blocked_training_agents") or []))) if ai_vis.get("blocked_training_agents") else "")
+            + (('<p class="muted">AI agent files: llms.txt <b>%s</b> · pricing.md <b>%s</b> · Open Knowledge Format <b>%s</b></p>'
+                % (_esc(ai_vis.get("llms_txt_present") and "present" or "missing"),
+                   _esc(ai_vis.get("pricing_md_present") and "present" or "missing"),
+                   _esc(ai_vis.get("okf_present") and "present" or "missing")))
+               if ai_vis.get("pricing_md_present") is not None else "")
+            + (f"<p class='muted'>Scanned {_esc(ai_vis.get('scanned_pages', 0))} pages — answer blocks: <b>{_esc(ai_vis.get('answer_block_pages', 0))}</b>, "
+               f"author attribution: <b>{_esc(ai_vis.get('author_pages', 0))}</b>, fresh/updated: <b>{_esc(ai_vis.get('fresh_pages', 0))}</b>, "
+               f"FAQ headings: <b>{_esc(ai_vis.get('faq_heading_pages', 0))}</b>, comparison tables: <b>{_esc(ai_vis.get('comparison_table_pages', 0))}</b></p>"
+               if ai_vis.get("scanned_pages") else "")
             + ('<p class="muted">Schema types: %s</p>' % _esc(" · ".join("%s (%d)" % (k, v) for k, v in list(schema_types.items())[:8]))
                if schema_types else "")
             + "<p>AI agent robots.txt stance</p><table><tr><th>Agent</th><th>Status</th><th>Disallow rules</th><th>Crawl delay</th></tr>%s</table>" % agent_rows
@@ -676,6 +687,29 @@ async def _report_html(job_id: str):
             + _checks_html(image_opt.get("checks"))
         )
 
+    programmatic_html = ""
+    if pseo:
+        subs = pseo.get("subscores") or {}
+        clusters = pseo.get("clusters") or []
+        cluster_rows = "".join(
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+            % (_esc(c.get("pattern")), _esc(c.get("page_count")), _esc(c.get("thin_pages")),
+               _esc(c.get("duplicate_pages")), _esc(c.get("unlinked_pages")))
+            for c in clusters[:10]
+        ) or '<tr><td colspan="5" class="muted">No template clusters detected.</td></tr>'
+        programmatic_html = (
+            "<h2 class='section-title'>Programmatic SEO</h2>"
+            "<p>Score: <b>%s</b> / 100%s</p>"
+            % (_esc(pseo.get("score")), _bar(pseo.get("score")))
+            + "<p class='muted'>%s template pages across %s cluster(s) (%s%% of %s crawled pages) · thin: %s · near-duplicates: %s · unlinked: %s · duplicate titles: %s</p>"
+            % (_esc(pseo.get("template_pages", 0)), _esc(pseo.get("clusters_count", 0)),
+               _esc(pseo.get("template_page_share", 0)), _esc(pseo.get("total_pages", 0)),
+               _esc(pseo.get("thin_template_pages", 0)), _esc(pseo.get("duplicate_template_pages", 0)),
+               _esc(pseo.get("unlinked_template_pages", 0)), _esc(pseo.get("duplicate_title_template_pages", 0)))
+            + "<table><tr><th>Template pattern</th><th>Pages</th><th>Thin</th><th>Near-dup</th><th>Unlinked</th></tr>%s</table>" % cluster_rows
+            + _checks_html(pseo.get("checks"))
+        )
+
     html = (
         '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
         "<title>ZuiGO Engine SEO Audit — %s</title><style>%s</style></head><body>"
@@ -701,7 +735,7 @@ async def _report_html(job_id: str):
         + '<h2 class="section-title">Page-Type Breakdown</h2>'
         '<table><tr><th>Page type</th><th>Count</th></tr>%s</table>' % page_type_rows
         + insights_html + ov_html + gsc_html
-        + sitemap_html + ai_html + local_html + hreflang_html + url_hygiene_html + indexation_html + image_opt_html
+        + sitemap_html + ai_html + local_html + hreflang_html + url_hygiene_html + indexation_html + image_opt_html + programmatic_html
         + '<h2 class="section-title">User Flows</h2>'
         '<table><tr><th>Target type</th><th>Depth</th><th>Visits</th><th>Target URL</th></tr>%s</table>'
         % flow_rows

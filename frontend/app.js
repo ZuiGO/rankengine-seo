@@ -1489,7 +1489,11 @@ async function loadReportExtras(jobId, preview) {
           ${kv("Structured data pages", (d.structured_data_pages ?? 0) + "/" + (d.total_pages ?? "N/A"))}
           ${kv("Blocked AI agents", d.blocked_ai_agents?.length ? d.blocked_ai_agents.join(", ") : "none")}
           ${kv("Extractable content", (d.extractable_pages ?? 0) + "/" + (d.total_pages ?? "N/A") + " pages")}
+          ${kv("AI files", [d.llms_txt_present && "llms.txt", d.pricing_md_present && "pricing.md", d.okf_present && "OKF"].filter(Boolean).join(", ") || "none")}
+          ${kv("Author attribution", d.scanned_pages ? (d.author_pages ?? 0) + "/" + d.scanned_pages + " pages" : "N/A")}
         </div>
+        ${d.scanned_pages ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Scanned ${d.scanned_pages} pages — answer blocks: ${d.answer_block_pages ?? 0} · FAQ headings: ${d.faq_heading_pages ?? 0} · comparison tables: ${d.comparison_table_pages ?? 0} · freshly updated: ${d.fresh_pages ?? 0}</p>` : ""}
+        ${d.blocked_training_agents?.length ? `<p style="font-size:12px;color:#d97706;margin-top:6px">⚠ robots.txt blocks training-only crawler(s): ${d.blocked_training_agents.join(", ")} — OK if intentional (blocks training, allows citation).</p>` : ""}
         <div style="max-width:460px">
           ${bar("XML sitemap", subs.sitemap ?? 0, 25)}
           ${bar("llms.txt", subs.llms_txt ?? 0, 25)}
@@ -1639,6 +1643,45 @@ async function loadReportExtras(jobId, preview) {
             </tbody>
           </table>`);
       }
+    }
+  } catch (_) {}
+  try {
+    const ps = await fetch(`${API_BASE}/quality/${jobId}/programmatic-seo`);
+    if (ps.ok) {
+      const d = await ps.json();
+      const subs = d.subscores || {};
+      const clusters = d.clusters || [];
+      preview.insertAdjacentHTML("beforeend", `
+        <h4 style="margin:20px 0 10px">Programmatic SEO</h4>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+          ${kv("Score", (d.score ?? "N/A") + "/100")}
+          ${kv("Template pages", (d.template_pages ?? 0) + " / " + (d.total_pages ?? 0))}
+          ${kv("Template share", (d.template_page_share ?? 0) + "%")}
+          ${kv("Thin template pages", d.thin_template_pages ?? 0)}
+          ${kv("Near-duplicate pages", d.duplicate_template_pages ?? 0)}
+          ${kv("Unlinked (orphan spokes)", d.unlinked_template_pages ?? 0)}
+        </div>
+        <div style="max-width:460px">
+          ${bar("Structure detected", subs.structure ?? 0, 25)}
+          ${bar("Content uniqueness", subs.content_uniqueness ?? 0, 25)}
+          ${bar("Internal linking", subs.internal_linking ?? 0, 25)}
+          ${bar("Indexation / sitemap", subs.indexation ?? 0, 25)}
+        </div>
+        ${clusters.length ? `
+        <table class="data-table" style="margin-top:10px">
+          <thead><tr><th>Template pattern</th><th>Pages</th><th>Thin</th><th>Near-dup</th><th>Unlinked</th><th>Sample</th></tr></thead>
+          <tbody>${clusters.slice(0, 8).map(c => `
+            <tr>
+              <td>${escapeHtml(c.pattern)}</td>
+              <td>${c.page_count || 0}</td>
+              <td>${c.thin_pages || 0}</td>
+              <td>${c.duplicate_pages || 0}</td>
+              <td>${c.unlinked_pages || 0}</td>
+              <td>${(c.sample_urls || []).slice(0, 2).map(linkifyText).join(", ")}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>` : `<p style="font-size:12px;color:var(--text-secondary)">No template page clusters detected (fewer than 3 pages share a URL pattern).</p>`}
+        ${checksList(d.checks)}`);
     }
   } catch (_) {}
 }

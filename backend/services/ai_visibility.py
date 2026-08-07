@@ -9,6 +9,8 @@ import re
 from collections import Counter
 from datetime import datetime
 
+from bs4 import BeautifulSoup
+
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 from backend.services.content_signals import compute_page_signals
@@ -25,6 +27,12 @@ AI_AGENTS = [
     "ccbot",
     "bingbot",
 ]
+
+TRAINING_ONLY_AGENTS = {"ccbot"}
+ANSWER_BLOCK_WORDS = (40, 60)
+DEFINITION_BLOCK_WORDS = (30, 80)
+FRESHNESS_DAYS = 183
+MAX_SCAN_PAGES = 50
 
 LDJSON_RE = re.compile(
     r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
@@ -98,6 +106,98 @@ def _agent_status(disallow: list[str]) -> str:
     return "allowed"
 
 
+def _word_count(text: str) -> int:
+    return len((text or "").split())
+
+
+def _parse_date(value: str) -> datetime | None:
+    v = (value or "").strip()
+    if not v:
+        return None
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S",
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(v, fmt)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        return parsed
+    except ValueError:
+        return None
+
+
+def _uttcnow_naive() -> datetime:
+    return datetime.utcnow()
+
+
+def _is_fresh(value: str, now: datetime | None = None) -> bool:
+    parsed = _parse_date(value)
+    if parsed is None:
+        return False
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+    now = now or _uttcnow_naive()
+    return (now - parsed).days <= FRESHNESS_DAYS
+
+
+def _ai_extractability(html: str) -> dict:
+    """ai-seo skill Pillar 1/2 signals from one page — extractable structure,
+    authority (author + freshness), and agent-friendly semantics."""
+    soup = BeautifulSoup(html or "", "lxml")
+    paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
+    paragraphs = [p for p in paragraphs if p]
+
+    answer_blocks = sum(1 for t in paragraphs if ANSWER_BLOCK_WORDS[0] <= _word_count(t) <= ANSWER_BLOCK_WORDS[1])
+    first = paragraphs[0] if paragraphs else ""
+    definition_first = (
+        DEFINITION_BLOCK_WORDS[0] <= _word_count(first) <= DEFINITION_BLOCK_WORDS[1]
+        if first
+        else False
+    )
+    faq_headings = sum(
+        1 for h in soup.find_all(["h2", "h3"]) if (h.get_text(" ", strip=True).strip().endswith("?"))
+    )
+    comparison_tables = len(soup.select("table"))
+    stat_cited = 0
+    for p in soup.find_all("p"):
+        text = p.get_text(" ", strip=True)
+        if re.search(r"\d", text) and text.find(" ") > 0 and p.find("a"):
+            stat_cited += 1
+    author = bool(soup.select_one('meta[name="author"], meta[property="article:author"]'))
+    fresh = False
+    for sel in (
+        'meta[property="article:modified_time"]',
+        'meta[name="last-modified"]',
+        'meta[property="article:published_time"]',
+    ):
+        node = soup.select_one(sel)
+        if node and _is_fresh(node.attrs.get("content") or ""):
+            fresh = True
+            break
+    if not fresh:
+        for t in soup.select("time[datetime]"):
+            if _is_fresh(t.attrs.get("datetime") or ""):
+                fresh = True
+                break
+    landmarks = bool(soup.select("main, article, nav"))
+    return {
+        "answer_block": answer_blocks,
+        "definition_first": definition_first,
+        "faq_heading": faq_headings,
+        "comparison_table": comparison_tables,
+        "stat_cited": stat_cited,
+        "author": author,
+        "fresh": fresh,
+        "semantic_landmark": landmarks,
+    }
+
+
 async def _fetch_plain(url: str, user_agent: str) -> tuple[str | None, int | None]:
     import httpx
     try:
@@ -129,11 +229,16 @@ async def check_ai_visibility(job_id: str, target_url: str) -> dict:
         })
     blocked_agents = [r["agent"] for r in agent_rows if r["status"] == "blocked"]
     allowed_agents = [r["agent"] for r in agent_rows if r["status"] != "blocked"]
+    blocked_training_agents = [
+        r["agent"] for r in agent_rows if r["agent"] in TRAINING_ONLY_AGENTS and r["status"] == "blocked"
+    ]
 
     pages = await db.pages.find({"job_id": job_id}, {"html": 1, "url": 1}).to_list(length=None)
     with_structured = 0
     extractable_plain = 0
     schema_counter: Counter[str] = Counter()
+    ai_ext = Counter()
+    scanned = 0
     for p in pages:
         html = p.get("html") or ""
         if not html:
@@ -145,8 +250,20 @@ async def check_ai_visibility(job_id: str, target_url: str) -> dict:
         signals = compute_page_signals(html)
         if signals.get("extractable_format"):
             extractable_plain += 1
+        if scanned < MAX_SCAN_PAGES:
+            ex = _ai_extractability(html)
+            for key, val in ex.items():
+                if val is True:
+                    ai_ext[key + "_pages"] += 1
+                elif isinstance(val, int) and val > 0:
+                    ai_ext[key + "_pages"] += 1
+            scanned += 1
 
     llms_txt, llms_status = await _fetch_plain("https://" + domain + "/llms.txt", "ZuiGO-Engine/1.0 ai-visibility")
+    pricing_md, pricing_md_status = await _fetch_plain("https://" + domain + "/pricing.md", "ZuiGO-Engine/1.0 ai-visibility")
+    pricing_txt, pricing_txt_status = await _fetch_plain("https://" + domain + "/pricing.txt", "ZuiGO-Engine/1.0 ai-visibility")
+    okf_html, okf_status = await _fetch_plain("https://" + domain + "/okf/", "ZuiGO-Engine/1.0 ai-visibility")
+    okf_present = okf_html is not None and len(okf_html.strip()) > 0
 
     total = max(len(pages), 1)
     sitemap_doc = await db.sitemap_audits.find_one({"job_id": job_id})
@@ -209,6 +326,62 @@ async def check_ai_visibility(job_id: str, target_url: str) -> dict:
             "detail": f"robots.txt fully blocks: {', '.join(blocked_agents[:5])}.",
         })
 
+    scanned_ratio = scanned / total if scanned else 0
+    pricing_ratio = (ai_ext["author_pages"] / scanned) if scanned else 0
+    fresh_ratio = (ai_ext["fresh_pages"] / scanned) if scanned else 0
+    answer_ratio = (ai_ext["answer_blocks_pages"] / scanned) if scanned else 0
+
+    checks.extend([
+        {
+            "passed": pricing_md is not None or pricing_txt is not None,
+            "label": "Machine-readable pricing for AI agents",
+            "detail": (
+                "pricing.md is published for AI agents to parse."
+                if pricing_md is not None
+                else ("pricing.txt is published for AI agents to parse."
+                      if pricing_txt is not None
+                      else "Add a /pricing.md (or /pricing.txt) file so buying agents can compare your plans.")
+            ),
+        },
+        {
+            "passed": answer_ratio >= 0.3,
+            "label": "Answer blocks (40-60 word passages) on content pages",
+            "detail": (
+                f"{ai_ext['answer_blocks_pages']} of {scanned} scanned pages contain self-contained answer blocks."
+                if scanned
+                else "No content pages scanned."
+            ),
+        },
+        {
+            "passed": pricing_ratio >= 0.3,
+            "label": "Author attribution on content pages",
+            "detail": (
+                f"{ai_ext['author_pages']} of {scanned} scanned pages name an author."
+                if scanned
+                else "No content pages scanned."
+            ),
+        },
+        {
+            "passed": fresh_ratio >= 0.3,
+            "label": "Freshness signals (last-updated within 6 months)",
+            "detail": (
+                f"{ai_ext['fresh_pages']} of {scanned} scanned pages show a recent update date."
+                if scanned
+                else "No content pages scanned."
+            ),
+        },
+    ])
+    if blocked_training_agents:
+        checks.append({
+            "passed": False,
+            "label": "robots.txt blocks training-only crawlers",
+            "detail": (
+                f"robots.txt blocks training-only crawler(s): {', '.join(blocked_training_agents)}. "
+                "This is a defensible business choice (blocks training, allows citation) — "
+                "verify search-and-cite bots (GPTBot, PerplexityBot, ClaudeBot) stay allowed."
+            ),
+        })
+
     summary = {
         "job_id": job_id,
         "url": target_url,
@@ -220,11 +393,27 @@ async def check_ai_visibility(job_id: str, target_url: str) -> dict:
         "ai_agents": agent_rows,
         "blocked_ai_agents": blocked_agents,
         "allowed_ai_agents": allowed_agents,
+        "blocked_training_agents": blocked_training_agents,
         "ai_agents_scanned": AI_AGENTS,
         "llms_txt_present": llms_txt is not None,
         "llms_txt_status": llms_status,
+        "pricing_md_present": pricing_md is not None,
+        "pricing_md_status": pricing_md_status,
+        "pricing_txt_present": pricing_txt is not None,
+        "pricing_txt_status": pricing_txt_status,
+        "okf_present": okf_present,
+        "okf_status": okf_status,
         "structured_data_pages": with_structured,
         "extractable_pages": extractable_plain,
+        "scanned_pages": scanned,
+        "answer_block_pages": ai_ext["answer_block_pages"],
+        "definition_first_pages": ai_ext["definition_first_pages"],
+        "faq_heading_pages": ai_ext["faq_headings_pages"],
+        "comparison_table_pages": ai_ext["comparison_tables_pages"],
+        "stat_cited_pages": ai_ext["stat_cited_pages"],
+        "author_pages": ai_ext["author_pages"],
+        "fresh_pages": ai_ext["fresh_pages"],
+        "semantic_landmark_pages": ai_ext["landmarks_pages"],
         "schema_types": dict(schema_counter.most_common(10)),
         "total_pages": len(pages),
         "sitemap_valid": sitemap_ok,

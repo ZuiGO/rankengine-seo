@@ -159,7 +159,10 @@ async def hard_delete_site(job_id: str):
         "page_performance", "page_performance_summaries", "user_flows",
         "dummy_sites", "site_comparisons", "keyword_tracking",
         "keyword_tracking_summaries", "audit_logs", "api_usage", "embeddings",
-        "competitor_gap_analyses",
+        "competitor_gap_analyses", "sitemap_audits", "ai_visibility_summaries",
+        "local_seo_summaries", "cannibalization_summaries", "hreflang_audits",
+        "url_hygiene_audits", "indexation_audits", "image_optimization_audits",
+        "programmatic_seo_audits", "exec_summaries", "serp_cache",
     ]
     deleted = {}
     for coll in collections:

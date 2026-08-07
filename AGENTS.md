@@ -10,7 +10,70 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: M6 apply-actions round — committed `94d961f`, pushed)
+## Status (last update: programmatic-seo + ai-seo skill integration round — working tree, commit pending)
+- programmatic-seo + ai-seo skill integration round (working tree; full suite 283/283):
+  - Skills installed: `~/.agents/skills/programmatic-seo` (SKILL.md v2.0.0) and
+    `~/.agents/skills/ai-seo` (SKILL.md v2.2.0) via
+    `npx skills add coreyhaines31/marketingskills --skill <name> -a opencode -g --copy -y`
+    (interactive TUI hangs; the `-a opencode -g --copy -y` flags make it non-interactive).
+  - `services/programmatic_seo.py` (NEW): `url_pattern(url)` collapses the leaf
+    path segment (and any numbers / ≥8-hex / >60-char segments) to `{slug}`
+    (root and <2-segment paths -> None); `detect_clusters(pages)` groups 3+ pages
+    sharing a pattern; `audit_programmatic_seo(job_id)` upserts
+    `programmatic_seo_audits` — score + 4×25 subscores (structure/content_uniqueness/
+    internal_linking/indexation), checks (cluster detected, thin <150 words,
+    near-duplicates via duplicate_content.duplicate_groups, internal linking via
+    orphan_pages, sitemap coverage), clusters rows (pattern/page_count/thin_pages/
+    duplicate_pages/unlinked_pages/sample_urls), template_pages/total_pages/
+    template_page_share/thin/duplicate/unlinked/duplicate_title/not_indexable counts.
+  - `services/ai_visibility.py` extended IN PLACE (kept 4×25 subscore model; new
+    signals land as checks + summary keys): `TRAINING_ONLY_AGENTS={"ccbot"}`,
+    `ANSWER_BLOCK_WORDS`/`DEFINITION_BLOCK_WORDS`/`FRESHNESS_DAYS=183`;
+    new probes `/pricing.md`, `/pricing.txt`, `/okf/`; page scan up to
+    `MAX_SCAN_PAGES=50` with `_ai_extractability(html)` -> answer_block/
+    definition_first/faq_heading/comparison_table/stat_cited/author/fresh/
+    semantic_landmark keys; new summary keys (pricing_md_present, pricing_txt_present,
+    okf_present, scanned_pages, answer_block_pages, definition_first_pages,
+    faq_heading_pages, comparison_table_pages, stat_cited_pages, author_pages,
+    fresh_pages, semantic_landmark_pages, blocked_training_agents) + 4 new checks
+    (machine-readable pricing, answer blocks 0.3 ratio, author 0.3 ratio, freshness
+    0.3 ratio) + CCBot-blocked info check; fixed `ai_extract`->`ai_ext` NameError.
+  - Pipeline: wave2 `_stage("programmatic_seo", ...)` in analysis.py; summary dict
+    gains `programmatic_seo`.
+  - site_health merge: pseo metrics (template_clusters/template_pages/
+    thin_template_pages/duplicate_template_pages/unlinked_template_pages/
+    programmatic_seo_score) + medium/high issues; ai_visibility merge extended
+    with pricing_md / author issues.
+  - exec_summary: keys `programmatic_thin`, `programmatic_duplicates`,
+    `programmatic_linking`, `ai_pricing_md`, `ai_eaat_signals` in EFFORT/TITLES/
+    EXPLANATIONS/HOW_TO_FIX/ISSUE_KEY_FROM_MESSAGE + `_evidence_for` branches.
+  - chat_service: `PROGRAMMATIC_SEO_GUIDANCE` + `AI_SEO_GUIDANCE` constants
+    (vendored from the skills, marketing-skills, MIT) wired into SYSTEM_PROMPT /
+    GENERAL_SYSTEM_PROMPT / FULL_SITE_PROMPT section list; `_programmatic_seo_context`
+    + `_ai_seo_context` builders; aliases programmatic-seo/programmatic/templates/
+    template and ai-seo/ai-visibility/ai_search/ai.
+  - quality.py: `GET /{job}/programmatic-seo`. sites.py hard-delete list extended
+    (programmatic_seo_audits, sitemap_audits, ai_visibility_summaries,
+    local_seo_summaries, cannibalization_summaries, hreflang_audits,
+    url_hygiene_audits, indexation_audits, image_optimization_audits,
+    exec_summaries, serp_cache).
+  - reports.py: `programmatic_html` section (score + 4 subscore bars + cluster
+    table + checks) appended to `_report_html`; `ai_html` extended with blocked
+    agents + machine-readable files row + scanned/author/freshness line.
+  - app.js Report tab: AI-Search Visibility block adds AI files row + author
+    attribution + scanned-page note + training-crawler note; new Programmatic SEO
+    block (3-col stats + 4 subscore bars + clusters table w/ sample links +
+    checks). `node --check` clean.
+  - Tests: `backend/tests/test_programmatic_seo.py` (12 new) +
+    `backend/tests/test_ai_seo_extras.py` (8 new); full suite 263 -> 283.
+  - Live-verified on `24fd33f6` (fluidcontrols.com): pseo score 84, 18 clusters,
+    177/261 template pages (e.g. `/products/fittings-and-connectors/
+    double-ferrule-fittings/{slug}/` 53 pages); ai score 50, 8 checks, scanned 50
+    pages, author/fresh/pricing/okf as expected; endpoints return doc; HTML report
+    + PDF (200, ~2.7MB) include both sections. Services restarted via launchd.
+  - QA NOTE: FakeDb test stores must put `job_id` inside seeded value dicts or
+    `find_one({"job_id": ...})` returns None (2 tests hit this); `_fetch_plain`
+    monkeypatch in tests must be an async func (ai_visibility awaits it).
 - UI privacy + Analyze page round `9f8f5f2` (pushed, frontend-only): NO
   customer data may appear on the public landing (`/`) or Analyze (`/app`)
   pages — the app is unauthenticated today, so anything rendered there is

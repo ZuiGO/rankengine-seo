@@ -54,6 +54,11 @@ EFFORT = {
     "hreflang_errors": ("medium", "Fix hreflang self-reference / reciprocity / codes"),
     "url_param_issues": ("low", "Clean faceted and pagination URL parameters"),
     "image_optimization": ("low", "Use WebP/AVIF and explicit image dimensions"),
+    "programmatic_thin": ("low", "Differentiate thin programmatic template pages with unique value"),
+    "programmatic_duplicates": ("medium", "Merge or differentiate near-duplicate programmatic pages"),
+    "programmatic_linking": ("low", "Link programmatic pages from hub categories (hub-and-spoke)"),
+    "ai_pricing_md": ("low", "Publish a /pricing.md file for AI agents"),
+    "ai_eaat_signals": ("low", "Add author attribution and freshness dates for AI citation"),
     "pending_actions": ("low", "Review and act on open action items"),
     "site_issue": ("medium", "Investigate the flagged site issue"),
 }
@@ -99,11 +104,23 @@ TITLES = {
     "hreflang_errors": "Hreflang / international errors",
     "url_param_issues": "Faceted URL parameters",
     "image_optimization": "Image optimization gaps",
+    "programmatic_thin": "Thin programmatic template pages",
+    "programmatic_duplicates": "Duplicate programmatic pages",
+    "programmatic_linking": "Unlinked programmatic pages",
+    "ai_pricing_md": "No machine-readable pricing for AI agents",
+    "ai_eaat_signals": "Missing AI-citation trust signals",
     "pending_actions": "Unresolved actions",
     "site_issue": "Site issue",
 }
 
 ISSUE_KEY_FROM_MESSAGE = [
+    ("programmatic thin", "programmatic_thin"),
+    ("near-duplicates of other template", "programmatic_duplicates"),
+    ("programmatic pages are near-duplicate", "programmatic_duplicates"),
+    ("orphan spokes", "programmatic_linking"),
+    ("programmatic", "programmatic_thin"),
+    ("pricing.md", "ai_pricing_md"),
+    ("author attribution", "ai_eaat_signals"),
     ("broken", "broken_links"),
     ("redirect chain", "redirect_chains"),
     ("https", "https_redirect_entries"),
@@ -177,6 +194,11 @@ EXPLANATIONS = {
     "hreflang_errors": "Broken hreflang clusters make Google ignore your language annotations or index the wrong locale variant.",
     "url_param_issues": "Faceted and pagination parameters create near-duplicate URLs that split signals and burn crawl budget.",
     "image_optimization": "Legacy image formats and missing dimensions inflate page weight and LCP, hurting Core Web Vitals.",
+    "programmatic_thin": "Programmatic pages often swap a single variable in identical body content; thin and undifferentiated pages earn no rankings and risk scaled-content spam flags.",
+    "programmatic_duplicates": "Template pages that are near-identical split intent and link equity; Google treats them as duplicate content, so none of them wins.",
+    "programmatic_linking": "Programmatic spokes need strong hub links and cross-links; orphaned template pages are barely crawled and rarely rank.",
+    "ai_pricing_md": "AI agents compare products programmatically; hidden or unparsable pricing gets them filtered out of AI-mediated buying journeys.",
+    "ai_eaat_signals": "AI systems prefer citable, trustworthy sources; undated, unattributed content loses out to expert and fresh alternative.",
     "pending_actions": "Open action items represent confirmed fixes that are not yet applied - each one is captured traffic risk.",
     "site_issue": "A flagged site-level issue may affect many pages at once and should be investigated first.",
 }
@@ -223,6 +245,11 @@ HOW_TO_FIX = {
     "hreflang_errors": ["Add a self-referencing hreflang entry to every localized page", "Mirror every alternate link back (reciprocity)", "Declare x-default and validate language-region codes", "Keep canonicals inside the hreflang set"],
     "url_param_issues": ["Canonicalize faceted URLs to their clean variant", "Noindex or remove unbounded filter combinations", "Keep pagination crawlable with self-referencing canonicals"],
     "image_optimization": ["Convert images to WebP/AVIF", "Add explicit width/height attributes", "Lazy-load below-the-fold images"],
+    "programmatic_thin": ["Identify thin template pages", "Add unique value per page (first-party data, original analysis, conditional sections)", "Keep the shared template shell but differentiate the substance"],
+    "programmatic_duplicates": ["Group near-duplicate template pages", "Merge them or differentiate each with unique content", "301 redirect duplicates to the winner"],
+    "programmatic_linking": ["Map each programmatic page to a hub category", "Add contextual links from hub and related spokes", "Keep XML sitemap + breadcrumbs covering all of them"],
+    "ai_pricing_md": ["Create a /pricing.md or /pricing.txt file", "List tiers, prices, limits, and included features in plain text", "Link to it from the pricing page and sitemap"],
+    "ai_eaat_signals": ["Add author names and credentials to articles", "Show a visible last-updated date", "Add Article/author structured data"],
     "site_issue": ["Investigate the flagged issue", "Fix the root cause", "Re-run the audit to confirm"],
 }
 
@@ -325,6 +352,23 @@ async def _evidence_for(db, job_id: str, key: str) -> list[str]:
             doc = await db.duplicate_content.find_one({"job_id": job_id})
             for g in (doc or {}).get("duplicate_groups", [])[:5]:
                 out.append(" ≈ ".join((g.get("urls") or [])[:3]))
+        elif key in ("programmatic_thin", "programmatic_duplicates", "programmatic_linking"):
+            doc = await db.programmatic_seo_audits.find_one({"job_id": job_id})
+            clusters = (doc or {}).get("clusters") or []
+            for c in clusters[:5]:
+                detail = " ".join(f"{p[0]}={p[1]}" for p in
+                                  [("pages", c.get("page_count")), ("thin", c.get("thin_pages")),
+                                   ("dup", c.get("duplicate_pages")), ("unlinked", c.get("unlinked_pages"))])
+                out.append(f"{c.get('pattern')} ({detail})")
+            if not clusters:
+                out.append("No template clusters detected")
+        elif key == "ai_pricing_md":
+            doc = await db.ai_visibility_summaries.find_one({"job_id": job_id})
+            out.append(f"pricing.md: {doc.get('pricing_md_present')} · pricing.txt: {doc.get('pricing_txt_present')}" if doc else "no AI-visibility audit")
+        elif key == "ai_eaat_signals":
+            doc = await db.ai_visibility_summaries.find_one({"job_id": job_id})
+            if doc:
+                out.append(f"author on {doc.get('author_pages', 0)} / {doc.get('scanned_pages', 0)} scanned pages · fresh: {doc.get('fresh_pages', 0)}")
     except Exception as e:
         logger.warning("Evidence resolution failed job=%s key=%s: %s", job_id, key, e)
     return out or ["No specific examples recorded yet"]

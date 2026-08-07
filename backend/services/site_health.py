@@ -207,10 +207,17 @@ async def compute_site_health(job_id: str) -> dict:
     if ai:
         metrics["ai_visibility_score"] = ai.get("score")
         metrics["ai_blocked_agents"] = ai.get("blocked_ai_agents", [])
+        metrics["ai_pricing_md"] = ai.get("pricing_md_present", False)
+        metrics["ai_author_pages"] = ai.get("author_pages", 0)
+        metrics["ai_fresh_pages"] = ai.get("fresh_pages", 0)
         if ai.get("blocked_ai_agents"):
             issues.append({"severity": "high", "message": f"robots.txt blocks AI crawlers: {', '.join(ai['blocked_ai_agents'][:4])} — the site is invisible to AI search."})
         if not ai.get("llms_txt_present"):
             issues.append({"severity": "low", "message": "No llms.txt present for LLM consumers."})
+        if not ai.get("pricing_md_present") and not ai.get("pricing_txt_present"):
+            issues.append({"severity": "low", "message": "No /pricing.md machine-readable file for AI agents."})
+        if (ai.get("author_pages") or 0) < 1 and (ai.get("scanned_pages") or 0) > 0:
+            issues.append({"severity": "low", "message": "No author attribution detected on scanned pages (AI citation relies on E-E-A-T signals)."})
 
     local = await db.local_seo_summaries.find_one({"job_id": job_id})
     if local:
@@ -225,6 +232,21 @@ async def compute_site_health(job_id: str) -> dict:
         metrics["cannibalization_groups"] = can.get("groups", 0)
         if can.get("groups", 0) > 0:
             issues.append({"severity": "high", "message": f"{can.get('groups')} keyword(s) are targeted by {can.get('affected_pages')} competing page(s) (cannibalization)."})
+
+    pseo = await db.programmatic_seo_audits.find_one({"job_id": job_id})
+    if pseo:
+        metrics["programmatic_seo_score"] = pseo.get("score")
+        metrics["template_clusters"] = pseo.get("clusters_count", 0)
+        metrics["template_pages"] = pseo.get("template_pages", 0)
+        metrics["thin_template_pages"] = pseo.get("thin_template_pages", 0)
+        metrics["duplicate_template_pages"] = pseo.get("duplicate_template_pages", 0)
+        metrics["unlinked_template_pages"] = pseo.get("unlinked_template_pages", 0)
+        if pseo.get("thin_template_pages", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{pseo.get('thin_template_pages')} programmatic thin page(s) under {pseo.get('total_pages', 0) or '?'} template pages — swapped-variable content risk."})
+        if pseo.get("duplicate_template_pages", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{pseo.get('duplicate_template_pages')} programmatic pages are near-duplicates of other template pages."})
+        if pseo.get("unlinked_template_pages", 0) > 0:
+            issues.append({"severity": "medium", "message": f"{pseo.get('unlinked_template_pages')} programmatic pages have no internal links pointing to them (orphan spokes)."})
 
     hreflang = await db.hreflang_audits.find_one({"job_id": job_id})
     if hreflang:

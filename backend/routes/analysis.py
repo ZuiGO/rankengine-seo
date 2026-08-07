@@ -263,14 +263,21 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             from backend.services.cannibalization import detect_cannibalization
             return await detect_cannibalization(job_id)
 
+        async def _programmatic_seo():
+            await _progress("Detecting programmatic page templates...")
+            from backend.services.programmatic_seo import audit_programmatic_seo
+            return await audit_programmatic_seo(job_id)
+
         w2 = dict(await asyncio.gather(*[
             _stage("action_analysis", _action_analysis, fallback=None),
             _stage("geo_alignment", _geo_alignment, fallback={}),
             _stage("cannibalization", _cannibalization, fallback={}),
+            _stage("programmatic_seo", _programmatic_seo, fallback={}),
             _stage("vectors", _vectors, fallback=0),
         ]))
         vector_count = w2["vectors"]
         geo_off_topic = w2["geo_alignment"].get("off_topic_pages", 0)
+        programmatic = w2["programmatic_seo"]
 
         async def _health():
             await _progress("Computing site health...")
@@ -330,6 +337,12 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                         "contact_page_present": local_seo.get("contact_page_present", False),
                     },
                     "cannibalization_groups": w2.get("cannibalization", {}).get("groups", 0),
+                    "programmatic_seo": {
+                        "score": programmatic.get("score"),
+                        "template_pages": programmatic.get("template_pages", 0),
+                        "clusters": programmatic.get("clusters_count", 0),
+                        "thin_template_pages": programmatic.get("thin_template_pages", 0),
+                    },
                     "sitemap": {
                         "found": sitemap_audit.get("sitemap_found", False),
                         "valid": sitemap_audit.get("sitemap_valid", False),

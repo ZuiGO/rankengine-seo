@@ -156,6 +156,17 @@ async def image_optimization(job_id: str):
     return doc
 
 
+@router.get("/{job_id}/programmatic-seo")
+async def programmatic_seo(job_id: str):
+    await _ensure_job(job_id)
+    db = get_db()
+    doc = await db.programmatic_seo_audits.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(404, "Programmatic-SEO check not run for this job")
+    doc["id"] = str(doc.pop("_id"))
+    return doc
+
+
 @router.get("/{job_id}/decay")
 async def content_decay(job_id: str, months: int = 6):
     await _ensure_job(job_id)

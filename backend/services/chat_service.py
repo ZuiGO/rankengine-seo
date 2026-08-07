@@ -26,6 +26,30 @@ SEO_AUDIT_GUIDANCE = """SEO audit guidance (vendored from the seo-audit skill, m
 - Language: be specific and honest. Cite URLs and observed values from the analysis context.
   If a metric was not measured, say so instead of guessing."""
 
+PROGRAMMATIC_SEO_GUIDANCE = """Programmatic-SEO guidance (vendored from the programmatic-seo skill, marketing-skills, MIT licensed):
+- Programmatic pages (locations, integrations, templates, personas, comparisons) rank only when each page
+  provides unique value — never just swapped variables in identical content. Thin, templated duplicates
+  risk scaled-content spam treatment.
+- Hierarchy of defensible data: proprietary > product-derived > user-generated > licensed > public.
+- Use subfolders, not subdomains, for template sections (subdomains split domain authority).
+- Build hub-and-spoke internal linking: hub category pages linking to every spoke, plus cross-links
+  between related spokes; every page reachable from the main site, covered by the XML sitemap.
+- Watch for keyword cannibalization: multiple template pages targeting the same keyword split rankings.
+- Indexation: prioritize high-volume patterns, noindex truly thin variations, separate sitemaps by page type."""
+
+AI_SEO_GUIDANCE = """AI-search (AEO/GEO) guidance (vendored from the ai-seo skill, marketing-skills, MIT licensed):
+- AI engines cite, not just rank: a well-structured page can be cited from position 2-3 of its category.
+- Google's official line: no special markup or files needed for AI Overviews — optimize for people and
+  core Search (E-E-A-T, original info, clean indexability) first.
+- Non-Google engines (ChatGPT, Perplexity, Claude, Copilot) reward extractable structure: 40-60 word
+  answer blocks, FAQ sections, comparison tables, numbered lists, statistics with sources.
+- Authority signals for citation: named authors with credentials, expert quotes, recent update dates
+  (within ~6 months), transparent sourcing. Never block GPTBot/PerplexityBot/ClaudeBot/Google-Extended
+  if you want citation; blocking training-only CCBot is a defensible middle ground.
+- Machine-readable files (/llms.txt, /pricing.md, /okf/) help AI agents and buying agents parse your
+  site without rendering JavaScript; opaque pricing gets filtered out of AI-mediated purchases.
+- Semantic HTML (main/article/nav, labelled controls) makes pages agent-accessible."""
+
 SYSTEM_PROMPT = """You are an SEO analysis assistant. Answer questions about the crawled website based on the provided context.
 
 Rules:
@@ -35,7 +59,7 @@ Rules:
 - Reference specific URLs and content types when relevant.
 - When answering questions about backlinks, keyword rankings, or domain metrics, use the "External SEO Insights" section of the context.
 
-""" + SEO_AUDIT_GUIDANCE
+""" + SEO_AUDIT_GUIDANCE + "\n" + PROGRAMMATIC_SEO_GUIDANCE + "\n" + AI_SEO_GUIDANCE
 
 SECTION_PROMPTS = {
     "overview": (
@@ -73,8 +97,9 @@ SECTION_PROMPTS = {
 FULL_SITE_PROMPT = (
     "You are discussing the ENTIRE site analysis covering all sections at once: overview, pages, "
     "content items, links & backlinks, SEO actions (impact/issues/improvements/approvals), user "
-    "flows, external SEO insights, site health, hreflang/international, URL hygiene, indexation "
-    "and image optimization. The user does not need to pick a section - answer their question "
+    "flows, external SEO insights, site health, hreflang/international, URL hygiene, indexation, "
+    "image optimization, programmatic-SEO template quality, and AI-search citation readiness. "
+    "The user does not need to pick a section - answer their question "
     "using whichever parts of the context are relevant. If the answer is not in the context, "
 "say so plainly."
 )
@@ -259,6 +284,8 @@ async def _full_site_context(job_id: str) -> str:
     parts.append("=== URL HYGIENE ===\n" + await _url_hygiene_context(job_id))
     parts.append("=== INDEXATION ===\n" + await _indexation_context(job_id))
     parts.append("=== IMAGE OPTIMIZATION ===\n" + await _image_opt_context(job_id))
+    parts.append("=== PROGRAMMATIC SEO ===\n" + await _programmatic_seo_context(job_id))
+    parts.append("=== AI-SEARCH VISIBILITY ===\n" + await _ai_seo_context(job_id))
     return "\n".join(parts)
 
 
@@ -359,6 +386,52 @@ async def _image_opt_context(job_id: str) -> str:
     return "Image optimization:\n" + "\n".join(lines)
 
 
+async def _programmatic_seo_context(job_id: str) -> str:
+    db = get_db()
+    doc = await db.programmatic_seo_audits.find_one({"job_id": job_id})
+    if not doc:
+        return "No programmatic-SEO audit yet."
+    failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
+    lines = [
+        "Programmatic-SEO score: %s/100" % (doc.get("score"),),
+        "clusters=%s template_pages=%s/%s (%s%%) thin=%s dup=%s unlinked=%s dup_titles=%s not_indexable=%s"
+        % (doc.get("clusters_count", 0), doc.get("template_pages", 0), doc.get("total_pages", 0),
+           doc.get("template_page_share", 0), doc.get("thin_template_pages", 0),
+           doc.get("duplicate_template_pages", 0), doc.get("unlinked_template_pages", 0),
+           doc.get("duplicate_title_template_pages", 0), doc.get("not_indexable_template_pages", 0)),
+    ]
+    for c in (doc.get("clusters") or [])[:6]:
+        lines.append("  %s: %s pages (thin %s, dup %s, unlinked %s)"
+                     % (c.get("pattern"), c.get("page_count"), c.get("thin_pages"),
+                        c.get("duplicate_pages"), c.get("unlinked_pages")))
+    if failed:
+        lines.append("Failed checks: " + ", ".join(failed[:6]))
+    return "Programmatic-SEO:\n" + "\n".join(lines)
+
+
+async def _ai_seo_context(job_id: str) -> str:
+    db = get_db()
+    doc = await db.ai_visibility_summaries.find_one({"job_id": job_id})
+    if not doc:
+        return "No AI-search visibility audit yet."
+    failed = [c.get("label", c) for c in (doc.get("checks") or []) if not c.get("passed")]
+    lines = [
+        "AI-search visibility score: %s/100" % (doc.get("score"),),
+        "llms.txt=%s pricing.md=%s pricing.txt=%s okf=%s" % (doc.get("llms_txt_present", False),
+                                                             doc.get("pricing_md_present", False),
+                                                             doc.get("pricing_txt_present", False),
+                                                             doc.get("okf_present", False)),
+        "blocked AI agents=%s training-only blocked=%s" % (doc.get("blocked_ai_agents", []),
+                                                           doc.get("blocked_training_agents", [])),
+        "scanned %s pages: answer blocks on %s, author on %s, fresh on %s, FAQ headings on %s, comparison tables on %s"
+        % (doc.get("scanned_pages", 0), doc.get("answer_block_pages", 0), doc.get("author_pages", 0),
+           doc.get("fresh_pages", 0), doc.get("faq_heading_pages", 0), doc.get("comparison_table_pages", 0)),
+    ]
+    if failed:
+        lines.append("Failed checks: " + ", ".join(failed[:6]))
+    return "AI-search visibility:\n" + "\n".join(lines)
+
+
 async def _context_for_section(job_id: str, section: str | None) -> str:
     if section is None or section == "all":
         return await _full_site_context(job_id)
@@ -380,6 +453,10 @@ async def _context_for_section(job_id: str, section: str | None) -> str:
         return await _indexation_context(job_id)
     if section in ("image-optimization", "images", "image"):
         return await _image_opt_context(job_id)
+    if section in ("programmatic-seo", "programmatic", "templates", "template"):
+        return await _programmatic_seo_context(job_id)
+    if section in ("ai-seo", "ai-visibility", "ai_search", "ai"):
+        return await _ai_seo_context(job_id)
     return await _overview_context(job_id)
 
 
@@ -460,9 +537,10 @@ async def chat_with_context(job_id: str, message: str, section: str | None = Non
 GENERAL_SYSTEM_PROMPT = (
     "You are the ZuiGO Engine SEO assistant. Answer general questions about SEO, website "
     "analysis, Core Web Vitals, page speed, backlinks, keyword research, content strategy, "
-    "and how to use the ZuiGO Engine app. Be concise, practical, and accurate. If the question "
+    "programmatic-SEO at scale, AI-search (AEO/GEO) readiness, and how to use the ZuiGO Engine app. "
+    "Be concise, practical, and accurate. If the question "
     "is about a specific analyzed website, ask the user to open that site in ZuiGO Engine first.\n\n"
-    + SEO_AUDIT_GUIDANCE
+    + SEO_AUDIT_GUIDANCE + "\n" + PROGRAMMATIC_SEO_GUIDANCE + "\n" + AI_SEO_GUIDANCE
 )
 
 
