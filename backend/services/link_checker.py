@@ -10,9 +10,12 @@ from backend.services.url_normalizer import normalize_url
 
 logger = get_logger("link_checker")
 
-CHECK_CONCURRENCY = 40
+CHECK_CONCURRENCY = 10
 REQUEST_TIMEOUT = 7
 USER_AGENT = "ZuiGO-Engine/1.0 link-checker (+https://zuigo.ai)"
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF = 0.5
+RETRY_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
 def classify_status(status_code: int) -> str:
@@ -41,16 +44,26 @@ async def _check_one(client: httpx.AsyncClient, url: str) -> dict:
     }
     resp = None
     err = None
-    try:
-        resp = await client.head(url, follow_redirects=True, timeout=REQUEST_TIMEOUT)
-    except (httpx.TimeoutException, httpx.HTTPError) as e:
-        err = e
-    if resp is None or resp.status_code >= 400:
+    for attempt in range(RETRY_ATTEMPTS):
+        resp = None
+        err = None
         try:
-            resp = await client.get(url, follow_redirects=True, timeout=REQUEST_TIMEOUT)
-            err = None
+            resp = await client.head(url, follow_redirects=True, timeout=REQUEST_TIMEOUT)
         except (httpx.TimeoutException, httpx.HTTPError) as e:
             err = e
+        if resp is None or resp.status_code >= 400:
+            try:
+                resp = await client.get(url, follow_redirects=True, timeout=REQUEST_TIMEOUT)
+                err = None
+            except (httpx.TimeoutException, httpx.HTTPError) as e:
+                err = e
+        if resp is None:
+            await asyncio.sleep(RETRY_BACKOFF * (attempt + 1))
+            continue
+        if resp.status_code in RETRY_STATUS_CODES and attempt < RETRY_ATTEMPTS - 1:
+            await asyncio.sleep(RETRY_BACKOFF * (attempt + 1))
+            continue
+        break
     if resp is None:
         result["error"] = str(err)[:200] if err else "Request failed"
         result["status"] = "unreachable"

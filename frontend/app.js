@@ -1206,6 +1206,7 @@ async function loadLinkHealth(jobId) {
         <div class="insights-card"><div class="insights-label">Unreachable</div><div class="insights-value">${s.unreachable ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Avg Link Length</div><div class="insights-value">${ls.avg ?? "-"} chars</div></div>
       </div>
+      <p class="section-desc" style="margin-top:8px;font-size:12px">Last checked: ${s.checked_at ? new Date(s.checked_at).toLocaleString() : "never"}</p>
       ${s.status === "not_checked" ? '<p class="section-desc" style="margin-top:10px">Links not checked yet for this job. Run Check or re-run analysis.</p>' : ""}
       ${(ls.longest || []).length ? `
       <div style="margin-top:12px">
