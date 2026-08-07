@@ -10,12 +10,28 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: SE Ranking competitor gap report + crawl/geo/analytics fixes — commit pending)
-- Round: professional ~20-section competitor gap report (SE Ranking
-  sibling live), geo_alignment `page_iter` NameError fix, link_checker
-  speedup, analytics single-point bar charts.
-  Full suite 298/298; `node --check` clean.
-- Committed last as `412d33d`; this round was pushed as `1cd70c4`.
+## Status (last update: link-check false positives fixed — committed `d8bf1fc`)
+- Round: checked-in link health was flagging ~272 broken/unreachable for job
+  `d14e24df` (fluidcontrols.com) while links opened fine in the browser.
+  Root cause: stored rows Pre-rework checker (09:27–09:33 UTC flaky window;
+  `error:""` rows impossible in current code) + the site 500s under the old
+  `CHECK_CONCURRENCY=40` (re-driving real `_check_one` at 40 gave 217×500).
+  Fix: `_check_one` now retries transient 5xx/httpx errors with small backoff
+  (RETRY_ATTEMPTS=3, RETRY_BACKOFF=0.5, RETRY_STATUS_CODES={500,502,503,504};
+  HEAD→GET fallback per attempt still applies), `CHECK_CONCURRENCY` 40→10
+  (site clean ~10), `_from_crawled` skip retained. Re-ran check on
+  `d14e24df`: checked 533, ok 508, broken 25, unreachable 0 — the 25 broken
+  are GENUINE (stable 404s, deleted/renamed product slugs like union-2,
+  bulkhead-union-3, gauge-valves/six-station; HEAD and GET both 404, crawl
+  recorded "Page not found"); user chose to keep them flagged. frontend
+  `loadLinkHealth` now renders "Last checked: <ts>" (uses
+  `summary.checked_at`). Tests: 9 new in `test_link_accuracy.py` (FakeClient
+  head/get queues + FakeCursor aiterator; retry-then-ok, persistent-5xx,
+  connect-error, 404-no-retry 2 calls, 405→GET, check_links bucket smoke);
+  suite 307/307, `node --check` clean. Live Playwright Links tab: "Last
+  checked" present, ok 508, 25 problematic, zero console errors.
+- Committed last as `412d33d`; prior round pushed as `1cd70c4` (competitor
+  gap report); this round pushed as `d8bf1fc`.
 
 ### SE Ranking competitor gap report (this round)
   - `competitor_audit.py::_se_rich_gap(target_domain, comp_domain,
