@@ -223,6 +223,411 @@ async def _backlink_gap(target_domain: str, comp_domain: str) -> dict:
     }
 
 
+async def _se_rich_gap(target_domain: str, comp_domain: str, target_job_id: str) -> dict:
+    """SE Ranking powered sections for the gap report (best-effort, per-key errors).
+
+    Target metrics reuse the cached seo_insights_cache; competitor metrics are
+    fetched live so the report shows organic traffic, backlinks, authority and
+    keyword volume/CPC/KD for both sides.
+    """
+    from backend.services import se_ranking
+    db = get_db()
+    errors = []
+    out: dict = {}
+
+    # Target cached data (no extra spend)
+    cached = await db.seo_insights_cache.find_one({"job_id": target_job_id})
+    cached_data = (cached or {}).get("data") or {}
+    t_overview = cached_data.get("overview") or {}
+    t_keywords = cached_data.get("keywords") or []
+    t_backlinks = cached_data.get("backlinks") or {}
+    t_history = cached_data.get("overview_history") or []
+    out["target"] = {
+        "overview": t_overview,
+        "keywords": t_keywords[:50],
+        "backlinks": t_backlinks,
+        "history": t_history,
+        "source": cached_data.get("overview_source") or "none",
+    }
+
+    # Competitor live data
+    comp_block = {}
+    try:
+        comp_block["overview"] = await se_ranking.domain_overview(comp_domain)
+    except Exception as e:
+        errors.append(f"overview: {e}")
+    try:
+        comp_block["keywords"] = await se_ranking.domain_keywords(comp_domain, limit=50)
+    except Exception as e:
+        errors.append(f"keywords: {e}")
+    try:
+        comp_block["ranked"] = await se_ranking.ranked_keywords(comp_domain, limit=50)
+    except Exception as e:
+        errors.append(f"ranked: {e}")
+    try:
+        comp_block["backlinks"] = await se_ranking.backlink_summary(comp_domain)
+    except Exception as e:
+        errors.append(f"backlinks: {e}")
+    try:
+        comp_block["history"] = await se_ranking.domain_overview_history(comp_domain)
+    except Exception as e:
+        errors.append(f"history: {e}")
+    try:
+        comp_block["backlink_sources"] = await se_ranking.backlink_list(comp_domain, limit=50)
+    except Exception as e:
+        errors.append(f"backlink_sources: {e}")
+    try:
+        comp_block["keyword_gap"] = await se_ranking.keyword_gap(comp_domain, target_domain, limit=50)
+    except Exception as e:
+        errors.append(f"keyword_gap: {e}")
+    out["competitor"] = comp_block
+
+    # Analysis helpers (rules over whichever data actually landed)
+    c_names = {_normalize(k.get("keyword", "")) for k in comp_block.get("keywords") or []}
+    t_names = {_normalize(k.get("keyword", "")) for k in t_keywords or []}
+    shared = sorted(n for n in (c_names & t_names) if n)
+    missing = sorted(n for n in (c_names - t_names) if n)
+    unique_t = sorted(n for n in (t_names - c_names) if n)
+
+    def _kw_meta(kws, ranked, name):
+        info = None
+        for k in kws:
+            if _normalize(k.get("keyword", "")) == name:
+                kd = k.get("keyword_data") or {}
+                ki = kd.get("keyword_info") or {}
+                kp = kd.get("keyword_properties") or {}
+                info = {
+                    "volume": ki.get("search_volume"),
+                    "cpc": ki.get("cpc"),
+                    "difficulty": kp.get("keyword_difficulty"),
+                    "rank": None,
+                }
+                break
+        rank = None
+        for r in ranked or []:
+            if _normalize(r.get("keyword", "")) == name:
+                pos = r.get("rank")
+                rank = pos if pos and pos > 0 else None
+                break
+        if info is None:
+            return {"volume": None, "cpc": None, "difficulty": None, "rank": rank}
+        info["rank"] = rank
+        return info
+
+    missing_detail = []
+    for name in missing:
+        meta = _kw_meta(comp_block.get("keywords") or [], comp_block.get("ranked") or [], name)
+        if meta.get("volume"):
+            missing_detail.append({"keyword": name, **meta})
+    missing_detail.sort(key=lambda x: (x.get("volume") or 0), reverse=True)
+
+    shared_detail = []
+    for name in shared:
+        cm = _kw_meta(comp_block.get("keywords") or [], comp_block.get("ranked") or [], name)
+        kw_obj = next((k for k in t_keywords if _normalize(k.get("keyword", "")) == name), None)
+        tm = {"volume": None, "cpc": None, "difficulty": None, "rank": None}
+        if kw_obj:
+            kd = kw_obj.get("keyword_data") or {}
+            ki = kd.get("keyword_info") or {}
+            kp = kd.get("keyword_properties") or {}
+            tm = {
+                "volume": ki.get("search_volume"),
+                "cpc": ki.get("cpc"),
+                "difficulty": kp.get("keyword_difficulty"),
+                "rank": None,
+            }
+        shared_detail.append({
+            "keyword": name,
+            "comp": cm, "target": tm,
+        })
+
+    out["keyword_analysis"] = {
+        "shared": shared[:50],
+        "missing_from_target": missing[:50],
+        "unique_target": unique_t[:50],
+        "missing_detail": missing_detail[:30],
+        "shared_detail": shared_detail[:30],
+        "top_opportunities": missing_detail[:20],
+    }
+
+    # ---- Traffic
+    c_ov = comp_block.get("overview") or {}
+    t_ov = t_overview or {}
+    out["traffic_analysis"] = {
+        "target_traffic": t_ov.get("estimated_organic_traffic"),
+        "competitor_traffic": c_ov.get("estimated_organic_traffic"),
+        "target_keywords": t_ov.get("organic_keywords_count"),
+        "competitor_keywords": c_ov.get("organic_keywords_count"),
+        "target_history": t_history,
+        "competitor_history": comp_block.get("history") or [],
+        "traffic_value_estimate": _estimate_traffic_value(c_ov, comp_block.get("keywords") or []),
+    }
+
+    # ---- Backlinks / authority
+    c_bl = comp_block.get("backlinks") or {}
+    t_bl = t_backlinks or {}
+    out["backlink_analysis"] = {
+        "target": t_bl,
+        "competitor": c_bl,
+        "referring_domains_delta": _delta(t_bl.get("referring_domains"), c_bl.get("referring_domains")),
+        "backlinks_delta": _delta(t_bl.get("backlinks"), c_bl.get("backlinks")),
+        "high_authority_sources": [s for s in comp_block.get("backlink_sources") or []
+                                  if (s.get("domain_inlink_rank") or 100) < 20][:15],
+        "comp_sources": comp_block.get("backlink_sources") or [],
+    }
+    out["authority_analysis"] = {
+        "target_domain_rank": t_bl.get("domain_rank"),
+        "comp_domain_rank": c_bl.get("domain_rank"),
+        "target_page_rank": t_bl.get("page_rank"),
+        "comp_page_rank": c_bl.get("page_rank"),
+        "delta": _delta(t_bl.get("domain_rank"), c_bl.get("domain_rank")),
+    }
+    out["errors"] = errors
+    return out
+
+
+def _delta(a, b):
+    if a is None or b is None:
+        return None
+    return round(b - a, 1)
+
+
+def _estimate_traffic_value(overview: dict, ranked_keywords: list[dict]) -> float | None:
+    """Estimated monthly traffic value = sum(keyword traffic * CPC) proxy over ranked keywords.
+
+    Clearly an estimate, not a paid-api revenue figure.
+    """
+    total = 0.0
+    had = False
+    for kw in ranked_keywords:
+        info = (kw.get("keyword_data") or {}).get("keyword_info") or {}
+        vol = info.get("search_volume") or 0
+        cpc = info.get("cpc") or 0
+        if vol and cpc:
+            total += vol * cpc
+            had = True
+    if not had:
+        return None
+    return round(total, 2)
+
+
+def _opportunity_score(se_rich: dict) -> int | None:
+    """0-100 upside estimate of closing the gap on this competitor.
+
+    Weights: keyword opportunity 0.4, traffic delta 0.3, backlink delta 0.3.
+    Returns None when no comparable metrics landed (best-effort data missing).
+    """
+    ka = se_rich.get("keyword_analysis") or {}
+    ta = se_rich.get("traffic_analysis") or {}
+    ba = se_rich.get("backlink_analysis") or {}
+    score = 0.0
+    weight = 0.0
+
+    missing = len(ka.get("missing_detail") or [])
+    shared = len(ka.get("shared_detail") or [])
+    if missing or shared:
+        opp = min(missing, 20) / 20.0
+        score += 0.4 * opp
+        weight += 0.4
+
+    c_t = ta.get("competitor_traffic")
+    t_t = ta.get("target_traffic")
+    if isinstance(c_t, (int, float)) and isinstance(t_t, (int, float)) and t_t > 0:
+        growth = (c_t - t_t) / t_t
+        if growth > 0:
+            score += 0.3 * min(growth, 4.0)
+            weight += 0.3
+
+    c_rd = ba.get("referring_domains_delta")
+    if isinstance(c_rd, (int, float)):
+        score += 0.3 * (min(c_rd / 200.0, 1.0) if c_rd > 0 else 0.0)
+        weight += 0.3
+
+    if weight <= 0:
+        return None
+    return round(min(score / weight, 1.0) * 100)
+
+
+def _build_recommendations(se_rich: dict) -> list[dict]:
+    """Rule-based, data-grounded recommendations for the gap report."""
+    ka = se_rich.get("keyword_analysis") or {}
+    ta = se_rich.get("traffic_analysis") or {}
+    ba = se_rich.get("backlink_analysis") or {}
+    aa = se_rich.get("authority_analysis") or {}
+    recs: list[dict] = []
+
+    missing_detail = ka.get("missing_detail") or []
+    if missing_detail:
+        top3 = ", ".join(m.get("keyword", "") for m in missing_detail[:3])
+        recs.append({
+            "priority": "high",
+            "title": "Target high-opportunity keywords you don't rank for",
+            "detail": (
+                f"Competitor ranks for keywords your site is missing. Top volume "
+                f"opportunities: {top3}. Create or strengthen pages addressed "
+                f"exactly to these intents."
+            ),
+            "count": len(missing_detail),
+        })
+
+    c_t = ta.get("competitor_traffic")
+    t_t = ta.get("target_traffic")
+    if isinstance(c_t, (int, float)) and isinstance(t_t, (int, float)) and c_t > t_t:
+        recs.append({
+            "priority": "medium",
+            "title": "Close the organic traffic gap",
+            "detail": (
+                f"Competitor drives {c_t:,} estimated monthly organic visits vs "
+                f"your {t_t:,}. Prioritize the missing keywords above plus "
+                f"content depth where they outrank you."
+            ),
+            "count": None,
+        })
+
+    c_bl = ba.get("backlinks_delta")
+    if isinstance(c_bl, (int, float)) and c_bl > 0:
+        recs.append({
+            "priority": "high" if c_bl > 100 else "medium",
+            "title": "Grow the backlink profile",
+            "detail": (
+                f"Competitor leads by {c_bl:,} backlinks. Audit their highest "
+                f"authority referring domains and pursue comparable placements "
+                f"(digital PR, data-led content, directory/list inclusion)."
+            ),
+            "count": int(c_bl),
+        })
+
+    c_rd = ba.get("referring_domains_delta")
+    if isinstance(c_rd, (int, float)) and c_rd > 0:
+        recs.append({
+            "priority": "medium",
+            "title": "Diversify referring domains",
+            "detail": (
+                f"Competitor links from {int(c_rd):,} more referring domains. "
+                f"Focus on breadth, not just volume — new domains signal "
+                f"editorial trust."
+            ),
+            "count": int(c_rd),
+        })
+
+    c_dr = aa.get("comp_domain_rank")
+    t_dr = aa.get("target_domain_rank")
+    if isinstance(c_dr, (int, float)) and isinstance(t_dr, (int, float)) and c_dr > t_dr:
+        recs.append({
+            "priority": "medium",
+            "title": "Raise domain authority",
+            "detail": (
+                f"Competitor domain authority is {c_dr:.0f} vs your {t_dr:.0f}. "
+                f"Authority grows with quality backlinks and consistent "
+                f"referring-domain diversity; see backlink recommendations."
+            ),
+            "count": int(int(c_dr) - int(t_dr)),
+        })
+
+    recs.sort(key=lambda r: {"high": 0, "medium": 1, "low": 2}.get(r["priority"], 3))
+    return recs
+
+
+def build_competitor_report(row: dict) -> dict:
+    """Assemble the full sectioned gap report from a stored analysis row.
+
+    Sources: local crawl diffs (content/technical/schema/on-page/UX/SERP) plus
+    the SE Ranking `se_rich` block (keyword, traffic, backlink, authority).
+    Returns a dict of named sections; individual sections stay empty when their
+    data is missing so the frontend can render "not measured" honestly.
+    """
+    se_rich = row.get("se_rich") or {}
+    ka = se_rich.get("keyword_analysis") or {}
+    ta = se_rich.get("traffic_analysis") or {}
+    ba = se_rich.get("backlink_analysis") or {}
+    aa = se_rich.get("authority_analysis") or {}
+
+    technical_gap = row.get("technical_gap") or {}
+    content_gap = row.get("content_gap") or {}
+    schema_gap = row.get("schema_gap") or {}
+    onpage_gap = row.get("onpage_gap") or {}
+    ux_gap = row.get("ux_gap") or {}
+    serp_feat = row.get("serp_features_gap") or {}
+    keyword_gap = row.get("keyword_gap") or {}
+
+    src_k = (se_rich.get("competitor") or {}).get("overview") or {}
+    tgt_src = se_rich.get("target") or {}
+    t_ov = tgt_src.get("overview") or {}
+    t_kws = tgt_src.get("keywords") or []
+
+    sections = {
+        "executive_overview": {
+            "competitor": row.get("competitor"),
+            "url": row.get("url"),
+            "pages_crawled": row.get("pages_crawled"),
+            "opportunity_score": se_rich.get("opportunity_score"),
+            "gap_count": row.get("gap_count"),
+            "generated_at": row.get("generated_at"),
+            "status": row.get("status"),
+            "errors": se_rich.get("errors") or row.get("errors") or [],
+        },
+        "keyword": {
+            "missing_from_target": (ka.get("missing_from_target") or [])[:50],
+            "missing_detail": ka.get("missing_detail") or [],
+            "shared_detail": ka.get("shared_detail") or [],
+            "unique_target": ka.get("unique_target") or [],
+            "top_opportunities": ka.get("top_opportunities") or [],
+            "comp_keywords_count": src_k.get("organic_keywords_count"),
+            "target_keywords_count": t_ov.get("organic_keywords_count") or len(t_kws),
+            "serp_derived_words": keyword_gap.get("gaps") or [],
+            "errors": keyword_gap.get("errors") or [],
+        },
+        "traffic": {
+            "target_estimated": ta.get("target_traffic"),
+            "competitor_estimated": ta.get("competitor_traffic"),
+            "target_keywords": ta.get("target_keywords"),
+            "competitor_keywords": ta.get("competitor_keywords"),
+            "traffic_value_estimate": ta.get("traffic_value_estimate"),
+            "competitor_history": ta.get("competitor_history") or [],
+            "target_history": ta.get("target_history") or [],
+        },
+        "content": {
+            "missing_pages": (content_gap.get("missing") or [])[:30],
+            "missing_count": content_gap.get("missing_count"),
+            "competitor_pages": content_gap.get("comp_pages"),
+        },
+        "backlink": {
+            "target": ba.get("target"),
+            "competitor": ba.get("competitor"),
+            "referring_domains_delta": ba.get("referring_domains_delta"),
+            "backlinks_delta": ba.get("backlinks_delta"),
+            "high_authority_sources": ba.get("high_authority_sources") or [],
+            "comp_sources": ba.get("comp_sources") or [],
+            "serp_derived_sources": (row.get("backlink_gap") or {}).get("gaps") or [],
+            "error": (row.get("backlink_gap") or {}).get("errors") or [],
+        },
+        "authority": {
+            "target_domain_rank": aa.get("target_domain_rank"),
+            "comp_domain_rank": aa.get("comp_domain_rank"),
+            "target_page_rank": aa.get("target_page_rank"),
+            "comp_page_rank": aa.get("comp_page_rank"),
+            "delta": aa.get("delta"),
+        },
+        "technical": technical_gap,
+        "serp": {
+            "features": serp_feat.get("comp_only"),
+            "errors": serp_feat.get("errors") or [],
+        },
+        "on_page": onpage_gap,
+        "ux": ux_gap,
+        "schema": schema_gap,
+        "insights": {
+            "recommendations": se_rich.get("recommendations") or [],
+            "opportunity_score": se_rich.get("opportunity_score"),
+        },
+        "source_report": {
+            "target": row.get("competitor"),
+            "generated_at": row.get("generated_at"),
+        },
+    }
+    return sections
+
+
 async def _content_gap(comp_pages: list[dict], target: dict) -> dict:
     comp_headings = [{"url": p.get("url", ""), "title": p.get("title", ""), "h1": p.get("h1_count", 0)} for p in comp_pages]
     target_titles = [t for t in target["titles"].values() if t]
@@ -424,6 +829,15 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
             onpage_gap = await _onpage_gap(comp_health, pages, target_baseline)
             ux_gap = await _ux_gap(comp_health, pages, target_baseline)
 
+            se_rich = {}
+            try:
+                se_rich = await _se_rich_gap(target_domain, comp_domain, target_job_id)
+                se_rich["recommendations"] = _build_recommendations(se_rich)
+                se_rich["opportunity_score"] = _opportunity_score(se_rich)
+            except Exception as e:
+                logger.warning("SE Ranking gap failed target=%s comp=%s: %s", target_job_id, comp_domain, e)
+                se_rich = {"errors": [f"se_ranking: {e}"]}
+
             gap_count = (
                 len(keyword_gap.get("gaps", []))
                 + content_gap.get("missing_count", 0)
@@ -447,6 +861,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "onpage_gap": onpage_gap,
                 "ux_gap": ux_gap,
                 "serp_features_gap": feature_gap,
+                "se_rich": se_rich,
                 "errors": [],
                 "generated_at": datetime.utcnow(),
             }

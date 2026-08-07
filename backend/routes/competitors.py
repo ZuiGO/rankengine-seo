@@ -131,6 +131,21 @@ async def competitor_list(target_job_id: str):
     return {"results": cleaned, "total": len(cleaned)}
 
 
+@router.get("/{target_job_id}/report")
+async def competitor_report(target_job_id: str):
+    db = get_db()
+    rows = await db.competitor_gap_analyses.find(
+        {"target_job_id": target_job_id, "status": "completed"}
+    ).sort("competitor", 1).to_list(length=100)
+    if not rows:
+        raise HTTPException(404, "No completed analysis for this job")
+
+    from backend.services.competitor_audit import build_competitor_report
+
+    reports = [build_competitor_report(r) for r in rows]
+    return {"job_id": target_job_id, "competitors": reports, "total": len(reports)}
+
+
 @router.get("/{target_job_id}/{competitor}")
 async def competitor_detail(target_job_id: str, competitor: str):
     db = get_db()

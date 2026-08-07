@@ -10,10 +10,53 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: email reports + crawl-progress live view + crawl-speed/evidence round — commit pending)
-- Round: exact counts, action evidence, cannibalization removal, speed,
-  SEOmator-style UI, Analytics/Competitor fixes, email, crawl progress.
-  Full suite 290/290; `node --check` clean.
+## Status (last update: SE Ranking competitor gap report + crawl/geo/analytics fixes — commit pending)
+- Round: professional ~20-section competitor gap report (SE Ranking
+  sibling live), geo_alignment `page_iter` NameError fix, link_checker
+  speedup, analytics single-point bar charts.
+  Full suite 298/298; `node --check` clean.
+- Committed last as `412d33d`; this round is uncommitted.
+
+### SE Ranking competitor gap report (this round)
+  - `competitor_audit.py::_se_rich_gap(target_domain, comp_domain,
+    target_job_id)`: reads TARGET's cached `seo_insights_cache` (no extra
+    SE Ranking spend) and fetches COMPETITOR live best-effort per-key
+    (`domain_overview`, `domain_keywords(50)`, `ranked_keywords(50)`,
+    `backlink_summary`, `domain_overview_history`, `backlink_list(50)`,
+    `keyword_gap`); per-key `errors` collected. Computes `keyword_analysis`
+    (shared / missing_from_target / unique_target / missing_detail
+    [volume+cpc+difficulty] / shared_detail [target vs comp vol/cpc/KD] /
+    top_opportunities = competitor's highest-volume keywords target misses),
+    `traffic_analysis` (incl. `traffic_value_estimate` = SUM volume×CPC over
+    comp `domain_keywords`), `backlink_analysis` (+ high_authority_sources
+    domain_inlink_rank<20), `authority_analysis` (domain/page rank deltas).
+    `_opportunity_score` (0-100: kw-opportunity 0.4 · traffic-growth 0.3 ·
+    RD-delta 0.3; None when no comparable metrics) + `_build_recommendations`
+    (rule-based, high/med/low sorted).
+  - Wired into `_analyze_one` → stored as `se_rich` in
+    `competitor_gap_analyses`; failures caught & logged (doc still writes).
+  - `build_competitor_report(row)` assembles named sections
+    (executive_overview, keyword, traffic, content, backlink, authority,
+    serp, on_page, ux, schema, technical, insights, source_report); empty
+    sections stay honest. New `GET /api/competitors/{target_job_id}/report`
+    (completed only, registered BEFORE `/{target_job_id}/{competitor}` so
+    route wins).
+  - Frontend `renderCompetitorGaps` rewritten as a professional sectioned
+    report per competitor: KPI strip (opportunity badge, pages, traffic "you
+    → them", keywords, gap count), Keyword Analysis table (opportunity
+    volume/CPC/difficulty + shared overlap table + SERP chips), Traffic
+    table, Backlinks & Authority table (you lead / competitor ahead / tie),
+    high-authority source chips + SERP-derived sources, Content + schema
+    lists, SERP features, Technical/On-page/UX delta grids, Insights &
+    Recommendations. Helpers: `_fmtNum`, `_fmtMoney`, `_oppBadge`, `_pairRow`,
+    `_deltaCard`, `_deltaGrid`.
+  - Live-verified on job `d14e24df` (fluidcontrols.com) competitor hydac.com
+    re-crawl: opp 100, traffic 141→4628, traffic value 54.2k, backlinks delta
+    118k, DR 46/78, 5 recs. Playwright zero console errors.
+  - Tests `backend/tests/test_competitor_gap_report.py` (6 new): _se_rich_gap
+    assembly with FakeDb + monkeypatched se ranking fns, per-key degradation
+    (7 errors), traffic_value_estimate, opp+recs, report assembler, empty row.
+- All prior rounds below (SE Ranking sole paid provider, etc.) unchanged.
   - Cannibalization fully removed (`rg -ri cannibal backend/ frontend/` = 0):
     deleted `services/cannibalization.py`; pipeline stage, summary key,
     quality route, site_health block, exec_summary entries, chat/sites
@@ -738,6 +781,12 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
+- This round (SE Ranking gap report, geo/link/analytics fixes, 298 tests)
+  is uncommitted — commit + push (`cd /Users/macbook/RankEngine-AI-Simple &&
+  git add -A && git commit && git push`). Prior round pushed as `412d33d`.
+- Optional competitor polish: also surface `seo_insights_cache`-based target
+  keyword overlap per competitor in the report's "overlap" table when SE
+  Ranking data is missing (currently shows "no data" honestly).
 - M1–M6 plan COMPLETE (last milestone M6 landed `94d961f`). Follow-ups:
 - PRIVACY RULE: no real customer domains/data on the public landing or
   Analyze pages (app is unauthenticated). If a login/owner-gate is ever

@@ -10,7 +10,7 @@ from backend.services.url_normalizer import normalize_url
 
 logger = get_logger("link_checker")
 
-CHECK_CONCURRENCY = 20
+CHECK_CONCURRENCY = 40
 REQUEST_TIMEOUT = 7
 USER_AGENT = "ZuiGO-Engine/1.0 link-checker (+https://zuigo.ai)"
 
@@ -83,8 +83,32 @@ async def check_links(job_id: str) -> dict:
     if not unique_urls:
         return {"checked": 0, "status": "no_links"}
 
+    crawled_status: dict[str, int] = {}
+    pages_cursor = db.pages.find({"job_id": job_id}, {"url": 1, "status_code": 1})
+    async for p in pages_cursor:
+        nurl = normalize_url(p.get("url") or "")
+        if nurl and p.get("status_code"):
+            crawled_status.setdefault(nurl, p["status_code"])
+
     results = []
     semaphore = asyncio.Semaphore(CHECK_CONCURRENCY)
+
+    def _from_crawled(url: str) -> dict | None:
+        status_code = crawled_status.get(url)
+        if status_code is None:
+            return None
+        return {
+            "url": url,
+            "status": classify_status(status_code),
+            "status_code": status_code,
+            "final_url": url,
+            "error": None,
+            "length_chars": len(url),
+            "checked_at": datetime.utcnow(),
+            "redirect_count": 0,
+            "redirect_chain": [],
+            "from_crawled": True,
+        }
 
     async with httpx.AsyncClient(
         headers={"User-Agent": USER_AGENT},
@@ -93,6 +117,9 @@ async def check_links(job_id: str) -> dict:
         limits=httpx.Limits(max_connections=CHECK_CONCURRENCY, max_keepalive_connections=CHECK_CONCURRENCY),
     ) as client:
         async def limited(url: str):
+            cached = _from_crawled(url)
+            if cached is not None:
+                return cached
             async with semaphore:
                 return await _check_one(client, url)
 

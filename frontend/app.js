@@ -844,26 +844,49 @@ function _clearChartTips(canvasId) {
 
 function renderSingleAnalytics(p) {
   const date = p.completed_at ? new Date(p.completed_at).toLocaleDateString() : "latest analysis";
-  const sets = [
-    ["chart-health", "Health Score", p.health_score],
-    ["chart-broken", "Broken Links", p.broken_link_count ?? p.broken_links ?? 0],
-    ["chart-pages", "Pages Crawled", p.total_pages ?? 0],
-  ];
-  for (const [canvasId, label, value] of sets) {
+  function bars(canvasId, seriesLabel, value, hex) {
     _clearChartTips(canvasId);
     const canvas = document.getElementById(canvasId);
-    if (!canvas) continue;
-    canvas.style.display = "none";
-    const box = canvas.parentElement;
-    if (!box) continue;
-    const wrap = document.createElement("div");
-    wrap.className = "chart-tip";
-    wrap.innerHTML = `
-      <div style="display:flex;align-items:baseline;gap:10px;padding:22px 12px">
-        <span style="font-size:34px;font-weight:700;color:var(--text)">${value ?? "N/A"}</span>
-        <span style="font-size:13px;color:var(--text-secondary)">as of ${escapeHtml(date)} — run this site again to chart trends</span>
-      </div>`;
-    box.appendChild(wrap);
+    if (!canvas) return;
+    canvas.style.display = "";
+    if (typeof Chart === "undefined") return;
+    chartInstances = chartInstances.filter(c => c.canvas !== canvas);
+    const chart = new Chart(canvas.getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: [seriesLabel],
+        datasets: [{
+          label: seriesLabel,
+          data: [value ?? null],
+          backgroundColor: hex + "55",
+          borderColor: hex,
+          borderWidth: 2,
+          maxBarThickness: 120,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { title: () => seriesLabel, label: c => `${seriesLabel}: ${c.parsed.y ?? "N/A"}` } },
+        },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(148,163,184,0.12)" }, ticks: { color: "#64748b" } },
+          x: { grid: { display: false }, ticks: { color: "#64748b" } },
+        },
+      },
+    });
+    chartInstances.push(chart);
+  }
+  bars("chart-health", "Health Score", p.health_score, "#16a34a");
+  bars("chart-broken", "Broken Links", p.broken_link_count ?? p.broken_links ?? 0, "#dc2626");
+  bars("chart-pages", "Pages Crawled", p.total_pages ?? 0, "#0ea5e9");
+  const box = document.getElementById("chart-pages")?.parentElement;
+  if (box) {
+    if (!box.querySelector(".chart-tip")) {
+      box.insertAdjacentHTML("beforeend", `<p class="section-desc chart-tip" style="padding:6px 12px 12px">One analysis so far (${escapeHtml(date)}) — run this site again to chart trends over time.</p>`);
+    }
   }
 }
 
@@ -2763,6 +2786,54 @@ function renderSerp(rankings, error, source) {
   el.innerHTML = html;
 }
 
+function _fmtNum(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "number") return v.toLocaleString();
+  return String(v);
+}
+
+function _fmtMoney(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  return "$" + Number(v).toLocaleString();
+}
+
+function _oppBadge(score) {
+  if (score === null || score === undefined) return '<span class="badge">No score</span>';
+  const cls = score >= 60 ? "background:#dcfce7;color:#15803d" : score >= 40 ? "background:#fef3c7;color:#b45309" : "background:#fee2e2;color:#b91c1c";
+  return `<span class="badge" style="${cls}">Opportunity ${score}/100</span>`;
+}
+
+function _pairRow(label, target, comp) {
+  const t = _fmtNum(target), c = _fmtNum(comp);
+  let status = "—";
+  if (typeof target === "number" && typeof comp === "number") {
+    status = comp > target ? "competitor ahead" : target > comp ? "you lead" : "tie";
+  }
+  return `<tr><td style="text-align:left">${escapeHtml(label)}</td><td>${t}</td><td>${c}</td><td>${status}</td></tr>`;
+}
+
+function _deltaCard(label, value) {
+  let inner = "—";
+  if (value && typeof value === "object") {
+    inner = `You: ${_fmtNum(value.target)} · They: ${_fmtNum(value.competitor)}`;
+    if (value.delta !== undefined && value.delta !== "n/a" && value.delta !== null) {
+      const d = Number(value.delta);
+      const pos = d >= 0;
+      inner += ` <span class="badge" style="background:${pos ? "#dcfce7" : "#fee2e2"};color:${pos ? "#15803d" : "#b91c1c"}">Δ ${pos ? "+" : ""}${_fmtNum(d)}</span>`;
+    }
+  } else if (typeof value === "number") {
+    inner = _fmtNum(value);
+  }
+  return `<div class="insights-card" style="font-size:13px"><strong>${escapeHtml(label)}</strong><div style="opacity:.85">${inner}</div></div>`;
+}
+
+function _deltaGrid(obj) {
+  if (!obj) return "";
+  return `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:8px 0">${
+    Object.entries(obj).filter(([k]) => k !== "sitemap").map(([k, v]) => _deltaCard(k, v)).join("")
+  }</div>`;
+}
+
 function renderCompetitorGaps(data, isSingle) {
   const resultsEl = document.getElementById("competitor-gap-results");
   if (!data || !data.results || !data.results.length) {
@@ -2778,43 +2849,110 @@ function renderCompetitorGaps(data, isSingle) {
     }
     if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
 
-    const kwGaps = (c.keyword_gap && c.keyword_gap.gaps || []).length;
-    const contentGaps = c.content_gap ? c.content_gap.missing_count : 0;
-    const blGaps = (c.backlink_gap && c.backlink_gap.gaps || []).length;
-    const schemaGaps = (c.schema_gap && c.schema_gap.missing_from_target || []).length;
-    const featureGaps = Object.keys(c.serp_features_gap && c.serp_features_gap.comp_only || {}).length;
+    const sr = c.se_rich || {};
+    const ka = sr.keyword_analysis || {};
+    const ta = sr.traffic_analysis || {};
+    const ba = sr.backlink_analysis || {};
+    const aa = sr.authority_analysis || {};
+    const recs = sr.recommendations || [];
+    const errs = (sr.errors || c.errors || []).filter(Boolean);
+    const opp = sr.opportunity_score;
+    const tTraffic = ta.target_traffic;
+    const cTraffic = ta.competitor_traffic;
+    const tKws = ta.target_keywords;
+    const cKws = ta.competitor_keywords;
 
-    const gapStats = [
-      ["Keyword", kwGaps], ["Content", contentGaps], ["Backlink", blGaps],
-      ["Schema", schemaGaps], ["SERP Features", featureGaps],
-    ].map(([label, n]) => `<div class="insights-card"><div class="insights-label">${label} Gaps</div><div class="insights-value">${n}</div></div>`).join("");
+    const kpis = [
+      ["Opportunity score", _oppBadge(opp)],
+      ["Competitor pages crawled", _fmtNum(c.pages_crawled)],
+      ["Est. organic traffic", `${_fmtNum(tTraffic)} → ${_fmtNum(cTraffic)}`],
+      ["Organic keywords", `${_fmtNum(tKws)} → ${_fmtNum(cKws)}`],
+      ["Gap count", _fmtNum(c.gap_count)],
+    ].map(([lbl, val]) => `<div class="insights-card"><div class="insights-label">${escapeHtml(lbl)}</div><div class="insights-value">${val}</div></div>`).join("");
 
-    const tech = c.technical_gap || {};
-    const techRows = Object.entries(tech).filter(([k]) => k !== "sitemap").map(([k, v]) => {
-      const label = k.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
-      const d = v && v.delta !== undefined ? ` (Δ ${escapeHtml(String(v.delta))})` : "";
-      return `<div class="insights-card" style="font-size:13px"><strong>${escapeHtml(label)}</strong>${d}<div style="opacity:.8">Target: ${escapeHtml(String(v.target))} | Competitor: ${escapeHtml(String(v.competitor))}</div></div>`;
-    }).join("");
+    const trafficRows = [
+      _pairRow("Organic traffic", tTraffic, cTraffic),
+      _pairRow("Organic keywords", tKws, cKws),
+      _pairRow("Est. traffic value", null, ta.traffic_value_estimate),
+    ].join("");
 
-    const ux = c.ux_gap || {};
-    const uxRows = Object.entries(ux).map(([k, v]) => {
-      const label = k.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
-      const d = v && v.delta !== undefined ? ` (Δ ${escapeHtml(String(v.delta))})` : "";
-      return `<div class="insights-card" style="font-size:13px"><strong>${escapeHtml(label)}</strong>${d}<div style="opacity:.8">Target: ${escapeHtml(String(v.target))} | Competitor: ${escapeHtml(String(v.competitor))}</div></div>`;
-    }).join("");
+    const kwRows = (ka.top_opportunities || []).slice(0, 10)
+      .map(k => `<tr><td style="text-align:left">${escapeHtml(k.keyword)}</td><td>${_fmtNum(k.volume)}</td><td>${_fmtMoney(k.cpc)}</td><td>${_fmtNum(k.difficulty)}</td></tr>`).join("");
+    const sharedRows = (ka.shared_detail || []).slice(0, 10)
+      .map(s => `<tr><td style="text-align:left">${escapeHtml(s.keyword)}</td><td>${_fmtNum(s.comp ? s.comp.volume : null)}</td><td>${_fmtNum(s.target ? s.target.volume : null)}</td></tr>`).join("");
+    const serpWords = (c.keyword_gap && c.keyword_gap.gaps || []).slice(0, 15);
 
-    return `<div class="insights-card" style="margin-top:10px">
-      <h4 style="display:flex;justify-content:space-between;align-items:center">${escapeHtml(c.competitor)}
-        <span class="count-label">${escapeHtml(c.pages_crawled || 0)} pages crawled</span></h4>
-      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:8px 0">${gapStats}</div>
-      ${kwGaps ? `<div class="insights-label">Keywords they rank for that you don't:</div><div style="font-size:13px;margin-top:4px">${c.keyword_gap.gaps.slice(0, 15).map(k => `• ${escapeHtml(k)}`).join(" ")}</div>` : ""}
-      ${contentGaps ? `<div class="insights-label" style="margin-top:8px">Content they have that you don't (top ${Math.min(contentGaps, 10)}):</div><div style="font-size:13px;margin-top:4px">${c.content_gap.missing.slice(0, 10).map(m => `• <a href="${escapeHtml(m.url)}" target="_blank" rel="noopener">${escapeHtml(m.title)}</a>`).join("<br>")}</div>` : ""}
-      ${blGaps ? `<div class="insights-label" style="margin-top:8px">Backlink sources they have that you don't (top 20):</div><div style="font-size:13px;margin-top:4px">${c.backlink_gap.gaps.map(d => `• ${escapeHtml(d)}`).join(" ")}</div>` : ""}
-      ${schemaGaps ? `<div class="insights-label" style="margin-top:8px">Schema types on their pages missing from yours:</div><div style="font-size:13px;margin-top:4px">${c.schema_gap.missing_from_target.map(t => `• ${escapeHtml(t)}`).join(" ")}</div>` : ""}
-      ${featureGaps ? `<div class="insights-label" style="margin-top:8px">SERP features they appear in that you don't:</div><div style="font-size:13px;margin-top:4px">${Object.entries(c.serp_features_gap.comp_only).map(([kw, feats]) => `${escapeHtml(kw)} → ${escapeHtml(feats.join(", "))}`).join("<br>")}</div>` : ""}
-      <div class="insights-label" style="margin-top:10px">Technical / On-page / UX deltas (competitor − target)</div>
-      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:8px 0">${techRows}</div>
-      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:8px 0">${uxRows}</div>
+    const tBl = ba.target || {};
+    const cBl = ba.competitor || {};
+    const abRows = [
+      _pairRow("Backlinks", tBl.backlinks, cBl.backlinks),
+      _pairRow("Referring domains", tBl.referring_domains, cBl.referring_domains),
+      _pairRow("Domain authority", aa.target_domain_rank, aa.comp_domain_rank),
+      _pairRow("Page authority", aa.target_page_rank, aa.comp_page_rank),
+    ].join("");
+
+    const contentMissing = (c.content_gap && c.content_gap.missing || []).slice(0, 10);
+    const schemaMissing = (c.schema_gap && c.schema_gap.missing_from_target || []).slice(0, 10);
+    const highAuth = (ba.high_authority_sources || []).slice(0, 8);
+    const blSerp = (c.backlink_gap && c.backlink_gap.gaps || []).slice(0, 10);
+    const featureEntries = Object.entries(c.serp_features_gap && c.serp_features_gap.comp_only || {}).slice(0, 10);
+
+    const techCards = _deltaGrid(c.technical_gap);
+    const onpageCards = _deltaGrid(c.onpage_gap);
+    const uxCards = _deltaGrid(c.ux_gap);
+
+    const recsHtml = recs.map(r => `<div class="insights-card" style="border-left:3px solid ${r.priority === "high" ? "#dc2626" : r.priority === "medium" ? "#d97706" : "#6b7280"};margin-top:6px">
+      <strong>${escapeHtml(r.title)}</strong>${r.count != null ? ` <span class="badge">${_fmtNum(r.count)}</span>` : ""}
+      <div style="font-size:13px;opacity:.9;margin-top:4px">${escapeHtml(r.detail)}</div>
+    </div>`).join("");
+
+    return `<div class="insights-card" style="margin-top:12px">
+      <h4 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <span>${escapeHtml(c.competitor)} <span class="count-label">${_fmtNum(c.pages_crawled)} pages</span></span>
+        <span>${_oppBadge(opp)}</span>
+      </h4>
+
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:10px 0">${kpis}</div>
+
+      <h5 style="margin:14px 0 6px">Keyword Analysis</h5>
+      <div class="insights-card">
+        <div class="insights-label">Top opportunities — they rank, you don't (by volume)</div>
+        ${kwRows ? `<table class="data-table" style="width:100%"><thead><tr><th style="text-align:left">Keyword</th><th>Volume</th><th>CPC</th><th>Difficulty</th></tr></thead><tbody>${kwRows}</tbody></table>` : '<div class="insights-label">No SE Ranking keyword data available</div>'}
+        ${sharedRows ? `<div class="insights-label" style="margin-top:10px">Overlap — keywords you both rank for</div><table class="data-table" style="width:100%"><thead><tr><th style="text-align:left">Keyword</th><th>Competitor vol</th><th>Your vol</th></tr></thead><tbody>${sharedRows}</tbody></table>` : ""}
+        ${serpWords.length ? `<div class="insights-label" style="margin-top:10px">SERP-derived keywords they rank for</div><div style="font-size:13px;margin-top:4px">${serpWords.map(k => `<a href="https://www.google.com/search?q=${encodeURIComponent(k)}" target="_blank" rel="noopener">${escapeHtml(k)}</a>`).join(" · ")}</div>` : ""}
+      </div>
+
+      <h5 style="margin:14px 0 6px">Traffic</h5>
+      <div class="insights-card"><table class="data-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Metric</th><th>You</th><th>Competitor</th><th>Status</th></tr></thead>
+        <tbody>${trafficRows}</tbody></table>
+      </div>
+
+      <h5 style="margin:14px 0 6px">Backlinks &amp; Authority</h5>
+      <div class="insights-card"><table class="data-table" style="width:100%">
+        <thead><tr><th style="text-align:left">Metric</th><th>You</th><th>Competitor</th><th>Status</th></tr></thead>
+        <tbody>${abRows}</tbody></table>
+        ${highAuth.length ? `<div class="insights-label" style="margin-top:10px">Strong-authority sources they link from (top ${highAuth.length}):</div><div style="font-size:13px;margin-top:4px">${highAuth.map(s => `• ${escapeHtml(s.source_domain || s)}`).join(" ")}</div>` : ""}
+        ${blSerp.length ? `<div class="insights-label" style="margin-top:10px">SERP-derived backlink sources they have that you don't:</div><div style="font-size:13px;margin-top:4px">${blSerp.map(d => `• ${escapeHtml(d)}`).join(" ")}</div>` : ""}
+      </div>
+
+      <h5 style="margin:14px 0 6px">Content</h5>
+      <div class="insights-card">
+        ${contentMissing.length ? `<div class="insights-label">Pages they have that you don't (top ${contentMissing.length}):</div><div style="font-size:13px;margin-top:4px">${contentMissing.map(m => `• <a href="${escapeHtml(m.url)}" target="_blank" rel="noopener">${escapeHtml(m.title)}</a>`).join("<br>")}</div>` : '<div class="insights-label">No content gaps detected in this crawl</div>'}
+        ${schemaMissing.length ? `<div class="insights-label" style="margin-top:8px">Schema types on their pages missing from yours:</div><div style="font-size:13px;margin-top:4px">${schemaMissing.map(t => `• ${escapeHtml(t)}`).join(" ")}</div>` : ""}
+      </div>
+
+      <h5 style="margin:14px 0 6px">SERP Features</h5>
+      <div class="insights-card">${featureEntries.length ? featureEntries.map(([kw, feats]) => `<div style="font-size:13px;margin-top:4px"><strong>${escapeHtml(kw)}</strong> → ${escapeHtml((feats || []).join(", "))}</div>`).join("") : '<div class="insights-label">No SERP feature gaps detected</div>'}</div>
+
+      <h5 style="margin:14px 0 6px">Technical / On-page / UX (competitor − you)</h5>
+      ${techCards}
+      ${onpageCards}
+      ${uxCards}
+
+      ${recsHtml ? `<h5 style="margin:16px 0 6px">Insights &amp; Recommendations</h5>${recsHtml}` : ""}
+      ${errs.length ? `<div class="insights-error" style="margin-top:10px">${errs.map(e => escapeHtml(e)).join("; ")}</div>` : ""}
+      <div class="count-label" style="margin-top:10px">Data: SE Ranking (live competitor metrics) + local crawl. Generated ${c.generated_at ? new Date(String(c.generated_at)).toLocaleString() : "recently"}.</div>
     </div>`;
   }).join("");
 }
