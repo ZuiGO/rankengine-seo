@@ -1,4 +1,9 @@
-"""Slack notifications via incoming webhook. No-op (with a log line) when no webhook is configured."""
+"""Slack notifications via incoming webhook + SMTP email. No-op (with a log line) when not configured."""
+
+import asyncio
+import smtplib
+import ssl
+from email.message import EmailMessage
 
 import httpx
 
@@ -6,6 +11,88 @@ from backend.config import settings
 from backend.logging_setup import get_logger
 
 logger = get_logger("notifications")
+
+
+async def get_smtp_config() -> dict:
+    """SMTP: MongoDB app_settings first, .env as fallback (mirrors GitHub config)."""
+    try:
+        from backend.db.mongo import get_db
+        db = get_db()
+        doc = await db.app_settings.find_one({"key": "smtp"}) or {}
+    except Exception:
+        doc = {}
+    return {
+        "host": doc.get("host") or settings.smtp_host,
+        "port": doc.get("port") or settings.smtp_port,
+        "user": doc.get("user") or settings.smtp_user,
+        "password": doc.get("password") or settings.smtp_password,
+        "from_email": doc.get("from_email") or settings.smtp_from,
+        "use_tls": doc.get("use_tls", settings.smtp_use_tls),
+    }
+
+
+def _send_sync(cfg: dict, to: str, subject: str, body: str, attachment: tuple[str, bytes] | None = None) -> None:
+    if not cfg.get("host"):
+        raise ValueError("SMTP host not configured")
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = cfg.get("from_email") or cfg.get("user") or "no-reply@zuigo.ai"
+    msg["To"] = to
+    msg.set_content(body)
+    if attachment:
+        filename, payload = attachment
+        msg.add_attachment(payload, maintype="application", subtype="pdf", filename=filename)
+    if cfg.get("use_tls", True):
+        context = ssl.create_default_context()
+        with smtplib.SMTP(cfg["host"], int(cfg.get("port") or 587), timeout=20) as server:
+            server.starttls(context=context)
+            if cfg.get("user") and cfg.get("password"):
+                server.login(cfg["user"], cfg["password"])
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(cfg["host"], int(cfg.get("port") or 587), timeout=20) as server:
+            if cfg.get("user") and cfg.get("password"):
+                server.login(cfg["user"], cfg["password"])
+            server.send_message(msg)
+
+
+async def send_email(to: str, subject: str, body: str, attachment: tuple[str, bytes] | None = None) -> bool:
+    """Send an email via the configured SMTP server (DB settings first, .env fallback)."""
+    cfg = await get_smtp_config()
+    if not cfg.get("host"):
+        logger.debug("SMTP not configured; skipping email: %s", subject)
+        return False
+    try:
+        await asyncio.to_thread(_send_sync, cfg, to, subject, body, attachment)
+        logger.info("Email sent to=%s subject=%s", to, subject)
+        return True
+    except Exception as e:
+        logger.warning("Email send failed to=%s: %s", to, e)
+        return False
+
+
+async def email_report(job_id: str, to: str) -> bool:
+    """Render the branded PDF report for a job and email it."""
+    from backend.routes.reports import _report_html, _render_pdf
+    from backend.db.mongo import get_db
+
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        return False
+    html = await _report_html(job_id)
+    if isinstance(html, dict):
+        return False
+    pdf = await _render_pdf(html)
+    if pdf is None:
+        return False
+    domain = (job.get("url") or "").split("//")[-1].split("/")[0]
+    return await send_email(
+        to,
+        f"[ZuiGO Engine] SEO report for {domain}",
+        f"Hi,\n\nYour SEO report for {job.get('url')} is ready.\n\nThe PDF report is attached.\n\n— ZuiGO Engine",
+        (f"seo-report-{job_id}.pdf", pdf),
+    )
 
 
 async def send_slack(title: str, fields: dict, color: str = "good") -> bool:

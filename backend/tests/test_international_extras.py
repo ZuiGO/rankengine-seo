@@ -255,22 +255,33 @@ class TestImageOptimization:
     @pytest.mark.asyncio
     async def test_unique_images_dedupe(self, monkeypatch):
         html = (
-            "<img src='/logo.png'>"          # same src on both pages -> 1 unique
-            "<img src='/logo.png?w=100'>"    # query stripped -> same key
-            "<img src='/hero.jpg#frag'>"     # fragment stripped -> distinct file
+            "<img src='/logo.png'>"          # same resolved URL on both pages -> 1 unique
+            "<img src='/logo.png'>"        # duplicate raw form, same URL -> still 1
+            "<img src='/hero.jpg'>"        # relative form -> resolves identically
         )
         db = FakeDb()
         monkeypatch.setattr(img_mod, "get_db", lambda: db)
         db._stores["pages"] = {
             "https://x.example/": _page("https://x.example/", html),
             "https://x.example/about": _page("https://x.example/about",
-                                             "<img src='/logo.png'><img src='/hero.jpg'>"),
+                                             "<img src='/logo.png'><img src='https://x.example/logo.png'>"),
         }
         summary = await img_mod.audit_image_optimization("j1")
-        assert summary["total_images"] == 2          # logo + hero, unique
+        assert summary["total_images"] == 2          # logo + hero, unique resolved URLs
         assert summary["image_occurrences"] == 5     # 3 + 2 raw <img> tags
         assert summary["missing_dimensions"] == 2
         assert "unique" in str(summary["checks"][0]["detail"])
+
+    @pytest.mark.asyncio
+    async def test_data_uri_images_skipped(self, monkeypatch):
+        html = ("<img src='data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='>"
+                "<img src='https://x.example/cdn/icon.svg'>")
+        db = FakeDb()
+        monkeypatch.setattr(img_mod, "get_db", lambda: db)
+        db._stores["pages"] = {"https://x.example/": _page("https://x.example/", html)}
+        summary = await img_mod.audit_image_optimization("j1")
+        assert summary["total_images"] == 1
+        assert summary["image_occurrences"] == 2
 
 
 class TestIndexation:

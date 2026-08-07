@@ -102,7 +102,7 @@ form.addEventListener("submit", async e => {
     const resp = await fetch(`${API_BASE}/analysis`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, email: (document.getElementById("email-input")?.value || "").trim() }),
     });
     const data = await resp.json();
     currentJobId = data.job_id;
@@ -214,7 +214,68 @@ async function loadSettings() {
   } catch (err) {
     if (ghStatus) ghStatus.textContent = "Settings unavailable: " + err.message;
   }
+  const smtpStatus = document.getElementById("smtp-settings-status");
+  const smtpHost = document.getElementById("smtp-host");
+  const smtpPort = document.getElementById("smtp-port");
+  const smtpFrom = document.getElementById("smtp-from");
+  const smtpTls = document.getElementById("smtp-tls");
+  const smtpHint = document.getElementById("smtp-settings-hint");
+  if (smtpHint) smtpHint.style.display = "none";
+  try {
+    const smtpResp = await fetch(`${API_BASE}/settings/smtp`);
+    const smtp = smtpResp.ok ? await smtpResp.json() : {};
+    if (smtpHost) smtpHost.placeholder = smtp.host || "smtp.gmail.com";
+    if (smtpPort) smtpPort.placeholder = smtp.port ? String(smtp.port) : "587";
+    if (smtpFrom) smtpFrom.placeholder = smtp.from_email || "no-reply@yourdomain.com";
+    if (smtpTls) smtpTls.checked = smtp.use_tls !== undefined ? smtp.use_tls : true;
+    if (smtpStatus) smtpStatus.textContent = smtp.host_set ? "Configured" : "Not configured yet";
+  } catch (err) {
+    if (smtpStatus) smtpStatus.textContent = "Settings unavailable: " + err.message;
+  }
 }
+
+document.getElementById("smtp-settings-save")?.addEventListener("click", async () => {
+  const host = document.getElementById("smtp-host");
+  const port = document.getElementById("smtp-port");
+  const user = document.getElementById("smtp-user");
+  const password = document.getElementById("smtp-password");
+  const from = document.getElementById("smtp-from");
+  const tls = document.getElementById("smtp-tls");
+  const status = document.getElementById("smtp-settings-status");
+  const hint = document.getElementById("smtp-settings-hint");
+  try {
+    const resp = await fetch(`${API_BASE}/settings/smtp`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        host: host ? host.value.trim() : "",
+        port: port && port.value ? parseInt(port.value, 10) : null,
+        user: user ? user.value.trim() : "",
+        password: password ? password.value.trim() : "",
+        from_email: from ? from.value.trim() : "",
+        use_tls: tls ? tls.checked : true,
+      }),
+    });
+    const s = await resp.json();
+    if (!resp.ok) throw new Error(s.detail || resp.status);
+    if (hint) {
+      hint.textContent = "Saved. Emails now come from your SMTP server when a report is requested.";
+      hint.style.display = "block";
+    }
+    if (host) host.value = "";
+    if (user) user.value = "";
+    if (password) password.value = "";
+    if (from) from.value = "";
+    if (status) status.textContent = "Configured";
+    showToast("Email settings saved");
+    loadSettings();
+  } catch (err) {
+    if (hint) {
+      hint.textContent = "Failed to save: " + err.message;
+      hint.style.display = "block";
+    }
+  }
+});
 
 document.getElementById("gsc-settings-save")?.addEventListener("click", async () => {
   const clientId = document.getElementById("gsc-client-id");
@@ -334,6 +395,18 @@ async function pollJob(jobId) {
     progressMessage.textContent = job.progress_message || "";
     statusBadge.textContent = job.status;
     statusBadge.className = `status-badge status-${job.status}`;
+    const progressPercent = document.getElementById("progress-percent");
+    if (progressPercent) progressPercent.textContent = `${job.progress || 0}%`;
+    if (job.status === "running" && /^Crawled /.test(job.progress_message || "")) {
+      progressTitle.textContent = "Crawling...";
+    } else if (job.status === "running") {
+      progressTitle.textContent = "Running audit...";
+    }
+    const progressPages = document.getElementById("progress-pages");
+    if (progressPages) {
+      progressPages.textContent = job.status === "running" && job.pages_crawled
+        ? `${job.pages_crawled} pages crawled` : "";
+    }
 
     if (job.status === "completed") {
       stopPolling();
@@ -401,16 +474,12 @@ function loadOverview(summary) {
   const failedCard = nested.failed_urls_count
     ? `<div class="stat-card"><div class="stat-value" style="font-size:16px;color:#dc2626">${nested.failed_urls_count}</div><div class="stat-label">Pages Failed to Fetch</div></div>`
     : "";
-  const cannib = nested.cannibalization_groups || 0;
-  const cannibCard = cannib
-    ? `<div class="stat-card"><div class="stat-value" style="font-size:16px">${cannib}</div><div class="stat-label">Cannibalized Keywords</div></div>`
-    : "";
   stats.innerHTML = `
     <div class="stat-card"><div class="stat-value" data-count="${summary.total_pages}">0</div><div class="stat-label">Pages Crawled</div></div>
     <div class="stat-card"><div class="stat-value" data-count="${summary.total_content_items}">0</div><div class="stat-label">Content Items</div></div>
     <div class="stat-card"><div class="stat-value" data-count="${summary.total_action_items}">0</div><div class="stat-label">SEO Action Items</div></div>
     <div class="stat-card"><div class="stat-value" data-count="${summary.summary?.total_links || 0}">0</div><div class="stat-label">Total Links Found</div></div>
-    ${geoCard}${aiCard}${localCard}${failedCard}${cannibCard}
+    ${geoCard}${aiCard}${localCard}${failedCard}
   `;
   applyCounts(stats);
 
@@ -696,63 +765,125 @@ async function loadAnalytics(jobId) {
     const domain = (summary.url || "").split("//").pop().split("/")[0];
     if (!domain) return;
     const resp = await fetch(`${API_BASE}/trends/${encodeURIComponent(domain)}`);
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const points = (data.points || []).filter(p => p.health_score !== null && p.health_score !== undefined);
-    if (points.length < 2) {
-      el.innerHTML = '<p class="section-desc">Need at least two completed analyses to chart trends.</p>';
+    if (!resp.ok) {
+      el.innerHTML = '<p class="section-desc">No completed analyses yet for this domain — run another analysis to chart trends over time.</p>';
       return;
     }
-    const labels = points.map(p => new Date(p.completed_at).toLocaleDateString());
-    makeLineChart("chart-health", labels, [{
-      label: "Health score",
-      data: points.map(p => p.health_score),
-      borderColor: "#16a34a", backgroundColor: "rgba(22,163,74,0.15)", fill: true, tension: 0.3,
-    }]);
-    makeLineChart("chart-broken", labels, [{
-      label: "Broken links",
-      data: points.map(p => p.broken_link_count ?? p.broken_links),
-      borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.15)", fill: true, tension: 0.3,
-    }]);
-    makeLineChart("chart-pages", labels, [{
-      label: "Pages",
-      data: points.map(p => p.total_pages),
-      borderColor: "#0ea5e9", backgroundColor: "rgba(14,165,233,0.15)", fill: true, tension: 0.3,
-    }]);
+    const data = await resp.json();
+    const points = (data.points || []).filter(p => p.health_score !== null && p.health_score !== undefined);
+    if (points.length === 0) {
+      el.innerHTML = '<p class="section-desc">No completed analyses with a health score yet. Once this site is analyzed, trends will appear here.</p>';
+      return;
+    }
+    if (points.length === 1) {
+      renderSingleAnalytics(points[0]);
+    } else {
+      renderAnalyticsCharts(points);
+    }
 
     const trackResp = await fetch(`${API_BASE}/tracking/${jobId}`);
-    const track = await trackResp.json();
+    const track = trackResp.ok ? await trackResp.json() : { history: [] };
     const history = (track.history || []).slice().sort((a, b) => new Date(a.checked_at) - new Date(b.checked_at));
     const kwBox = document.getElementById("chart-keywords");
-    if (history.length >= 2 && kwBox) {
-      const kLabels = history.map(h => new Date(h.checked_at).toLocaleDateString());
-      const keywordOrder = [];
-      history.forEach(h => (h.results || []).forEach(r => {
-        if (r.keyword && !keywordOrder.includes(r.keyword)) keywordOrder.push(r.keyword);
-      }));
-      const palette = ["#6366f1", "#0ea5e9", "#f59e0b", "#ec4899", "#10b981", "#8b5cf6", "#ef4444", "#14b8a6"];
-      const datasets = keywordOrder.slice(0, 8).map((kw, i) => ({
-        label: kw.length > 24 ? kw.slice(0, 24) + "…" : kw,
-        data: history.map(h => {
-          const r = (h.results || []).find(x => x.keyword === kw);
-          return r && r.rank !== null && r.rank !== undefined ? r.rank : null;
-        }),
-        borderColor: palette[i % palette.length],
-        backgroundColor: palette[i % palette.length],
-        spanGaps: true, tension: 0.3, borderWidth: 2,
-      }));
-      makeLineChart("chart-keywords", kLabels, datasets, {
-        reverse: true,
-        ticks: { color: "#64748b" },
-        grid: { color: "rgba(148,163,184,0.12)" },
-        title: { display: true, text: "Rank (lower is better)", color: "#64748b" },
-      });
-    } else if (kwBox) {
-      kwBox.parentElement.innerHTML = '<p class="section-desc">Run Keyword Check at least twice to chart ranking trends.</p>';
+    if (kwBox) {
+      if (history.filter(h => (h.results || []).length).length >= 2) {
+        const kLabels = history.map(h => new Date(h.checked_at).toLocaleDateString());
+        const keywordOrder = [];
+        history.forEach(h => (h.results || []).forEach(r => {
+          if (r.keyword && !keywordOrder.includes(r.keyword)) keywordOrder.push(r.keyword);
+        }));
+        const palette = ["#6366f1", "#0ea5e9", "#f59e0b", "#ec4899", "#10b981", "#8b5cf6", "#ef4444", "#14b8a6"];
+        const datasets = keywordOrder.slice(0, 8).map((kw, i) => ({
+          label: kw.length > 24 ? kw.slice(0, 24) + "…" : kw,
+          data: history.map(h => {
+            const r = (h.results || []).find(x => x.keyword === kw);
+            return r && r.rank !== null && r.rank !== undefined ? r.rank : null;
+          }),
+          borderColor: palette[i % palette.length] || palette[0],
+          backgroundColor: palette[i % palette.length] || palette[0],
+          spanGaps: true, tension: 0.3, borderWidth: 2,
+        }));
+        makeLineChart("chart-keywords", kLabels, datasets, {
+          reverse: true,
+          ticks: { color: "#64748b" },
+          grid: { color: "rgba(148,163,184,0.12)" },
+          title: { display: true, text: "Rank (lower is better)", color: "#64748b" },
+        });
+      } else {
+        setChartEmpty("chart-keywords", "Run the Keyword Check at least twice to chart ranking trends.");
+      }
     }
   } catch {
-    el.innerHTML = '<p class="section-desc">Analytics unavailable for this site.</p>';
+    el.innerHTML = '<p class="section-desc">Analytics unavailable right now — try again shortly.</p>';
   }
+}
+
+function setChartEmpty(canvasId, message) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || typeof Chart === "undefined") return;
+  if (chartInstances.some(c => c.canvas === canvas)) return;
+  canvas.style.display = "none";
+  const box = canvas.parentElement;
+  if (box) {
+    box.querySelectorAll(".chart-tip").forEach(t => t.remove());
+    const tip = document.createElement("p");
+    tip.className = "section-desc chart-tip";
+    tip.style.padding = "24px 12px";
+    tip.textContent = message;
+    box.appendChild(tip);
+  }
+}
+
+function _clearChartTips(canvasId) {
+  const canvas = document.getElementById(canvasId);
+  if (canvas) {
+    canvas.style.display = "";
+    if (canvas.parentElement) canvas.parentElement.querySelectorAll(".chart-tip").forEach(t => t.remove());
+  }
+}
+
+function renderSingleAnalytics(p) {
+  const date = p.completed_at ? new Date(p.completed_at).toLocaleDateString() : "latest analysis";
+  const sets = [
+    ["chart-health", "Health Score", p.health_score],
+    ["chart-broken", "Broken Links", p.broken_link_count ?? p.broken_links ?? 0],
+    ["chart-pages", "Pages Crawled", p.total_pages ?? 0],
+  ];
+  for (const [canvasId, label, value] of sets) {
+    _clearChartTips(canvasId);
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) continue;
+    canvas.style.display = "none";
+    const box = canvas.parentElement;
+    if (!box) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "chart-tip";
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:baseline;gap:10px;padding:22px 12px">
+        <span style="font-size:34px;font-weight:700;color:var(--text)">${value ?? "N/A"}</span>
+        <span style="font-size:13px;color:var(--text-secondary)">as of ${escapeHtml(date)} — run this site again to chart trends</span>
+      </div>`;
+    box.appendChild(wrap);
+  }
+}
+
+function renderAnalyticsCharts(points) {
+  const labels = points.map(p => new Date(p.completed_at).toLocaleDateString());
+  makeLineChart("chart-health", labels, [{
+    label: "Health score",
+    data: points.map(p => p.health_score),
+    borderColor: "#16a34a", backgroundColor: "rgba(22,163,74,0.15)", fill: true, tension: 0.3,
+  }]);
+  makeLineChart("chart-broken", labels, [{
+    label: "Broken links",
+    data: points.map(p => p.broken_link_count ?? p.broken_links),
+    borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.15)", fill: true, tension: 0.3,
+  }]);
+  makeLineChart("chart-pages", labels, [{
+    label: "Pages",
+    data: points.map(p => p.total_pages),
+    borderColor: "#0ea5e9", backgroundColor: "rgba(14,165,233,0.15)", fill: true, tension: 0.3,
+  }]);
 }
 
 let pagesOffset = 0;
@@ -1160,6 +1291,7 @@ async function loadActions(jobId) {
         </div>
         <div class="action-issues"><strong>Issues:</strong> ${(a.identified_issues || []).join("; ")}</div>
         <div class="action-improvements"><strong>Improve:</strong> ${(a.improvement_suggestions || []).join("; ")}</div>
+        ${a.evidence && Object.keys(a.evidence).length ? `<div class="action-evidence"><strong>Evidence (from crawl):</strong> ${Object.entries(a.evidence).map(([k, v]) => `<span class="evidence-chip">${escapeHtml(String(k))}: ${escapeHtml(Array.isArray(v) ? v.slice(0, 5).join(", ") : String(v))}</span>`).join("")}</div>` : `<div class="action-evidence" style="color:var(--danger)"><strong>No evidence recorded — exclude this action before relying on it.</strong></div>`}
         ${a.status === "pending" ? `
           <div class="action-approve">
             <button class="btn-approve" onclick="approveAction('${a.id}', 'approved')">Approve</button>
@@ -1365,6 +1497,36 @@ document.getElementById("refresh-report-btn")?.addEventListener("click", () => {
   if (currentJobId) loadReport(currentJobId);
 });
 
+document.getElementById("report-email-btn")?.addEventListener("click", async () => {
+  if (!currentJobId) return;
+  const input = document.getElementById("report-email-input");
+  if (!input) return;
+  const to = input.value.trim();
+  if (!to) {
+    input.focus();
+    showToast("Enter a recipient email address first");
+    return;
+  }
+  const btn = document.getElementById("report-email-btn");
+  btn.disabled = true;
+  btn.textContent = "Sending...";
+  try {
+    const resp = await fetch(`${API_BASE}/reports/${currentJobId}/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    showToast(data.message || `Report emailed to ${to}`);
+  } catch (err) {
+    showToast("Email failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Email report";
+  }
+});
+
 async function loadReport(jobId) {
   const link = document.getElementById("report-download-link");
   link.href = `${API_BASE}/reports/${jobId}/download`;
@@ -1416,14 +1578,6 @@ async function loadReport(jobId) {
         </tr>`).join("")}
       </tbody>
     </table>` : ""}
-    <h4 style="margin:20px 0 10px">SEO Action Items (${report.seo_action_items.length})</h4>
-    ${report.seo_action_items.slice(0, 10).map(a => `
-      <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-        <strong>${a.content_type}</strong> - <span class="action-impact impact-${a.impact_on_ranking}">${a.impact_on_ranking}</span>
-        <div style="font-size:13px;color:var(--text-secondary)">${(a.identified_issues || []).slice(0, 2).join("; ")}</div>
-      </div>
-    `).join("")}
-    ${report.seo_action_items.length > 10 ? `<p style="margin-top:10px;font-size:13px;color:var(--text-secondary)">...and ${report.seo_action_items.length - 10} more items</p>` : ""}
   `;
   loadReportExtras(jobId, preview);
 }
@@ -1630,22 +1784,6 @@ async function loadReportExtras(jobId, preview) {
     }
   } catch (_) {}
   try {
-    const ca = await fetch(`${API_BASE}/quality/${jobId}/cannibalization`);
-    if (ca.ok) {
-      const d = await ca.json();
-      if (d.groups) {
-        preview.insertAdjacentHTML("beforeend", `
-          <h4 style="margin:20px 0 10px">Keyword Cannibalization (${d.groups} keyword groups)</h4>
-          <table class="data-table">
-            <thead><tr><th>Keyword</th><th>Competing Pages</th></tr></thead>
-            <tbody>${d.cannibalized_keywords.slice(0, 10).map(kw => `
-              <tr><td>${escapeHtml(kw)}</td><td>${d.affected_pages || "N/A"}</td></tr>`).join("")}
-            </tbody>
-          </table>`);
-      }
-    }
-  } catch (_) {}
-  try {
     const ps = await fetch(`${API_BASE}/quality/${jobId}/programmatic-seo`);
     if (ps.ok) {
       const d = await ps.json();
@@ -1754,6 +1892,10 @@ function showProgress() {
   progressMessage.textContent = "Starting...";
   progressTitle.textContent = "Crawling...";
   statusBadge.className = "status-badge status-queued";
+  const progressPercent = document.getElementById("progress-percent");
+  if (progressPercent) progressPercent.textContent = "0%";
+  const progressPages = document.getElementById("progress-pages");
+  if (progressPages) progressPages.textContent = "";
   statusBadge.textContent = "Queued";
 }
 
@@ -1845,7 +1987,7 @@ async function loadQuality(jobId) {
   const el = document.getElementById("quality-content");
   if (!el) return;
   el.innerHTML = '<div class="insights-card">Loading site health & audits...</div>';
-  const [dup, sd, perf, geo, orphans, spend, summary, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, cannib, links, health] = await Promise.all([
+  const [dup, sd, perf, geo, orphans, spend, summary, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, links, health] = await Promise.all([
     clientGet(`${API_BASE}/quality/${jobId}/duplicates`),
     clientGet(`${API_BASE}/quality/${jobId}/structured-data`),
     clientGet(`${API_BASE}/quality/${jobId}/performance`),
@@ -1861,13 +2003,12 @@ async function loadQuality(jobId) {
     clientGet(`${API_BASE}/quality/${jobId}/sitemap`),
     clientGet(`${API_BASE}/quality/${jobId}/ai-visibility`),
     clientGet(`${API_BASE}/quality/${jobId}/local-seo`),
-    clientGet(`${API_BASE}/quality/${jobId}/cannibalization`),
     clientGet(`${API_BASE}/links/${jobId}`),
     clientGet(`${API_BASE}/sites/${jobId}/health`),
   ]);
   const nested = summary?.summary || summary || {};
   renderSiteHealth(health, nested);
-  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, cannib, links);
+  el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, links);
   const spendEl = document.getElementById("quality-spend");
   if (spendEl) spendEl.innerHTML = renderSpend(spend);
 }
@@ -1940,7 +2081,7 @@ function renderSiteHealth(health, nested) {
   </div>`;
 }
 
-function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, cannib, links) {
+function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, links) {
   const cards = [];
 
   const dupCount = (dup?.duplicate_groups?.length) ?? 0;
@@ -2137,19 +2278,6 @@ function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, 
         };
       })()
     : { status: "na", label: "Not run", verdict: "Local-SEO audit not run for this job.", score: null }));
-
-  const cannibGroups = cannib?.groups ?? 0;
-  cards.push(auditCard("Keyword Cannibalization", cannib
-    ? {
-        status: cannibGroups === 0 ? "pass" : "attention",
-        label: cannibGroups === 0 ? "Pass" : "Attention",
-        score: cannibGroups === 0 ? 100 : Math.max(0, 100 - cannibGroups * 10),
-        verdict: cannibGroups === 0
-          ? "No pages competing for the same keyword detected."
-          : `${cannibGroups} keyword group(s) have multiple competing pages — split or merge to avoid rank cannibalization.`,
-        checks: (cannib.cannibalized_keywords || []).slice(0, 8).map(k => ({ passed: false, label: k })),
-      }
-    : { status: "na", label: "Not run", verdict: "Cannibalization check not run for this job.", score: null }));
 
   const blChecked = links?.total_links_scanned ?? links?.links_checked ?? 0;
   const blBroken = links?.broken_link_count ?? 0;
@@ -2644,7 +2772,10 @@ function renderCompetitorGaps(data, isSingle) {
   resultsEl.innerHTML = data.results.map(c => {
     const status = c.status || "queued";
     if (status === "queued") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Queued for full-page crawl...</div></div>`;
-    if (status === "running") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div></div>`;
+    if (status === "running") {
+      const err = (c.errors || []).filter(Boolean).join("; ");
+      return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div>${err ? `<div class="insights-error" style="margin-top:6px">${escapeHtml(err)}</div>` : ""}</div>`;
+    }
     if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
 
     const kwGaps = (c.keyword_gap && c.keyword_gap.gaps || []).length;
@@ -2692,6 +2823,8 @@ function renderCompetitorStatus(rows) {
   return rows.some(r => ["queued", "running"].includes(r.status));
 }
 
+let competitorPollDeadline = 0;
+
 function retryCompetitor(domain) {
   if (!currentJobId) return;
   const input = document.getElementById("competitor-input");
@@ -2710,7 +2843,14 @@ async function loadCompetitors(jobId) {
     }
     renderCompetitorGaps(data, false);
     if (data.results && renderCompetitorStatus(data.results)) {
-      setTimeout(() => loadCompetitors(jobId), 4000);
+      if (!competitorPollDeadline) competitorPollDeadline = Date.now() + 30 * 60 * 1000;
+      if (Date.now() < competitorPollDeadline) {
+        setTimeout(() => loadCompetitors(jobId), 4000);
+      } else {
+        resultsEl.insertAdjacentHTML("beforeend", '<p class="insights-label" style="margin-top:8px">Polling stopped after 30 minutes — refresh to re-check live status.</p>');
+      }
+    } else {
+      competitorPollDeadline = 0;
     }
   } catch (err) {
     resultsEl.innerHTML = `<div class="insights-error">Error: ${escapeHtml(err.message)}</div>`;
@@ -2742,6 +2882,7 @@ document.getElementById("competitor-form")?.addEventListener("submit", async (e)
       resultsEl.innerHTML = `<div class="insights-label">Error: ${escapeHtml(data.detail || resp.status)}</div>`;
     } else {
       showToast("Competitor analysis queued");
+      competitorPollDeadline = 0;
       loadCompetitors(currentJobId);
     }
   } catch (err) {
@@ -2753,7 +2894,10 @@ document.getElementById("competitor-form")?.addEventListener("submit", async (e)
 });
 
 document.getElementById("competitor-refresh-btn")?.addEventListener("click", () => {
-  if (currentJobId) loadCompetitors(currentJobId);
+  if (currentJobId) {
+    competitorPollDeadline = 0;
+    loadCompetitors(currentJobId);
+  }
 });
 
 document.getElementById("refresh-insights-btn")?.addEventListener("click", async () => {
@@ -3184,11 +3328,6 @@ async function loadLogs() {
             `).join("")}
           </tbody>
         </table>`;
-
-    logsEl.textContent = (appLogs.lines || []).join("\n") || "No log output yet.";
-    document.getElementById("app-log-path").textContent = appLogs.path ? `(${appLogs.path})` : "";
-    logsEl.textContent = (appLogs.lines || []).join("\n") || "No log output yet.";
-    document.getElementById("app-log-path").textContent = appLogs.path ? `(${appLogs.path})` : "";
   } catch (err) {
     alertsEl.innerHTML = `<div class="insights-card">Error: ${escapeHtml(err.message)}</div>`;
   }

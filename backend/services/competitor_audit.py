@@ -497,8 +497,14 @@ async def audit_competitors(target_job_id: str, competitors: list[str]) -> dict:
     target_url = job.get("url", "")
 
     results = []
-    for comp in competitors:
-        entry = await _analyze_one(target_job_id, target_url, comp)
+    parallel = min(2, len(competitors))
+    sema = asyncio.Semaphore(parallel)
+
+    async def run_one(comp):
+        async with sema:
+            return await _analyze_one(target_job_id, target_url, comp)
+
+    for entry in await asyncio.gather(*(run_one(c) for c in competitors)):
         update = dict(entry)
         update["updated_at"] = datetime.utcnow()
         await db.competitor_gap_analyses.update_one(

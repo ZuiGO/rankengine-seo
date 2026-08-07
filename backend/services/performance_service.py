@@ -145,8 +145,8 @@ async def fetch_page_performance(url: str, strategy: str = "mobile") -> dict:
     }
 
 
-async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
-    """Mobile CWV for every page (cap max_pages), desktop for the homepage. Per-page error isolation."""
+async def fetch_performance(job_id: str, max_pages: int | None = None) -> dict:
+    """Mobile CWV for a sample (cap max_pages or settings.psi_page_sample), desktop for the homepage. Per-page error isolation."""
     db = get_db()
     pages = await db.pages.find({"job_id": job_id}, {"html": 0, "html_mobile": 0}).to_list(length=None)
     if not pages:
@@ -165,6 +165,7 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
         deduped.append(p)
     pages = deduped
 
+    limit = min(len(pages), max_pages if max_pages is not None else settings.psi_page_sample)
     sem = asyncio.Semaphore(settings.psi_concurrency)
     results = []
     errors = []
@@ -184,7 +185,7 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
                 except Exception as e:
                     errors.append(f"{url} ({strategy}): {e}")
 
-    await asyncio.gather(*[fetch_one(p) for p in pages[:max_pages]])
+    await asyncio.gather(*[fetch_one(p) for p in pages[:limit]])
 
     urls_seen = set()
     page_scores = []
@@ -215,7 +216,7 @@ async def fetch_performance(job_id: str, max_pages: int = 50) -> dict:
         "checks": len(results),
         "pages_checked": len(urls_seen),
         "desktop_checked": desktop_checked,
-        "pages": min(len(pages), max_pages),
+        "pages": limit,
         "failed": len(errors),
         "errors": errors[:10],
         "avg_cwv_score": round(sum(page_scores) / len(page_scores), 1) if page_scores else None,

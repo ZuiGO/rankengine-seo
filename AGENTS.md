@@ -10,8 +10,60 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: DataForSEO removed, SE Ranking sole paid provider — working tree, commit pending)
-- DataForSEO removal + SE Ranking expansion round (working tree; full suite 285/285):
+## Status (last update: email reports + crawl-progress live view + crawl-speed/evidence round — commit pending)
+- Round: exact counts, action evidence, cannibalization removal, speed,
+  SEOmator-style UI, Analytics/Competitor fixes, email, crawl progress.
+  Full suite 290/290; `node --check` clean.
+  - Cannibalization fully removed (`rg -ri cannibal backend/ frontend/` = 0):
+    deleted `services/cannibalization.py`; pipeline stage, summary key,
+    quality route, site_health block, exec_summary entries, chat/sites
+    refs, frontend stats card/report section/quality card all removed.
+  - `logsEl is not defined` fixed: dead `logsEl`/`appLogs` refs removed
+    (`rg -n logsEl\|appLogs` = 0); `loadLogs` catch renders into
+    `alertsEl`.
+  - Analytics tab handles no-study, empty history, single-analysis KPI
+    cards, multi-analysis charts, keyword charts only with >=2 points.
+  - Competitors: parallel batches `Semaphore(2)`, cancel resets
+    running→queued, dedupe enqueue, 30-min frontend poll cap \
+    (`competitorPollDeadline`), running cards surface errors.
+  - Exact content counts: `content_items` unique per
+    (job_id, content_type, source_url); `ensure_indexes` unique index in
+    `db/mongo.py` (degrades to non-unique on duplicate); classifier
+    dedupes per resolved URL, skips `data:` URIs, `<source>` only inside
+    `<picture>`; image_optimization uses same URL-resolved dedupe so
+    `total_images` == `content_breakdown.image`; crawler dedupes
+    video_embeds by download URL + DuplicateKeyError guard.
+    `scripts/dedupe_content_items.py` one-time migration for existing
+    jobs (dedupes content_items + orphans content_extractions).
+  - Report: raw "SEO Action Items" section + `seo_action_items`/`action_items_list`
+    JSON key removed (report kept Quick Wins / Long-Term Improvements /
+    Content Versions / Overview + KPI bars); `action_items` var is still
+    fetched into `_report_html` for exec/recommendation rendering.
+    Evidence guarantee lives in `seo_analyzer._make_action`, which returns
+    `None` (skips with a warning) whenever `check.evidence` is empty, so
+    every stored action has real evidence; Actions tab surfaces the
+    Evidence block per action or a red "No evidence recorded" note.
+  - Crawl speed: link_checker CHECK_CONCURRENCY 10→20, REQUEST_TIMEOUT
+    12→7, geo_alignment parallel via Semaphore(8), PSI sample cap
+    `settings.psi_page_sample` = 20 (was all pages), mobile sample cap
+    `settings.mobile_sample_pages` = 20 sorted by smallest `click_depth`,
+    classifier/crawler/image_opt dedupe. Live fluidcontrols.com (261 pg)
+    crawl time cut substantially; reports still render identical content.
+  - Email reports: SMTP config DB `app_settings` key `smtp` first (`GET/PUT
+    /api/settings/smtp`, masked), `.env` fallback (`smtp_host/port/user/
+    password/from/use_tls` in config.py + .env.example); `notifications.py`
+    `get_smtp_config`/`send_email` (smtplib in asyncio.to_thread)/
+    `email_report(job_id, to)` builds branded PDF via reports `_render_pdf`;
+    `POST /api/reports/{job_id}/email`; Analyze form optional `email` field
+    (success + failure alert emails); Settings tab SMTP section; Report tab
+    "Email report" button. Without SMTP configured the endpoint 502s with a
+    clear message (tested live).
+  - Crawl-progress live view: crawler writes `current_stage`/
+    `pages_crawled` into the job doc on every progress tick; progress
+    card shows animated `%`, "Live" pulse dot, stage title (Crawling... /
+    Running audit...), and "N pages crawled" line.
+- SE Ranking is the sole paid insight provider (DataForSEO removed) — see below.
+- DataForSEO removal + SE Ranking expansion round (committed, was working tree; full suite 285/285):
   - `services/dataforseo.py` and `services/competitor_gap.py` DELETED. SE Ranking
     (api.seranking.com/v1) is now the sole paid insights provider for: domain
     overview + organic traffic estimates, organic keywords, paid keywords

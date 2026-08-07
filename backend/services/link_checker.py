@@ -10,8 +10,8 @@ from backend.services.url_normalizer import normalize_url
 
 logger = get_logger("link_checker")
 
-CHECK_CONCURRENCY = 10
-REQUEST_TIMEOUT = 12
+CHECK_CONCURRENCY = 20
+REQUEST_TIMEOUT = 7
 USER_AGENT = "ZuiGO-Engine/1.0 link-checker (+https://zuigo.ai)"
 
 

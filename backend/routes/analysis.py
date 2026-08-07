@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 class AnalyzeRequest(BaseModel):
     url: str
     max_pages: int = 50
+    email: str = ""
 
 
 class AnalyzeResponse(BaseModel):
@@ -49,6 +50,7 @@ async def start_analysis(req: AnalyzeRequest):
         "completed_at": None,
         "error_message": None,
         "summary": None,
+        "email": (req.email or "").strip(),
     })
 
     await run_or_fallback("analyze_job", run_analysis_pipeline, job_id, url, req.max_pages)
@@ -73,7 +75,10 @@ async def run_competitor_pipeline(target_job_id: str, competitors: list[str]):
         await audit_competitors(target_job_id, competitors)
     except asyncio.CancelledError:
         logger.warning("Competitor audit cancelled target=%s", target_job_id)
-        await _mark_errors("Audit cancelled (worker restart or timeout)")
+        await db.competitor_gap_analyses.update_many(
+            {"target_job_id": target_job_id, "status": "running"},
+            {"$set": {"status": "queued", "updated_at": datetime.utcnow()}},
+        )
         raise
     except asyncio.TimeoutError:
         logger.error("Competitor audit timed out target=%s", target_job_id)
@@ -258,11 +263,6 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             from backend.services.geo_alignment import audit_geo_alignment
             return await audit_geo_alignment(job_id)
 
-        async def _cannibalization():
-            await _progress("Checking keyword cannibalization...")
-            from backend.services.cannibalization import detect_cannibalization
-            return await detect_cannibalization(job_id)
-
         async def _programmatic_seo():
             await _progress("Detecting programmatic page templates...")
             from backend.services.programmatic_seo import audit_programmatic_seo
@@ -271,7 +271,6 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         w2 = dict(await asyncio.gather(*[
             _stage("action_analysis", _action_analysis, fallback=None),
             _stage("geo_alignment", _geo_alignment, fallback={}),
-            _stage("cannibalization", _cannibalization, fallback={}),
             _stage("programmatic_seo", _programmatic_seo, fallback={}),
             _stage("vectors", _vectors, fallback=0),
         ]))
@@ -336,7 +335,6 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                         "nap_schema_present": local_seo.get("nap_schema_present", False),
                         "contact_page_present": local_seo.get("contact_page_present", False),
                     },
-                    "cannibalization_groups": w2.get("cannibalization", {}).get("groups", 0),
                     "programmatic_seo": {
                         "score": programmatic.get("score"),
                         "template_pages": programmatic.get("template_pages", 0),
@@ -412,6 +410,15 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         except Exception as n_err:
             logger.warning("Slack notification failed job=%s: %s", job_id, n_err)
 
+        try:
+            from backend.services.notifications import email_report
+            job_doc = await db.analysis_jobs.find_one({"_id": job_id}, {"email": 1})
+            report_email = (job_doc or {}).get("email") or ""
+            if report_email:
+                await email_report(job_id, report_email)
+        except Exception as m_err:
+            logger.warning("Report email failed job=%s: %s", job_id, m_err)
+
     except Exception as e:
         logger.error("Analysis failed job=%s: %s", job_id, e)
         await log_audit("analysis_failed", job_id, {"error": str(e)})
@@ -425,8 +432,16 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             }}
         )
         try:
-            from backend.services.notifications import send_slack
+            from backend.services.notifications import send_slack, send_email
             await send_slack("Analysis failed", {"Site": url, "Error": str(e)[:300]}, color="danger")
+            job_doc = await db.analysis_jobs.find_one({"_id": job_id}, {"email": 1})
+            report_email = (job_doc or {}).get("email") or ""
+            if report_email:
+                await send_email(
+                    report_email,
+                    "[ZuiGO Engine] Analysis failed",
+                    f"Your ZuiGO Engine analysis of {url} failed.\n\nError: {e}\n\nRetry from the app when ready.",
+                )
         except Exception as n_err:
             logger.warning("Slack failure notification failed job=%s: %s", job_id, n_err)
 

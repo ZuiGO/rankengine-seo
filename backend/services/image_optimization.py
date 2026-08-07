@@ -8,6 +8,7 @@ measurable parts of the seo-audit skill's Image Optimization checklist.
 from datetime import datetime
 
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
@@ -17,13 +18,15 @@ logger = get_logger("image_optimization")
 MODERN_EXT = {".webp", ".avif"}
 
 
-def _unique_key(src: str) -> str:
-    key = (src or "").strip().lower()
-    if "?" in key:
-        key = key.split("?", 1)[0]
-    if "#" in key:
-        key = key.split("#", 1)[0]
-    return key
+def _resolve(page_url: str, src: str) -> str:
+    if not src:
+        return ""
+    if src.lower().startswith("data:"):
+        return ""
+    full = urljoin(page_url, src.strip())
+    if full.lower().startswith("data:"):
+        return ""
+    return full
 
 
 async def audit_image_optimization(job_id: str) -> dict:
@@ -49,8 +52,8 @@ async def audit_image_optimization(job_id: str) -> dict:
         pages_with_imgs += 1
         occurrences += len(imgs)
         for img in imgs:
-            src = (img.get("src") or "").strip().lower()
-            key = _unique_key(src)
+            src = (img.get("src") or "").strip()
+            key = _resolve(p.get("url", ""), src)
             if not key:
                 continue
             if key in seen:
@@ -61,7 +64,7 @@ async def audit_image_optimization(job_id: str) -> dict:
             loading = (img.get("loading") or "").strip().lower()
             if loading == "lazy":
                 lazy_imgs += 1
-            if any(key.endswith(ext) or ext in srcset for ext in MODERN_EXT):
+            if any(key.lower().endswith(ext) or ext in srcset for ext in MODERN_EXT):
                 modern_imgs += 1
                 continue
             picture = next(

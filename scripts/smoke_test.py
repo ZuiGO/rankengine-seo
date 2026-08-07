@@ -78,10 +78,8 @@ async def main(host: str, url: str):
         local_seo = (await client.get(f"/api/quality/{job_id}/local-seo")).json()
         report("local seo", "score" in local_seo and "local_business_schema" in local_seo,
                f"score={local_seo.get('score')} nap={local_seo.get('nap_schema_present')}")
-        can = (await client.get(f"/api/quality/{job_id}/cannibalization")).json()
-        report("cannibalization check", "groups" in can, f"groups={can.get('groups')} kw={can.get('cannibalized_keywords')[:2]}")
         report("new summary keys", "sitemap" in ssum and "ai_visibility" in ssum and "local_seo" in ssum,
-               f"sitemap={bool(ssum.get('sitemap'))} ai={bool(ssum.get('ai_visibility'))} local={bool(ssum.get('local_seo'))} cannib_groups={ssum.get('cannibalization_groups')}")
+               f"sitemap={bool(ssum.get('sitemap'))} ai={bool(ssum.get('ai_visibility'))} local={bool(ssum.get('local_seo'))}")
 
         # 3. Pages
         pages = (await client.get(f"/api/pages/{job_id}?limit=500")).json()

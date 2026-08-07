@@ -61,95 +61,82 @@ def classify_with_magic(file_path: str) -> str | None:
 def detect_content_types(page_url: str, html: str) -> list[dict]:
     soup = BeautifulSoup(html, "lxml")
     items = []
-    seen = set()
+    seen: set[str] = set()
+
+    joined = lambda url: urljoin(page_url, url.strip()) if url else ""
+
+    def add(ctype: str, source_url: str, **extra) -> None:
+        if not source_url or source_url.lower().startswith("data:"):
+            return
+        if source_url in seen:
+            return
+        seen.add(source_url)
+        items.append({"type": ctype, "source_url": source_url, **extra})
 
     # Images
     for img in soup.find_all("img"):
         src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
-        if src and src not in seen:
-            seen.add(src)
-            items.append({
-                "type": "image",
-                "source_url": urljoin(page_url, src),
-                "alt": img.get("alt", ""),
-                "tag": "img",
-                "width": img.get("width"),
-                "height": img.get("height"),
-            })
+        full = joined(src)
+        if full:
+            add("image", full, alt=img.get("alt", ""), tag="img",
+                width=img.get("width"), height=img.get("height"))
 
-    # Picture sources
+    # Picture sources (skip video <source> children — handled below)
     for source in soup.find_all("source"):
+        picture = next(
+            (a for a in (source.parents if source.parent is not None else iter(()))
+             if getattr(a, "name", "") == "picture"),
+            None,
+        )
+        if picture is None:
+            continue
         srcset = source.get("srcset", "")
-        if srcset and srcset not in seen:
+        if srcset:
             first_url = srcset.split(",")[0].strip().split(" ")[0]
-            if first_url not in seen:
-                seen.add(first_url)
-                items.append({
-                    "type": "image",
-                    "source_url": urljoin(page_url, first_url),
-                    "tag": "source",
-                    "alt": "",
-                })
+            full = joined(first_url)
+            if full:
+                add("image", full, tag="source", alt="")
 
     # Links to files / embeds
     for a in soup.find_all("a", href=True):
         href = a["href"].strip()
         if not href or href.startswith("#") or href.startswith("javascript:"):
             continue
-        ctype = classify_url(href)
-        if ctype and href not in seen:
-            seen.add(href)
-            items.append({
-                "type": ctype,
-                "source_url": urljoin(page_url, href),
-                "text": a.get_text(strip=True),
-                "tag": "a",
-            })
+        full = joined(href)
+        if not full:
+            continue
+        ctype = classify_url(full)
+        if ctype:
+            add(ctype, full, text=a.get_text(strip=True), tag="a")
 
     # YouTube embeds (iframe src)
     for iframe in soup.find_all("iframe"):
         src = iframe.get("src") or ""
-        if src and src not in seen:
-            seen.add(src)
-            full = urljoin(page_url, src)
-            parsed = urlparse(full)
-            domain = parsed.netloc.lower()
-            is_embed = any(d in domain for d in (*YOUTUBE_DOMAINS, *VIMEO_DOMAINS))
-            items.append({
-                "type": "video_embed" if is_embed else "iframe",
-                "source_url": full,
-                "tag": "iframe",
-            })
+        full = joined(src)
+        if not full:
+            continue
+        parsed = urlparse(full)
+        domain = parsed.netloc.lower()
+        is_embed = any(d in domain for d in (*YOUTUBE_DOMAINS, *VIMEO_DOMAINS))
+        add("video_embed" if is_embed else "iframe", full, tag="iframe")
 
     # Video tags
     for video in soup.find_all("video"):
         src = video.get("src") or ""
-        if src and src not in seen:
-            seen.add(src)
-            items.append({
-                "type": "video",
-                "source_url": urljoin(page_url, src),
-                "tag": "video",
-            })
+        full = joined(src)
+        if full:
+            add("video", full, tag="video")
         for source in video.find_all("source"):
             s = source.get("src", "")
-            if s and s not in seen:
-                seen.add(s)
-                items.append({
-                    "type": "video",
-                    "source_url": urljoin(page_url, s),
-                    "tag": "source",
-                })
+            full = joined(s)
+            if full:
+                add("video", full, tag="source")
 
     # Object / embed tags
     for obj in soup.find_all("object"):
         data = obj.get("data", "")
-        if data and data not in seen:
-            seen.add(data)
-            items.append({
-                "type": "iframe",
-                "source_url": urljoin(page_url, data),
-                "tag": "object",
-            })
+        full = joined(data)
+        if full:
+            add("iframe", full, tag="object")
 
     return items

@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     slack_webhook_url: str = ""
     action_webhook_url: str = ""
     github_token: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
     broken_link_alert_threshold: int = 5
     gemini_cost_per_million: float = 0.125
     groq_cost_per_million: float = 0.0
@@ -33,6 +39,8 @@ class Settings(BaseSettings):
     competitor_crawl_max_pages: int = 1000
     competitor_psi_all_pages: bool = False
     competitor_psi_sample: int = 10
+    psi_page_sample: int = 20
+    mobile_sample_pages: int = 20
     metadata_only: bool = True
     log_level: str = "INFO"
     log_dir: str = "logs"

@@ -7,6 +7,7 @@ from urllib.robotparser import RobotFileParser
 import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
+from pymongo.errors import DuplicateKeyError
 
 from backend.config import settings
 from backend.db.mongo import get_db
@@ -135,6 +136,8 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
             {"$set": {
                 "progress": int((crawled / progress_denom) * 100) if progress_denom else 0,
                 "progress_message": msg,
+                "current_stage": "crawling",
+                "pages_crawled": crawled,
             }}
         )
 
@@ -240,12 +243,12 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                     source = item.get("source_url", "")
                     if source.lower().startswith("data:"):
                         return None
-                    if item.get("type") == "video_embed":
-                        return (item, None)
                     async with dedup_lock:
                         if source in downloaded_urls:
                             return None
                         downloaded_urls.add(source)
+                    if item.get("type") == "video_embed":
+                        return (item, None)
                     dl = None
                     try:
                         async with download_sem:
@@ -275,11 +278,13 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                         "width": item.get("width"),
                         "height": item.get("height"),
                     }
-                    result = await db.content_items.insert_one(doc)
+                    try:
+                        result = await db.content_items.insert_one(doc)
+                    except DuplicateKeyError:
+                        continue
                     doc["_id"] = str(result.inserted_id)
                     await analyze_content_item(doc, url, job_id)
                     downloaded_types.add(item["type"])
-
                 async with lock:
                     total_internal += len(internal_urls)
                     total_external += len(external_urls)
@@ -406,7 +411,10 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                             except Exception as me:
                                 logger.error("Mobile crawl error for %s: %s", url, me)
 
-                    await asyncio.gather(*[mobile_pass(result["url"]) for result in crawled_pages])
+                    sample_pages = sorted(
+                        crawled_pages, key=lambda p: (p.get("click_depth", 0), p.get("url", ""))
+                    )[: settings.mobile_sample_pages]
+                    await asyncio.gather(*[mobile_pass(p["url"]) for p in sample_pages])
                     await mobile_browser.close()
             except Exception as mb_err:
                 logger.error("Mobile crawl pass failed job=%s: %s", job_id, mb_err)

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.config import settings
-from backend.db.mongo import connect_db, close_db, get_db
+from backend.db.mongo import connect_db, close_db, get_db, ensure_indexes
 from backend.db.neo4j_db import connect_neo4j, close_neo4j
 from backend.logging_setup import setup_logging, get_logger
 from backend.routes import analysis, pages, content, links, actions, reports, chat, seo_insights, sites, scheduler, logs, dummy, quality, tracking, spend, trends, competitors, exec_summary, gsc, app_settings
@@ -32,6 +32,10 @@ async def lifespan(app: FastAPI):
     global scheduler_task
     setup_logging()
     await connect_db(settings.mongodb_uri)
+    try:
+        await ensure_indexes()
+    except Exception as e:
+        logger.warning("Index init failed: %s", e)
     try:
         await connect_neo4j(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
     except Exception as e:

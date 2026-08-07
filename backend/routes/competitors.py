@@ -74,12 +74,14 @@ async def competitor_analyze(target_job_id: str, req: GapRequest):
     for comp, raw in zip(competitors, raw_forms):
         await _migrate_stale_key(db, target_job_id, comp, [comp, raw])
 
+    to_enqueue = []
     for comp in competitors:
         existing = await db.competitor_gap_analyses.find_one(
             {"target_job_id": target_job_id, "competitor": comp}
         )
         if existing and existing.get("status") in ("queued", "running"):
             continue
+        to_enqueue.append(comp)
         await db.competitor_gap_analyses.update_one(
             {"target_job_id": target_job_id, "competitor": comp},
             {
@@ -88,12 +90,21 @@ async def competitor_analyze(target_job_id: str, req: GapRequest):
                     "url": comp,
                     "target_job_id": target_job_id,
                     "status": "queued",
+                    "errors": None,
                     "updated_at": datetime.utcnow(),
                 },
                 "$setOnInsert": {"created_at": datetime.utcnow()},
             },
             upsert=True,
         )
+
+    if not to_enqueue:
+        return {
+            "status": "already_running",
+            "job_id": target_job_id,
+            "competitors": competitors,
+            "detail": "All submitted competitors are already queued or running.",
+        }
 
     from backend.services.queue import run_or_fallback
     from backend.routes.analysis import run_competitor_pipeline
@@ -102,9 +113,9 @@ async def competitor_analyze(target_job_id: str, req: GapRequest):
         "competitor_audit",
         run_competitor_pipeline,
         target_job_id,
-        competitors,
+        to_enqueue,
     )
-    return {"status": "queued", "job_id": target_job_id, "competitors": competitors}
+    return {"status": "queued", "job_id": target_job_id, "competitors": to_enqueue}
 
 
 @router.get("/{target_job_id}")

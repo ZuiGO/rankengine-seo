@@ -46,6 +46,9 @@
           <input type="url" id="url-input" placeholder="https://yoursite.com" required autofocus>
           <button type="submit" id="analyze-btn">Run free site audit</button>
         </div>
+        <div class="input-group" style="margin-top:10px">
+          <input type="email" id="email-input" placeholder="you@example.com (optional — get the PDF report by email)" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);flex:1">
+        </div>
         <div class="examples">
           Try: <a href="#" data-url="https://example.com">example.com</a> · <a href="#" data-url="https://books.toscrape.com">books.toscrape.com</a>
         </div>
@@ -72,8 +75,8 @@
           </div>
           <div class="feature-card">
             <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 1 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 1 0 6 6l1-1"/></svg>
-            <h3>Links &amp; cannibalization</h3>
-            <p>Broken, orphaned and redirected links, plus keyword cannibalization clusters.</p>
+            <h3>Links &amp; content quality</h3>
+            <p>Broken, orphaned and redirected links, plus duplicate-content clusters.</p>
           </div>
           <div class="feature-card">
             <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l4 2 -4 2M12 6h8M4 11l4 2-4 2M12 13h8M4 18l4 2-4 2M12 20h8"/></svg>
@@ -97,7 +100,7 @@
             <li>Broken and redirected outgoing links</li>
             <li>Orphan pages and internal linking gaps</li>
             <li>Noindex, blocked-by-robots and indexation issues</li>
-            <li>Duplicate content and keyword cannibalization</li>
+            <li>Duplicate content and thin or template-driven pages</li>
           </ul>
           <ul>
             <li>Thin content and missing E-E-A-T signals</li>
@@ -138,11 +141,12 @@
         <div class="progress-bar-track">
           <div id="progress-bar" class="progress-bar-fill"></div>
         </div>
-        <style>
-          .bar-track { background:#e5e7eb; border-radius:4px; height:8px; overflow:hidden; }
-          .bar-fill { height:100%; border-radius:4px; background:var(--success); }
-        </style>
+        <div class="progress-meta">
+          <span id="progress-percent" class="progress-percent">0%</span>
+          <span id="progress-live" class="progress-live"><span class="live-dot"></span> Live</span>
+        </div>
         <p id="progress-message" class="progress-message">Starting...</p>
+        <p id="progress-pages" class="progress-message" style="opacity:.75;margin-top:6px;font-size:13px"></p>
         <div id="status-badge" class="status-badge status-queued">Queued</div>
       </div>
     </div>
@@ -347,6 +351,8 @@
         <div class="report-actions">
           <a id="report-download-link" class="btn-primary" target="_blank">Download HTML Report</a>
           <a id="report-pdf-link" class="btn-secondary" target="_blank">Download PDF</a>
+          <input type="email" id="report-email-input" placeholder="you@example.com" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);max-width:220px">
+          <button id="report-email-btn" class="btn-secondary">Email report</button>
           <button id="refresh-report-btn" class="btn-secondary">Refresh</button>
         </div>
         <div id="report-preview" class="report-preview"><div class="skeleton skeleton-report"></div></div>
@@ -556,6 +562,43 @@
               <span id="github-settings-status" class="count-label"></span>
             </div>
             <div id="github-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
+          </div>
+        </div>
+
+        <div class="logs-section" style="margin-top:28px">
+          <h3>Email Reports</h3>
+          <p class="section-desc">SMTP lets the app email the branded PDF report to the address you enter on the Analyze form when an audit finishes, and to you manually from the Report tab. Values are stored in the app database; .env is only a fallback.</p>
+          <div class="insights-card" style="max-width:640px">
+            <div style="display:grid;gap:12px;grid-template-columns:1fr 1fr">
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                SMTP Host
+                <input type="text" id="smtp-host" class="settings-input" placeholder="smtp.gmail.com" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                Port
+                <input type="number" id="smtp-port" class="settings-input" placeholder="587" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                Username
+                <input type="text" id="smtp-user" class="settings-input" placeholder="you@gmail.com" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                Password / App password
+                <input type="password" id="smtp-password" class="settings-input" placeholder="(15-char app password)" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+                From address
+                <input type="text" id="smtp-from" class="settings-input" placeholder="no-reply@yourdomain.com" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
+              </label>
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:8px">
+                <input type="checkbox" id="smtp-tls" checked style="width:16px;height:16px"> Use STARTTLS (port 587)
+              </label>
+            </div>
+            <div style="margin-top:14px;display:flex;align-items:center;gap:12px">
+              <button id="smtp-settings-save" class="btn-primary">Save Email Settings</button>
+              <span id="smtp-settings-status" class="count-label"></span>
+            </div>
+            <div id="smtp-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
           </div>
         </div>
       </div>

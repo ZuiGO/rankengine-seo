@@ -366,7 +366,11 @@ def _weighted_impact(impact: str, learning: dict | None) -> tuple[str, bool]:
 
 def _make_action(job_id: str, content_type: str, content_item_id: str, page_url: str,
                  source_url: str, check: dict, impact: str, demoted: bool,
-                 rank_corr: float | None = None, already_applied: bool = False) -> dict:
+                 rank_corr: float | None = None, already_applied: bool = False) -> dict | None:
+    evidence = check.get("evidence") or {}
+    if not evidence:
+        logger.warning("Skipping action without evidence: job=%s issue=%s", job_id, check.get("issue_key"))
+        return None
     action = {
         "job_id": job_id,
         "page_url": page_url,
@@ -376,7 +380,7 @@ def _make_action(job_id: str, content_type: str, content_item_id: str, page_url:
         "issue_key": check["issue_key"],
         "impact_on_ranking": impact,
         "confidence": check.get("confidence", 0.5),
-        "evidence": check.get("evidence") or {},
+        "evidence": evidence,
         "identified_issues": check.get("identified_issues") or [],
         "improvement_suggestions": check.get("improvement_suggestions") or [],
         "status": "pending",
@@ -449,6 +453,8 @@ async def analyze_content_item(item: dict, page_url: str, job_id: str) -> list[d
             job_id, item.get("content_type", ""), item.get("_id", ""),
             page_url, item.get("source_url", ""), check, check["impact"], False,
         )
+        if action is None:
+            continue
         await db.action_items.insert_one(action)
         actions.append(action)
     return actions
@@ -527,6 +533,8 @@ async def analyze_pages(job_id: str) -> dict:
                 rank_corr=rank_corr.get("page"),
                 already_applied=(p.get("url", ""), issue_key) in applied,
             )
+            if page_action is None:
+                continue
             await db.action_items.insert_one(page_action)
             created += 1
             page_actions[p.get("url", "")] = page_actions.get(p.get("url", ""), 0) + 1
@@ -572,6 +580,8 @@ async def analyze_pages(job_id: str) -> dict:
                 rank_corr=rank_corr.get(item.get("content_type", "")),
                 already_applied=(item.get("source_url", "") or page_url, issue_key) in applied,
             )
+            if action is None:
+                continue
             if existing:
                 await db.action_items.update_one(
                     {"_id": existing["_id"]},

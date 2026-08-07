@@ -6,6 +6,7 @@ Low cosine alignment marks a page as off-topic — content a generative search e
 would not associate with the site's vertical.
 """
 
+import asyncio
 import math
 import re
 from collections import Counter
@@ -108,22 +109,23 @@ async def audit_geo_alignment(job_id: str) -> dict:
     industry_vec = _mean_vec(await embed_texts(industry_keywords, job_id))
 
     report = []
-    off_topic_pages = 0
-    for p in pages:
-        if p.get("page_type") == "home":
-            continue
+    async def analyze_page(p):
         keywords, page_vec = await _topic_vector(db, job_id, p)
         if not keywords or not page_vec:
-            report.append({"page_url": p["url"], "title": p.get("title", ""), "alignment": 0.0,
-                           "top_keywords": keywords, "off_topic": True, "reason": "No extractable topic"})
-            off_topic_pages += 1
-            continue
+            return {"page_url": p["url"], "title": p.get("title", ""), "alignment": 0.0,
+                    "top_keywords": keywords, "off_topic": True, "reason": "No extractable topic"}
         alignment = round(_cosine(page_vec, industry_vec), 3)
-        off_topic = alignment < ALIGNMENT_THRESHOLD
-        if off_topic:
-            off_topic_pages += 1
-        report.append({"page_url": p["url"], "title": p.get("title", ""), "alignment": alignment,
-                       "top_keywords": keywords, "off_topic": off_topic})
+        return {"page_url": p["url"], "title": p.get("title", ""), "alignment": alignment,
+                "top_keywords": keywords, "off_topic": alignment < ALIGNMENT_THRESHOLD}
+
+    sem_page = asyncio.Semaphore(8)
+    async def bounded(p):
+        async with sem_page:
+            return await analyze_page(p)
+
+    pages_iter = [p for p in pages if p.get("page_type") != "home"]
+    report = list(await asyncio.gather(*(bounded(p) for p in page_iter)))
+    off_topic_pages = sum(1 for r in report if r.get("off_topic"))
 
     doc = {
         "job_id": job_id,

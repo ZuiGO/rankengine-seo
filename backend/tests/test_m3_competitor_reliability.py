@@ -128,12 +128,12 @@ def test_crawl_competitor_caps(monkeypatch):
     assert result["total_pages"] == 3
 
 
-@pytest.mark.parametrize("exc", [
-    RuntimeError("boom"),
-    asyncio.TimeoutError(),
-    asyncio.CancelledError(),
+@pytest.mark.parametrize("exc,expected", [
+    (RuntimeError("boom"), "error"),
+    (asyncio.TimeoutError(), "error"),
+    (asyncio.CancelledError(), "queued"),
 ])
-def test_pipeline_marks_rows_error(exc):
+def test_pipeline_marks_rows_error(exc, expected):
     async def _boom(*args, **kwargs):
         raise exc
 
@@ -163,5 +163,8 @@ def test_pipeline_marks_rows_error(exc):
         _run_until()
 
     row = db._stores["competitor_gap_analyses"]["comp1.example"]
-    assert row["status"] == "error"
-    assert row["errors"]
+    assert row["status"] == expected
+    if expected == "error":
+        assert row["errors"]
+    else:
+        assert not row.get("errors")

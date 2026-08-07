@@ -227,12 +227,6 @@ async def compute_site_health(job_id: str) -> dict:
             missing = ", ".join(failed) if failed else f"score {local.get('score')}/100"
             issues.append({"severity": "low", "message": f"Local-SEO signals weak ({local.get('score')}/100): {missing}"})
 
-    can = await db.cannibalization_summaries.find_one({"job_id": job_id})
-    if can:
-        metrics["cannibalization_groups"] = can.get("groups", 0)
-        if can.get("groups", 0) > 0:
-            issues.append({"severity": "high", "message": f"{can.get('groups')} keyword(s) are targeted by {can.get('affected_pages')} competing page(s) (cannibalization)."})
-
     pseo = await db.programmatic_seo_audits.find_one({"job_id": job_id})
     if pseo:
         metrics["programmatic_seo_score"] = pseo.get("score")

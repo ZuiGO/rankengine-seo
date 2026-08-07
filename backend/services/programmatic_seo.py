@@ -1,7 +1,7 @@
 """Programmatic-SEO audit: detects template-driven page clusters (locations,
 integrations, templates, personas...) and grades them against the
 programmatic-seo skill's quality bar — unique value per page, thin-content
-risk, keyword cannibalization, hub-and-spoke internal linking, and
+risk, competing-page duplication, hub-and-spoke internal linking, and
 indexation. Fully crawl-driven; no external API calls.
 """
 

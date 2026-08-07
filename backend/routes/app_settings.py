@@ -124,3 +124,61 @@ async def write_github_settings(req: GithubSettingsRequest):
         return await read_github_settings()
     await db.app_settings.update_one({"key": "github"}, {"$set": {"token": token, "key": "github"}}, upsert=True)
     return await read_github_settings()
+
+
+class SmtpSettingsRequest(BaseModel):
+    host: str = ""
+    port: int | None = None
+    user: str = ""
+    password: str = ""
+    from_email: str = ""
+    use_tls: bool = True
+
+
+async def get_smtp_settings() -> dict:
+    db = get_db()
+    doc = await db.app_settings.find_one({"key": "smtp"}) or {}
+    return {
+        "host": doc.get("host", ""),
+        "port": doc.get("port", 587),
+        "user": doc.get("user", ""),
+        "password": doc.get("password", ""),
+        "from_email": doc.get("from_email", ""),
+        "use_tls": doc.get("use_tls", True),
+    }
+
+
+@router.get("/smtp")
+async def read_smtp_settings():
+    s = await get_smtp_settings()
+    return {
+        "host": s["host"],
+        "host_set": bool(s["host"]),
+        "port": s["port"],
+        "user": _mask(s["user"]),
+        "user_set": bool(s["user"]),
+        "password_set": bool(s["password"]),
+        "from_email": s["from_email"],
+        "use_tls": s["use_tls"],
+    }
+
+
+@router.put("/smtp")
+async def write_smtp_settings(req: SmtpSettingsRequest):
+    db = get_db()
+    update = {}
+    if req.host:
+        update["host"] = req.host.strip()
+    if req.port:
+        update["port"] = int(req.port)
+    if req.user:
+        update["user"] = req.user.strip()
+    if req.password:
+        update["password"] = req.password.strip()
+    if req.from_email:
+        update["from_email"] = req.from_email.strip()
+    update["use_tls"] = req.use_tls
+    if not update:
+        return await read_smtp_settings()
+    await db.app_settings.update_one({"key": "smtp"}, {"$set": {**update, "key": "smtp"}}, upsert=True)
+    return await read_smtp_settings()

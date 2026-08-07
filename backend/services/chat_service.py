@@ -34,7 +34,7 @@ PROGRAMMATIC_SEO_GUIDANCE = """Programmatic-SEO guidance (vendored from the prog
 - Use subfolders, not subdomains, for template sections (subdomains split domain authority).
 - Build hub-and-spoke internal linking: hub category pages linking to every spoke, plus cross-links
   between related spokes; every page reachable from the main site, covered by the XML sitemap.
-- Watch for keyword cannibalization: multiple template pages targeting the same keyword split rankings.
+- Duplicate content and thin/template pages split rankings the same way.
 - Indexation: prioritize high-volume patterns, noindex truly thin variations, separate sitemaps by page type."""
 
 AI_SEO_GUIDANCE = """AI-search (AEO/GEO) guidance (vendored from the ai-seo skill, marketing-skills, MIT licensed):

@@ -1,5 +1,5 @@
 """Tests for the complete-audit round: exec summary, sitemap parsing, E-E-A-T /
-extractability signals, cannibalization, AI visibility, and local-SEO heuristics."""
+extractability signals, AI visibility, and local-SEO heuristics."""
 
 import pytest
 
@@ -35,7 +35,6 @@ class TestExecSummary:
         assert issue_key_from_message("3 broken links found") == "broken_links"
         assert issue_key_from_message("Sitemap could not be parsed") == "sitemap_issues"
         assert issue_key_from_message("AI crawlers blocked") == "ai_visibility_low"
-        assert issue_key_from_message("cannibalization risk") == "cannibalization"
 
     def test_issue_key_unknown_defaults_site_issue(self):
         assert issue_key_from_message("something else") == "site_issue"
