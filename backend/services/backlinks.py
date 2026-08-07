@@ -14,33 +14,33 @@ def _domain_of(url: str) -> str:
 
 
 async def fetch_backlinks(job_id: str, domain: str) -> dict:
-    """List backlink source pages. DataForSEO first, SERP `link:` fallback."""
+    """List backlink source pages. SE Ranking first, SERP `link:` fallback."""
     db = get_db()
     sources = []
     source_api = None
     last_error = None
 
     try:
-        from backend.services.dataforseo import backlink_referring_pages
-        items = await backlink_referring_pages(domain, limit=100)
+        from backend.services.se_ranking import backlink_list
+        items = await backlink_list(domain, limit=100)
         if items:
-            source_api = "dataforseo"
+            source_api = "se-ranking"
             for item in items:
-                url = item.get("url") or item.get("page_from")
+                url = item.get("source_url") or item.get("url_from")
                 if not url:
                     continue
                 sources.append({
                     "source_url": url,
-                    "source_domain": item.get("source") or item.get("domain_from") or _domain_of(url),
+                    "source_domain": item.get("source_domain") or _domain_of(url),
                     "anchor": item.get("anchor", ""),
-                    "backlinks_count": item.get("backlinks"),
+                    "backlinks_count": item.get("backlinks_count"),
                     "page_from_rank": item.get("page_from_rank"),
                     "first_seen": item.get("first_seen"),
                 })
-            logger.info("Backlinks via DataForSEO job=%s sources=%s", job_id, len(sources))
+            logger.info("Backlinks via SE Ranking job=%s sources=%s", job_id, len(sources))
     except Exception as e:
-        last_error = f"DataForSEO: {e}"
-        logger.warning("DataForSEO backlink list unavailable job=%s: %s", job_id, e)
+        last_error = f"SE Ranking: {e}"
+        logger.warning("SE Ranking backlink list unavailable job=%s: %s", job_id, e)
 
     if not sources:
         try:

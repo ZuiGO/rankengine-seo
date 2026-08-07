@@ -187,6 +187,7 @@ ul.evidence { color: #64748b; font-size: 12px; }
 .page-break { page-break-before: always; }
 .bar { height: 6px; border-radius: 3px; background: #e2e8f0; overflow: hidden; margin: 4px 0 10px; max-width: 480px; }
 .bar div { height: 100%; border-radius: 3px; }
+td.subhead { font-weight: 700; color: #64748b; font-size: 12px; letter-spacing: .02em; padding-top: 10px; }
 .checks { margin: 8px 0; }
 .checks .row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #eef2f7; }
 .checks .row .mark { font-weight: 700; flex: 0 0 18px; }
@@ -392,9 +393,11 @@ async def _report_html(job_id: str):
         "<tr><td>Pages Crawled</td><td>%s</td><td>measured</td><td>BFS crawl + XML sitemap seed</td></tr>" % _esc(page_count),
         "<tr><td>Links Checked</td><td>%s</td><td>measured</td><td>HEAD/GET checks with redirect + retry logic</td></tr>" % _esc((health or {}).get("links_checked", 0)),
         "<tr><td>Core Web Vitals</td><td>%s</td><td>field + lab</td><td>Google PageSpeed Insights (CrUX + Lighthouse)</td></tr>" % _esc(cwv_detail),
-        "<tr><td>Keywords</td><td>%s</td><td>%s</td><td>DataForSEO / SERP API / on-page extraction</td></tr>" % (_esc(kw_count), _esc(keywords_source)),
-        "<tr><td>Backlinks</td><td>%s</td><td>%s</td><td>DataForSEO or SERP discovery</td></tr>" % (_esc(backlinks.get("backlinks") if backlinks.get("backlinks") is not None else "N/A"), _esc(backlinks_source)),
-        "<tr><td>Organic Traffic</td><td>%s</td><td>%s</td><td>Search Console / DataForSEO; N/A when unmeasured</td></tr>" % (_esc(overview.get("estimated_organic_traffic") if overview.get("estimated_organic_traffic") is not None else "N/A"), _esc(overview_source)),
+        "<tr><td>Keywords</td><td>%s</td><td>%s</td><td>SE Ranking API / SERP API / on-page extraction</td></tr>" % (_esc(kw_count), _esc(keywords_source)),
+        "<tr><td>Backlinks</td><td>%s</td><td>%s</td><td>SE Ranking API or SERP discovery</td></tr>" % (_esc(backlinks.get("backlinks") if backlinks.get("backlinks") is not None else "N/A"), _esc(backlinks_source)),
+        "<tr><td>Organic Traffic</td><td>%s</td><td>%s</td><td>Search Console / SE Ranking; N/A when unmeasured</td></tr>" % (_esc(overview.get("estimated_organic_traffic") if overview.get("estimated_organic_traffic") is not None else "N/A"), _esc(overview_source)),
+        "<tr><td>Competitors</td><td>%s</td><td>measured</td><td>SE Ranking domain competitors (keyword overlap)</td></tr>" % _esc(len(insights.get("competitors") or [])),
+        "<tr><td>Overview History</td><td>%s</td><td>measured</td><td>SE Ranking monthly traffic history</td></tr>" % _esc(len(insights.get("overview_history") or [])),
         "<tr><td>Google Search Console</td><td>%s</td><td>real-user data</td><td>Search Analytics (last 28 days)</td></tr>" % (_esc((gsc or {}).get("property", "not connected")) if gsc else "not connected"),
     ])
 
@@ -411,11 +414,40 @@ async def _report_html(job_id: str):
             "<tr><td>Referring IPs</td><td>%s</td></tr>" % _esc(backlinks.get("referring_ips", "N/A"))
             + "<tr><td>Domain Rank</td><td>%s</td></tr>" % _esc(backlinks.get("rank", "N/A"))
         )
+    bl_profile = ""
+    if insights.get("backlink_authority"):
+        auth = insights["backlink_authority"]
+        bl_profile += "<tr><td>Domain Authority</td><td>%s</td></tr>" % _esc(auth.get("domain_rank", "N/A"))
+        bl_profile += "<tr><td>Page Authority</td><td>%s</td></tr>" % _esc(auth.get("page_rank", "N/A"))
+    top_ref = (insights.get("backlink_refdomains") or [])[:5]
+    if top_ref:
+        bl_profile += "<tr><td colspan='2' class='subhead'>Top Referring Domains</td></tr>" + "".join(
+            "<tr><td>%s</td><td>%s backlinks</td></tr>" % (_esc(r.get("refdomain", "-")), _esc(r.get("backlinks", "-")))
+            for r in top_ref
+        )
+    top_anchors = (insights.get("backlink_anchors") or [])[:5]
+    if top_anchors:
+        bl_profile += "<tr><td colspan='2' class='subhead'>Top Anchor Texts</td></tr>" + "".join(
+            "<tr><td>%s</td><td>%s backlinks</td></tr>" % (_esc((a.get("anchor") or "-")[:60]), _esc(a.get("backlinks", "-")))
+            for a in top_anchors
+        )
+    top_bl_pages = (insights.get("backlink_top_pages") or [])[:5]
+    if top_bl_pages:
+        bl_profile += "<tr><td colspan='2' class='subhead'>Top Pages by Backlinks</td></tr>" + "".join(
+            "<tr><td>%s</td><td>%s backlinks</td></tr>" % (_esc(p.get("url", "-")), _esc(p.get("backlinks", "-")))
+            for p in top_bl_pages
+        )
+    new_lost = insights.get("backlink_new_lost_counts") or []
+    if new_lost:
+        bl_profile += "<tr><td colspan='2' class='subhead'>New / Lost Backlinks (last 30 days)</td></tr>" + "".join(
+            "<tr><td>%s</td><td>%s new / %s lost</td></tr>" % (_esc(c.get("date", "-")), _esc(c.get("new", 0)), _esc(c.get("lost", 0)))
+            for c in new_lost[:10]
+        )
     insights_html = "<div class='card'><div class='card-head'><strong>Backlinks</strong></div>%s</div>" % (
         "<table><tr><th>Metric</th><th>Value</th></tr>"
         "<tr><td>Total Backlinks</td><td>%s</td></tr>"
-        "<tr><td>Referring Domains</td><td>%s</td></tr>%s</table>"
-        % (_esc(backlinks.get("backlinks", "N/A")), _esc(backlinks.get("referring_domains", "N/A")), bl_extra)
+        "<tr><td>Referring Domains</td><td>%s</td></tr>%s%s</table>"
+        % (_esc(backlinks.get("backlinks", "N/A")), _esc(backlinks.get("referring_domains", "N/A")), bl_extra, bl_profile)
         if backlinks else "<p class='muted'>No backlink data.</p>"
     )
     ov_html = ""
@@ -429,6 +461,24 @@ async def _report_html(job_id: str):
                _esc(overview.get("organic_keywords_count", "N/A")),
                _esc(overview.get("paid_keywords_count", "N/A")))
         )
+        ov_hist = (insights.get("overview_history") or [])[:6]
+        if ov_hist:
+            ov_html += "<h3>Overview History</h3><table><tr><th>Month</th><th>Organic Traffic</th><th>Organic Keywords</th></tr>" + "".join(
+                "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (_esc(t.get("month", "-")), _esc(t.get("traffic_sum", "-")), _esc(t.get("keywords_count", "-")))
+                for t in ov_hist
+            ) + "</table>"
+        comps = (insights.get("competitors") or [])[:5]
+        if comps:
+            ov_html += "<h3>Top Organic Competitors</h3><table><tr><th>Domain</th><th>Shared Keywords</th><th>Traffic</th></tr>" + "".join(
+                "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (_esc(c.get("domain", "-")), _esc(c.get("common_keywords", "-")), _esc(c.get("traffic_sum", "-")))
+                for c in comps
+            ) + "</table>"
+        auth_hist = (insights.get("authority_history") or [])[:6]
+        if auth_hist:
+            ov_html += "<h3>Domain Authority History</h3><table><tr><th>Month</th><th>Authority</th></tr>" + "".join(
+                "<tr><td>%s</td><td>%s</td></tr>" % (_esc(a.get("date", "-")), _esc(a.get("domain_rank", "-")))
+                for a in auth_hist
+            ) + "</table>"
     gsc_html = ""
     if gsc:
         q_rows = "".join(

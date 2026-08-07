@@ -10,7 +10,7 @@ A simple, standalone SEO analysis tool. Enter a URL, crawl the site, classify it
 - **SEO analysis** — per-content-type impact scoring, identified issues, improvement suggestions, approve/reject workflow
 - **Graph database** — Neo4j pages/content graph with force-directed visualization in the UI
 - **Vector search + RAG chat** — n-gram hashing embeddings (numpy-only) with Groq-powered answers about the analyzed site
-- **External SEO APIs** — DataForSEO (keywords, backlinks, domain overview, on-page) and SerpAPI (keyword rankings), cached in MongoDB
+- **External SEO APIs** — SE Ranking (domain overview, organic/paid keywords, competitors, backlink profile) and SerpAPI (keyword rankings), cached in MongoDB
 - **Reports** — JSON + downloadable HTML report including external insights
 - **Logging & audit** — rotating file logs, request middleware, MongoDB audit trail
 
@@ -25,7 +25,7 @@ backend/
   routes/          analysis, pages, content, links, actions, reports, chat, graph, seo-insights
   services/        crawler, content_classifier, content_downloader, seo_analyzer,
                    pdf_extractor, content_extractor, graph_service, vector_service,
-                   chat_service, dataforseo, serp_api, audit_service
+                   chat_service, se_ranking, serp_api, audit_service
   logging_setup.py rotating file logs (logs/app.log) + console
 ```
 
@@ -57,7 +57,7 @@ See `.env.example`:
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Neo4j graph database |
 | `GROQ_API_KEY` | LLM for RAG chat |
 | `SERP_API_KEY` | SerpAPI keyword ranking lookups |
-| `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` | DataForSEO insights (backlinks, keywords, domain overview) |
+| `SE_RANKING_API_KEY` | SE Ranking insights fallback (backlinks, keywords, domain overview, competitors; configure region in Settings) |
 | `LOG_LEVEL` / `LOG_DIR` | Logging configuration |
 
 ## API Endpoints

@@ -132,7 +132,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
 
         async def _insights():
             await _progress("Fetching external SEO insights...")
-            from backend.services.dataforseo import fetch_all_insights
+            from backend.services.external_insights import fetch_all_insights
             from backend.routes.seo_insights import CACHE_VERSION
             insights = await fetch_all_insights(domain, job_id)
             await db.seo_insights_cache.update_one(

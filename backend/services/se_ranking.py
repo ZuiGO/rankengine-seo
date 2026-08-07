@@ -4,14 +4,13 @@ Auth is `Authorization: Token <key>`. The key is read from the MongoDB
 `app_settings` doc keyed `se_ranking` (set via the Settings page) with
 `settings.se_ranking_api_key` (.env) as fallback, mirroring GSC config.
 
-Used as a provider in the insights chain (dataforseo.py) so SEO providers
-with an SE Ranking key still get keyword / overview / backlink data when
-DataForSEO is not configured, out of credits, or the endpoint is not on
-plan (404).
+This is the sole paid external provider: keyword / overview / backlink /
+competitor data, with local crawl-data fallbacks in external_insights.py.
 """
 
 import asyncio
 import time
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -244,7 +243,7 @@ async def ranked_keywords(domain: str, limit: int = LIMIT) -> list[dict]:
 
 async def backlink_summary(target: str) -> dict:
     """Backlink summary for the target domain -> renderer shape (counts preserved)."""
-    data = await _get("backlinks/summary", {"target": target, "mode": "domain"})
+    data = await _get("backlinks/summary", {"target": target, "mode": "domain"}, region_params=False)
     await _record_usage("backlinks/summary")
     rows = data.get("summary") if isinstance(data, dict) else data
     if not isinstance(rows, list) or not rows:
@@ -271,3 +270,239 @@ async def backlink_summary(target: str) -> dict:
         "top_countries": row.get("top_countries"),
         "source": "se-ranking",
     }
+
+
+def _rows(data: dict | list, key: str) -> list:
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        rows = data.get(key) or []
+        return rows if isinstance(rows, list) else []
+    return []
+
+
+def _days_ago(days: int) -> str:
+    return (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+async def domain_overview_history(domain: str, months: int = 12) -> list[dict]:
+    """Monthly organic traffic / keyword history -> trend rows (newest first)."""
+    data = await _get("domain/overview/history", {
+        "domain": domain,
+        "with_subdomains": 1,
+        "type": "organic",
+    })
+    await _record_usage("domain/overview/history")
+    rows = data if isinstance(data, list) else (data.get("results") or data.get("items") or [])
+    trend = []
+    for r in rows:
+        year, month = r.get("year"), r.get("month")
+        if not year or not month:
+            continue
+        trend.append({
+            "month": f"{year:04d}-{month:02d}",
+            "traffic_sum": r.get("traffic_sum"),
+            "keywords_count": r.get("keywords_count"),
+            "price_sum": r.get("price_sum"),
+        })
+    trend.sort(key=lambda t: t["month"], reverse=True)
+    return trend[:months]
+
+
+async def domain_competitors(domain: str, limit: int = 10) -> list[dict]:
+    """Top organic competitors with keyword overlap and traffic estimates."""
+    data = await _get("domain/competitors", {
+        "domain": domain,
+        "type": "organic",
+        "limit": limit,
+    })
+    await _record_usage("domain/competitors")
+    return [{
+        "domain": c.get("domain") or "",
+        "common_keywords": c.get("common_keywords"),
+        "domain_relevance": c.get("domain_relevance"),
+        "total_keywords": c.get("total_keywords"),
+        "missing_keywords": c.get("missing_keywords"),
+        "traffic_sum": c.get("traffic_sum"),
+        "price_sum": c.get("price_sum"),
+    } for c in _rows(data, "competitors")][:limit]
+
+
+async def keyword_gap(primary: str, compare: str, limit: int = 50) -> list[dict]:
+    """Keywords the primary domain ranks for that the compare domain does not (diff=1)."""
+    data = await _get("domain/keywords/comparison", {
+        "domain": primary,
+        "compare": compare,
+        "type": "organic",
+        "diff": 1,
+        "limit": limit,
+        "order_field": "volume",
+        "order_type": "desc",
+    })
+    await _record_usage("domain/keywords/comparison")
+    return [{
+        "keyword": k.get("keyword") or "",
+        "volume": k.get("volume"),
+        "cpc": k.get("cpc"),
+        "difficulty": k.get("difficulty"),
+        "position": k.get("position"),
+        "url": k.get("url"),
+    } for k in _rows(data, "keywords")][:limit]
+
+
+async def backlink_list(target: str, limit: int = 50) -> list[dict]:
+    """Backlink source pages -> renderer shape (one per referring domain, best rank first)."""
+    data = await _get("backlinks/all", {
+        "target": target,
+        "mode": "domain",
+        "limit": limit,
+        "per_domain": 1,
+        "order_by": "domain_inlink_rank",
+        "order_type": "desc",
+    }, region_params=False)
+    await _record_usage("backlinks/all")
+    return [{
+        "source_url": b.get("url_from") or "",
+        "url_to": b.get("url_to") or "",
+        "title": b.get("title") or "",
+        "anchor": b.get("anchor") or "",
+        "nofollow": b.get("nofollow"),
+        "page_from_rank": b.get("inlink_rank"),
+        "domain_inlink_rank": b.get("domain_inlink_rank"),
+        "first_seen": b.get("first_seen"),
+        "last_visited": b.get("last_visited"),
+    } for b in _rows(data, "backlinks")][:limit]
+
+
+async def backlink_anchors(target: str, limit: int = 25) -> list[dict]:
+    """Anchor-text distribution for inbound links (most-used first)."""
+    data = await _get("backlinks/anchors", {
+        "target": target,
+        "mode": "domain",
+        "limit": limit,
+        "order_by": "backlinks",
+    }, region_params=False)
+    await _record_usage("backlinks/anchors")
+    return [{
+        "anchor": a.get("anchor") or "",
+        "backlinks": a.get("backlinks"),
+        "refdomains": a.get("refdomains"),
+        "dofollow_backlinks": a.get("dofollow_backlinks"),
+        "nofollow_backlinks": a.get("nofollow_backlinks"),
+        "first_seen": a.get("first_seen"),
+    } for a in _rows(data, "anchors")][:limit]
+
+
+async def backlink_refdomains(target: str, limit: int = 25) -> list[dict]:
+    """Referring domains sorted by authority."""
+    data = await _get("backlinks/refdomains", {
+        "target": target,
+        "mode": "domain",
+        "limit": limit,
+        "order_by": "domain_inlink_rank",
+        "order_type": "desc",
+    }, region_params=False)
+    await _record_usage("backlinks/refdomains")
+    return [{
+        "refdomain": r.get("refdomain") or "",
+        "backlinks": r.get("backlinks"),
+        "dofollow_backlinks": r.get("dofollow_backlinks"),
+        "first_seen": r.get("first_seen"),
+        "domain_inlink_rank": r.get("domain_inlink_rank"),
+    } for r in _rows(data, "refdomains")][:limit]
+
+
+async def backlink_top_pages(target: str, limit: int = 10) -> list[dict]:
+    """Target pages with the most backlinks."""
+    data = await _get("backlinks/indexed-pages", {
+        "target": target,
+        "mode": "domain",
+        "limit": limit,
+        "order_by": "backlinks",
+    }, region_params=False)
+    await _record_usage("backlinks/indexed-pages")
+    return [{
+        "url": p.get("url") or "",
+        "backlinks": p.get("backlinks"),
+        "refdomains": p.get("refdomains"),
+        "dofollow_backlinks": p.get("dofollow_backlinks"),
+        "first_seen": p.get("first_seen"),
+    } for p in _rows(data, "pages")][:limit]
+
+
+async def backlink_authority(target: str) -> dict | None:
+    """Page + domain authority (InLink Rank / Domain InLink Rank) for the target."""
+    data = await _get("backlinks/authority", {"target": target}, region_params=False)
+    await _record_usage("backlinks/authority")
+    pages = _rows(data, "pages")
+    if not pages:
+        raise ServiceError(SERVICE, "SE Ranking backlinks authority returned no data")
+    first = pages[0]
+    return {
+        "url": first.get("url") or target,
+        "page_rank": first.get("inlink_rank"),
+        "domain_rank": first.get("domain_inlink_rank"),
+        "source": "se-ranking",
+    }
+
+
+async def authority_history(target: str, months: int = 6) -> list[dict]:
+    """Domain Authority (Domain InLink Rank) history, monthly, newest first."""
+    data = await _get(
+        "backlinks/authority/domain/history",
+        {
+            "target": target,
+            "granularity": "by_month",
+            "date_from": _days_ago(31 * months),
+        },
+        region_params=False,
+    )
+    await _record_usage("backlinks/authority/domain/history")
+    ranks = []
+    for r in _rows(data, "ranks"):
+        date = r.get("date")
+        if not date:
+            continue
+        ranks.append({"date": str(date)[:7], "domain_rank": r.get("domain_inlink_rank")})
+    ranks.sort(key=lambda t: t["date"], reverse=True)
+    return ranks
+
+
+async def backlink_new_lost(target: str, days: int = 30, limit: int = 50) -> list[dict]:
+    """Recently added and lost backlinks (both types, newest activity first)."""
+    data = await _get("backlinks/history", {
+        "target": target,
+        "mode": "domain",
+        "date_from": _days_ago(days),
+        "limit": limit,
+        "order_by": "new_lost_date",
+        "order_type": "desc",
+    }, region_params=False)
+    await _record_usage("backlinks/history")
+    return [{
+        "date": b.get("new_lost_date"),
+        "type": b.get("new_lost_type"),
+        "url_from": b.get("url_from") or "",
+        "url_to": b.get("url_to") or "",
+        "anchor": b.get("anchor") or "",
+        "reason_lost": b.get("reason_lost"),
+        "domain_inlink_rank": b.get("domain_inlink_rank"),
+    } for b in _rows(data, "new_lost_backlinks")][:limit]
+
+
+async def backlink_new_lost_counts(target: str, days: int = 30) -> list[dict]:
+    """Daily new/lost backlink counts -> trend rows (newest first)."""
+    data = await _get("backlinks/history/count", {
+        "target": target,
+        "mode": "domain",
+        "date_from": _days_ago(days),
+    }, region_params=False)
+    await _record_usage("backlinks/history/count")
+    counts = []
+    for r in _rows(data, "new_lost_backlinks_count"):
+        date = r.get("date")
+        if not date:
+            continue
+        counts.append({"date": date, "new": r.get("new"), "lost": r.get("lost")})
+    counts.sort(key=lambda t: t["date"], reverse=True)
+    return counts

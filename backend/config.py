@@ -10,8 +10,6 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     serp_api_key: str = ""
     se_ranking_api_key: str = ""
-    dataforseo_login: str = ""
-    dataforseo_password: str = ""
     gemini_api_key: str = ""
     gsc_client_id: str = ""
     gsc_client_secret: str = ""
@@ -23,7 +21,6 @@ class Settings(BaseSettings):
     broken_link_alert_threshold: int = 5
     gemini_cost_per_million: float = 0.125
     groq_cost_per_million: float = 0.0
-    dataforseo_cost_per_million: float = 0.0
     crawl_max_pages: int = 50
     crawl_concurrency: int = 5
     crawl_timeout_seconds: int = 360

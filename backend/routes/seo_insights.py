@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.services.dataforseo import fetch_all_insights
+from backend.services.external_insights import fetch_all_insights
 from backend.services.serp_api import search_keyword, bulk_keyword_search, extract_keywords_from_content
 from backend.services.backlinks import get_backlinks, fetch_backlinks
 from backend.db.mongo import get_db
@@ -10,7 +10,7 @@ from backend.db.mongo import get_db
 router = APIRouter(prefix="/api/seo-insights", tags=["seo-insights"])
 
 CACHE_TTL_MINUTES = 60
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 class KeywordSearchRequest(BaseModel):

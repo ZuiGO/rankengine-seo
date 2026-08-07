@@ -269,7 +269,7 @@ document.getElementById("se-ranking-settings-save")?.addEventListener("click", a
     const s = await resp.json();
     if (!resp.ok) throw new Error(s.detail || resp.status);
     if (hint) {
-      hint.textContent = "Saved. Insights will prefer SE Ranking for keywords / overview / backlinks when DataForSEO isn't available.";
+      hint.textContent = "Saved. SE Ranking now powers keywords, overview, competitors and the backlink profile.";
       hint.style.display = "block";
     }
     if (apiKey) apiKey.value = "";
@@ -1778,8 +1778,8 @@ function serviceErrorHtml(service, message, hint) {
 
 function insightErrorKind(msg) {
   const m = String(msg || "");
-  if (/402|40200|credits|fund|payment|quota/i.test(m)) return { kind: "credits", title: "DataForSEO unavailable (no credits)" };
-  if (/\b404\b|not enabled|not on .*plan|not present/i.test(m)) return { kind: "disabled", title: "DataForSEO endpoint not enabled on this plan" };
+  if (/402|40200|credits|fund|payment|quota/i.test(m)) return { kind: "credits", title: "Live data unavailable (no credits)" };
+  if (/\b404\b|not enabled|not on .*plan|not present/i.test(m)) return { kind: "disabled", title: "Live data endpoint not enabled" };
   if (/\b429\b|rate.paused|rate.limit/i.test(m)) return { kind: "rate", title: "Data service temporarily rate-limited" };
   if (/\b(500|502|503|504)\b|\btemporarily issue/i.test(m)) return { kind: "retry", title: "Data service temporarily unavailable" };
   if (/keyword check(s)? failed/i.test(m)) return { kind: "partial", title: "Some keyword checks failed" };
@@ -1798,14 +1798,14 @@ function insightErrorHtml(error) {
   const k = insightErrorKind(error);
   if (k.kind === "credits") {
     return `<div class="service-error" style="background:#fffbeb;border-color:#fde68a">
-      <div class="service-error-title" style="color:#92400e">DataForSEO unavailable (no credits)</div>
-      <div class="service-error-msg" style="color:#78350f">This data couldn't be fetched and no local fallback is available. Add credits to DataForSEO (or connect SE Ranking) to enable live keyword, backlink and domain data.</div>
+      <div class="service-error-title" style="color:#92400e">Live data unavailable (no credits)</div>
+      <div class="service-error-msg" style="color:#78350f">This data couldn't be fetched and no local fallback is available. Top up SE Ranking credits (or connect SE Ranking in Settings) to enable live keyword, competitor, backlink and domain data.</div>
     </div>`;
   }
   if (k.kind === "disabled") {
     return `<div class="service-error" style="background:#fefce8;border-color:#fde047">
-      <div class="service-error-title" style="color:#713f12">DataForSEO endpoint not enabled on this plan</div>
-      <div class="service-error-msg" style="color:#713f12">Your current DataForSEO plan does not include this endpoint, so live data isn't available for it. It's not an error — upgrade the plan or connect an alternative provider (SE Ranking) to fill it in.</div>
+      <div class="service-error-title" style="color:#713f12">Live data endpoint not enabled</div>
+      <div class="service-error-msg" style="color:#713f12">Your current SE Ranking plan does not include this endpoint, so live data isn't available for it. It's not an error — upgrade the plan or check the API key in Settings to fill it in.</div>
     </div>`;
   }
   if (k.kind === "rate" || k.kind === "retry") {
@@ -1818,7 +1818,7 @@ function insightErrorHtml(error) {
 }
 
 function sourceLabel(source) {
-  const map = { dataforseo: "DataForSEO", "dataforseo-labs": "DataForSEO Labs", gsc: "Google Search Console", serp: "SERP API", "se-ranking": "SE Ranking", local: "local crawl data", none: "not available" };
+  const map = { gsc: "Google Search Console", serp: "SERP API", "se-ranking": "SE Ranking", local: "local crawl data", none: "not available" };
   return map[source] || source || "not available";
 }
 
@@ -2190,6 +2190,9 @@ async function loadSeoInsights(jobId) {
     renderKeywords(data.keywords || [], data.keywords_error, data.keywords_source);
     renderBacklinks(data.backlinks, data.backlinks_error, data.backlinks_source);
     renderDomainOverview(data.overview, data.overview_error, data.overview_source);
+    renderOverviewHistory(data.overview_history || [], data.overview_history_error);
+    renderCompetitors(data.competitors || [], data.competitors_error);
+    renderBacklinkProfile(data);
     renderOnpage(data.onpage, data.onpage_error, data.onpage_source);
     renderSerp(data.serp_rankings || [], data.serp_error, data.serp_source);
     renderGscData(data.gsc, data.gsc_error);
@@ -2436,9 +2439,152 @@ function renderDomainOverview(ov, error, source) {
         <div class="insights-card"><div class="insights-label">Paid Keywords</div><div class="insights-value">${o.paid_keywords_count ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Domain Rank</div><div class="insights-value">${o.domain_rank ?? "N/A"}</div></div>
       </div>
-      ${o.sample_n ? `<p class="source-note" style="margin-top:8px">Traffic is the summed organic clicks of the top ${escapeHtml(o.sample_n)} ranked keywords (DataForSEO Labs) — a lower bound. Organic keyword count is the domain's total ranked keyword count.</p>` : ""}
     `,
   });
+}
+
+function renderOverviewHistory(rows, error) {
+  const el = document.getElementById("overview-history");
+  if (!el) return;
+  let html = "";
+  if (error && !rows.length) html += insightErrorHtml(error);
+  if (rows.length) {
+    html += `<p class="source-note">Monthly organic traffic & keyword history (SE Ranking)</p>`;
+    html += `<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Month</th><th>Organic Traffic</th><th>Organic Keywords</th><th>Est. Value</th></tr></thead><tbody>${rows.map(r => `<tr>
+      <td>${escapeHtml(r.month)}</td>
+      <td>${r.traffic_sum ?? "-"}</td>
+      <td>${r.keywords_count ?? "-"}</td>
+      <td>${r.price_sum != null ? "$" + Number(r.price_sum).toLocaleString() : "-"}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No overview history available.</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderCompetitors(rows, error) {
+  const el = document.getElementById("competitors-list");
+  if (!el) return;
+  let html = "";
+  if (error && !rows.length) html += insightErrorHtml(error);
+  if (rows.length) {
+    html += `<p class="source-note">Top organic competitors ranked by keyword overlap (SE Ranking)</p>`;
+    html += rows.slice(0, 10).map(c => `
+      <div class="insights-card">
+        <div class="insights-label">${escapeHtml(c.domain)}</div>
+        <div class="insights-value" title="Keyword overlap">${c.common_keywords ?? "N/A"} shared keywords</div>
+        <div class="insights-value">Relevance: ${c.domain_relevance != null ? c.domain_relevance + "%" : "N/A"}</div>
+        <div class="insights-value">Traffic: ${c.traffic_sum != null ? Number(c.traffic_sum).toLocaleString() : "N/A"}</div>
+      </div>`).join("");
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No competitor data available.</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderBacklinkProfile(data) {
+  renderBacklinkAuthority(data.backlink_authority, data.backlink_authority_error);
+  renderBacklinkTable("backlink-refdomains", "Referring domains by authority", ["domain_inlink_rank", "backlinks"],
+    data.backlink_refdomains || [], data.backlink_refdomains_error,
+    r => `<a href="https://${escapeHtml(r.refdomain)}" target="_blank" rel="noopener">${escapeHtml(r.refdomain)}</a>`);
+  renderBacklinkTable("backlink-anchors", "Most-used anchor texts", ["backlinks", "refdomains"],
+    data.backlink_anchors || [], data.backlink_anchors_error,
+    r => escapeHtml((r.anchor || "-").substring(0, 80)), "Anchor Text");
+  renderBacklinkTable("backlink-top-pages", "Top pages by backlinks", ["backlinks", "refdomains"],
+    data.backlink_top_pages || [], data.backlink_top_pages_error,
+    r => linkify(r.url, 70), "Page");
+  renderAuthorityHistory(data.authority_history || [], data.authority_history_error);
+  renderBacklinkNewLost(data.backlink_new_lost || [], data.backlink_new_lost_error, data.backlink_new_lost_counts || []);
+}
+
+function renderBacklinkAuthority(auth, error) {
+  const el = document.getElementById("backlink-authority");
+  if (!el) return;
+  let html = "";
+  if (error && !auth) html += insightErrorHtml(error);
+  if (auth) {
+    html += `<p class="source-note">Domain & page authority (SE Ranking InLink Rank)</p>`;
+    html += `<div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+      <div class="insights-card"><div class="insights-label">Domain Authority</div><div class="insights-value">${auth.domain_rank ?? "N/A"}</div></div>
+      <div class="insights-card"><div class="insights-label">Page Authority</div><div class="insights-value">${auth.page_rank ?? "N/A"}</div></div>
+    </div>`;
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No authority data available.</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderAuthorityHistory(rows, error) {
+  const el = document.getElementById("authority-history");
+  if (!el) return;
+  let html = "";
+  if (error && !rows.length) html += insightErrorHtml(error);
+  if (rows.length) {
+    html += `<p class="source-note">Domain authority history (monthly, SE Ranking)</p>`;
+    html += `<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Month</th><th>Domain Authority</th></tr></thead><tbody>${rows.slice(0, 12).map(r => `<tr>
+      <td>${escapeHtml(r.date)}</td>
+      <td>${r.domain_rank ?? "-"}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No authority history available.</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderBacklinkNewLost(rows, error, counts) {
+  const el = document.getElementById("backlink-new-lost");
+  if (!el) return;
+  let html = "";
+  if (error && !rows.length) html += insightErrorHtml(error);
+  if (rows.length) {
+    const totalNew = counts.reduce((s, c) => s + (c.new || 0), 0);
+    const totalLost = counts.reduce((s, c) => s + (c.lost || 0), 0);
+    html += `<p class="source-note">New & lost backlinks over the last 30 days (SE Ranking)${counts.length ? ` — <strong>${totalNew} new / ${totalLost} lost</strong>` : ""}</p>`;
+    html += `<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Target</th><th>Anchor</th><th>Reason</th></tr></thead><tbody>${rows.slice(0, 50).map(b => `<tr>
+      <td>${escapeHtml(b.date || "-")}</td>
+      <td><span class="status-chip ${b.type === "new" ? "chip-pass" : "chip-attention"}">${escapeHtml(b.type || "-")}</span></td>
+      <td class="page-url-cell" title="${escapeHtml(b.url_from)}">${linkify(b.url_from, 55)}</td>
+      <td class="page-url-cell" title="${escapeHtml(b.url_to)}">${linkify(b.url_to, 40)}</td>
+      <td>${escapeHtml((b.anchor || "-").substring(0, 50))}</td>
+      <td>${escapeHtml(b.reason_lost || "-")}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+    if (counts.length) {
+      html += `<div style="overflow-x:auto;margin-top:10px"><table class="data-table"><thead><tr><th>Date</th><th>New</th><th>Lost</th></tr></thead><tbody>${counts.slice(0, 30).map(c => `<tr>
+        <td>${escapeHtml(c.date)}</td>
+        <td>${c.new ?? 0}</td>
+        <td>${c.lost ?? 0}</td>
+      </tr>`).join("")}</tbody></table></div>`;
+    }
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No new/lost backlink activity in the last 30 days.</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderBacklinkTable(elId, title, extraCols, rows, error, cellRender, firstLabel) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  let html = "";
+  if (error && !rows.length) html += insightErrorHtml(error);
+  if (rows.length) {
+    html += `<p class="source-note">${escapeHtml(title)} (SE Ranking)</p>`;
+    const cols = [firstLabel || "Domain", ...extraCols.map(c => c.replace(/_/g, " "))];
+    html += `<div style="overflow-x:auto"><table class="data-table"><thead><tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>`;
+    for (const r of rows) {
+      const cells = extraCols.map(c => `<td>${r[c] ?? "-"}</td>`).join("");
+      html += `<tr><td>${cellRender(r)}</td>${cells}</tr>`;
+    }
+    html += `</tbody></table></div>`;
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No data available.</div>';
+  }
+  el.innerHTML = html;
 }
 
 function renderOnpage(op, error, source) {

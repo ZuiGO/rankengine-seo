@@ -1,5 +1,5 @@
 class ServiceError(Exception):
-    """Raised when an external service (DataForSEO, SERP API, Groq, ...) fails."""
+    """Raised when an external service (SE Ranking, SERP API, Groq, ...) fails."""
 
     def __init__(
         self,

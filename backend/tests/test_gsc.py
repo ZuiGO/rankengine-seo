@@ -190,7 +190,7 @@ class TestInsightsMerge:
             "job_id": "job-abc",
             "data": {"overview": {"estimated_organic_traffic": None, "source": "local"}},
         }
-        from backend.services.dataforseo import merge_gsc_into_insights
+        from backend.services.external_insights import merge_gsc_into_insights
 
         await merge_gsc_into_insights(fake_db, "job-abc", "example.com", self._gsc(), 3)
         doc = fake_db._stores["seo_insights_cache"]["job-abc"]
@@ -202,7 +202,7 @@ class TestInsightsMerge:
         assert doc["v"] == 3
 
     async def test_merge_skips_when_no_cache(self, fake_db):
-        from backend.services.dataforseo import merge_gsc_into_insights
+        from backend.services.external_insights import merge_gsc_into_insights
 
         ok = await merge_gsc_into_insights(fake_db, "job-missing", "example.com", self._gsc(), 3)
         assert not ok

@@ -85,7 +85,7 @@ async def fetch(job_id: str):
     if data is None:
         raise HTTPException(status_code=400, detail="GSC not connected for this domain")
     from backend.routes.seo_insights import CACHE_VERSION
-    from backend.services.dataforseo import merge_gsc_into_insights
+    from backend.services.external_insights import merge_gsc_into_insights
 
     merged = await merge_gsc_into_insights(db, job_id, domain, data, CACHE_VERSION)
     return {"job_id": job_id, "domain": domain, **data, "merged": merged}

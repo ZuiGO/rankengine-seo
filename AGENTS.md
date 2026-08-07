@@ -10,7 +10,48 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: programmatic-seo + ai-seo skill integration round — working tree, commit pending)
+## Status (last update: DataForSEO removed, SE Ranking sole paid provider — working tree, commit pending)
+- DataForSEO removal + SE Ranking expansion round (working tree; full suite 285/285):
+  - `services/dataforseo.py` and `services/competitor_gap.py` DELETED. SE Ranking
+    (api.seranking.com/v1) is now the sole paid insights provider for: domain
+    overview + organic traffic estimates, organic keywords, paid keywords
+    (`domain/overview/db`), keyword gap (`domain/keywords/comparison` diff=1),
+    competitors (`domain/competitors`), backlink overview (`backlinks/summary`),
+    backlink sources (`backlinks/all` per_domain=1 ordered by domain_inlink_rank),
+    referring domains (`backlinks/refdomains`), anchors (`backlinks/anchors`),
+    top pages (`backlinks/indexed-pages`), page/domain authority
+    (`backlinks/authority` inlink_rank/domain_inlink_rank), authority history
+    (`backlinks/authority/domain/history` by_month), new/lost backlinks
+    (`backlinks/history` -> new_lost_backlinks, `backlinks/history/count` ->
+    new_lost_backlinks_count). Region `source` param is added for `domain/*`
+    endpoints only (NOT backlinks/*). 100 credits per domain request.
+  - NEW `services/external_insights.py`: `fetch_all_insights(domain, job_id)`
+    orchestrator (se-ranking -> local per section; onpage = local crawl only;
+    best-effort extras with `*_error` keys; GSC override block; SERP via
+    serp_api with se_ranking.ranked_keywords fallback) +
+    `merge_gsc_into_insights` moved verbatim from dataforseo.py.
+    `routes/seo_insights.py` CACHE_VERSION 3 -> 4.
+  - config.py: dropped dataforseo_login/password/cost vars; spend_tracker.py:
+    dropped "dataforseo" rate. `backlinks.py::fetch_backlinks`: SE Ranking
+    `backlink_list` (limit 100, source_api="se-ranking") first, SERP `link:`
+    fallback.
+  - Frontend: all DataForSEO strings gone (insightErrorKind titles, credits/
+    disabled error blocks, sourceLabel map, Labs sample note). SEO Insights
+    gains: Overview History table, Top Organic Competitors cards, Backlink
+    Profile section (authority cards, referring domains, anchor texts, top
+    pages, authority history, new/lost + daily counts tables). Settings text
+    now describes SE Ranking as the sole provider.
+  - reports.py: methodology rows now name SE Ranking + competitors/overview
+    history rows; Backlinks card gains profile rows (authority, top refdomains,
+    anchors, top pages, new/lost); Domain Insights gains overview history,
+    competitors and authority history tables (`td.subhead` style added).
+  - Tests: `test_dataforseo_resilience.py` DELETED (11); `test_se_ranking.py`
+    rewritten (26 tests: retry/hints/mapping for all new endpoints +
+    external_insights chain tests); `test_gsc.py` imports merge_gsc_into_insights
+    from external_insights. Suite 283 -> 285.
+  - README.md updated (features, services list, env table); ServiceError +
+    competitors.py docstrings cleaned. `rg -ri dataforseo backend/ frontend/` = 0.
+  - LIVE VERIFY PENDING (see Next up): launchd restart + refresh job 24fd33f6.
 - programmatic-seo + ai-seo skill integration round (working tree; full suite 283/283):
   - Skills installed: `~/.agents/skills/programmatic-seo` (SKILL.md v2.0.0) and
     `~/.agents/skills/ai-seo` (SKILL.md v2.2.0) via
@@ -602,9 +643,8 @@ card render, no dummy references, Playwright zero console errors.
   - New config: `psi_concurrency=5`, `mobile_crawl_concurrency=5`,
     `download_concurrency=6`, `extract_workers=4`.
 - Gemini free-tier daily quota exhausted sometimes -> hash-embedding fallback
-  (robust, degraded). DataForSEO: keywords_for_site + backlinks/summary 200,
-  but domain_analytics/overview, on_page/*, backlinks/referring_pages 404
-  (endpoints not on plan) -> SERP fallback used; graceful local fallbacks live.
+  (robust, degraded). SE Ranking is the sole paid insights provider (see Status);
+  graceful local crawl fallbacks live when it's unconfigured/out of credits.
   Groq key active. Neo4j offline (graph unwired, backend files kept).
 - Hard delete (`DELETE /api/sites/{job_id}/hard`) cascades 27 collections +
   Chroma + files. Chat supports global (no job_id) mode.
@@ -684,9 +724,11 @@ curl -s localhost:8001/api/health
 - Brand logomark is inline SVG in both pages — no logo.png dependency
   (old `#app-logo`/`#logo-fallback` markup removed).
 -   GSC: user completes one-time Google Cloud OAuth client setup (Web app + in-app
-  Settings tab) then end-to-end connect test on the live job; DataForSEO full
-  re-test once credits are topped up (account currently returns HTTP 402) and
-  stability/fraud-pause lift confirmed ("we will do test later").
+  Settings tab) then end-to-end connect test on the live job.
+- LIVE VERIFY (this round, pending): launchd restart, then refresh job
+  `24fd33f6` (fluidcontrols.com) — confirm `overview_source=se-ranking`,
+  competitors + backlink profile + overview/authority history populated, HTML +
+  PDF include the new report rows; then commit + push.
 - Competitor-audit speed items (approved, not implemented): PSI sampling cap,
   no mobile browser pass for competitors, no asset downloads, content-hash page
   dedup, parallel competitor audits, SERP budget trim.

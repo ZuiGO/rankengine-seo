@@ -1,6 +1,5 @@
 """Free-tools competitor gap analysis endpoints.
 
-Replaces the DataForSEO-backed implementation (endpoints not on plan -> 404).
 Analysis runs on the queue; results persist in `competitor_gap_analyses`
 keyed by (target_job_id, competitor).
 """
