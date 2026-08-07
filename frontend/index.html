@@ -40,16 +40,96 @@
   <main class="main">
     <div id="input-section" class="input-section">
       <h1>Analyze any website</h1>
-      <p class="subtitle">Enter a URL to crawl, analyze content, and generate SEO recommendations</p>
+      <p class="subtitle">Crawl every page, score on-page and technical SEO, surface AI-visibility risks, and turn findings into applied, versioned changes.</p>
       <form id="analyze-form" class="url-form">
         <div class="input-group">
-          <input type="url" id="url-input" placeholder="https://example.com" required autofocus>
-          <button type="submit" id="analyze-btn">Analyze</button>
+          <input type="url" id="url-input" placeholder="https://yoursite.com" required autofocus>
+          <button type="submit" id="analyze-btn">Run free site audit</button>
         </div>
         <div class="examples">
-          Try: <a href="#" data-url="https://example.com">example.com</a>
+          Try: <a href="#" data-url="https://example.com">example.com</a> · <a href="#" data-url="https://books.toscrape.com">books.toscrape.com</a>
         </div>
+        <p class="privacy-note">Your site's data stays private to you — no shared galleries, no public results.</p>
       </form>
+
+      <section class="analyze-section">
+        <h2 class="section-title-landing">What the audit checks</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            <h3>Technical SEO</h3>
+            <p>Crawlability, indexation, redirects, HTTPS, sitemap coverage and robots.txt.</p>
+          </div>
+          <div class="feature-card">
+            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h7"/></svg>
+            <h3>On-page SEO</h3>
+            <p>Titles, meta descriptions, H1s, headings, alt text, and structured data per page.</p>
+          </div>
+          <div class="feature-card">
+            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 6-8 3 4"/></svg>
+            <h3>Content &amp; performance</h3>
+            <p>Thin and duplicate content, Core Web Vitals, mobile friendliness and image optimization.</p>
+          </div>
+          <div class="feature-card">
+            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 1 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 1 0 6 6l1-1"/></svg>
+            <h3>Links &amp; cannibalization</h3>
+            <p>Broken, orphaned and redirected links, plus keyword cannibalization clusters.</p>
+          </div>
+          <div class="feature-card">
+            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l4 2 -4 2M12 6h8M4 11l4 2-4 2M12 13h8M4 18l4 2-4 2M12 20h8"/></svg>
+            <h3>AI &amp; local visibility</h3>
+            <p>Robots-blocked AI agents, llms.txt, generative-search readiness, and local SEO signals.</p>
+          </div>
+          <div class="feature-card">
+            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8"/></svg>
+            <h3>Actions &amp; reports</h3>
+            <p>Every issue becomes a versioned action you can approve, export as a patch, or apply via GitHub.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="analyze-checks">
+        <h2 class="section-title-landing">Every page scored against real checks</h2>
+        <div class="checks-grid">
+          <ul>
+            <li>Missing, duplicate or too-short title tags and meta descriptions</li>
+            <li>Missing or duplicate H1 / heading structure</li>
+            <li>Broken and redirected outgoing links</li>
+            <li>Orphan pages and internal linking gaps</li>
+            <li>Noindex, blocked-by-robots and indexation issues</li>
+            <li>Duplicate content and keyword cannibalization</li>
+          </ul>
+          <ul>
+            <li>Thin content and missing E-E-A-T signals</li>
+            <li>Missing or poorly written alt text on images</li>
+            <li>Slow pages, failing Core Web Vitals, weak mobile layout</li>
+            <li>Missing structured data / schema markup</li>
+            <li>AI agents blocked from your content, no llms.txt</li>
+            <li>Local SEO gaps and hreflang / international errors</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="analyze-how">
+        <h2 class="section-title-landing">How it works</h2>
+        <div class="how-grid">
+          <div class="how-step">
+            <div class="how-num">1</div>
+            <h3>Analyze</h3>
+            <p>Paste a URL. The engine crawls, extracts, and scores every page and link in waves.</p>
+          </div>
+          <div class="how-step" style="animation-delay:.08s">
+            <div class="how-num">2</div>
+            <h3>Decide</h3>
+            <p>Approve or reject each SEO action. Approved changes are generated and versioned.</p>
+          </div>
+          <div class="how-step" style="animation-delay:.16s">
+            <div class="how-num">3</div>
+            <h3>Apply &amp; measure</h3>
+            <p>Export a patch, open a GitHub PR, or follow the in-repo guide — then re-crawl to see the delta.</p>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div id="progress-section" class="progress-section hidden">
