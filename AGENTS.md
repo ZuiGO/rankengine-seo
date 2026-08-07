@@ -11,6 +11,25 @@ MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
 ## Status (last update: M6 apply-actions round — committed `94d961f`, pushed)
+- UI privacy + Analyze page round `9f8f5f2` (pushed, frontend-only): NO
+  customer data may appear on the public landing (`/`) or Analyze (`/app`)
+  pages — the app is unauthenticated today, so anything rendered there is
+  visible to anyone. Dropped the planned "recent analyses" section
+  (would have leaked real job domains); instead:
+  - landing.html hero mock: `fluidcontrols.com` -> fictional `yoursite.com`
+    with a `Sample report` chip (`.mock-stage`/`.mock-sample`); no real
+    customer referenced anywhere in frontend (verified `rg -ni fluid`).
+  - index.html `#input-section` rebuilt (SEOmator-style): privacy-safe
+    example chips (example.com IANA-reserved, books.toscrape.com public
+    demo), "Run free site audit" CTA, "What the audit checks" 6-card
+    feature grid, 2-column 12-item checks checklist, 3-step how-it-works,
+    one-line privacy note. All static text; zero `/api/sites` calls.
+  - style.css: `.privacy-note`, `.analyze-section/.analyze-checks/
+    .analyze-how`, `.checks-grid` (2-col -> 1-col under 600px).
+  - Verified: node --check clean; Playwright landing (yoursite.com +
+    Sample report, 4 count-ups) and /app (2 examples, 6 features,
+    12 checks, 3 steps, privacy note, CTA; example-chip submit starts a
+    job; zero console errors). Test-generated example.com job deleted.
 - M6 (LAST milestone of the M1-M6 plan) `94d961f` (pushed): apply-actions flow
   replaces the dummy-site demo. 263/263 tests.
   - `POST /api/actions/{job}/apply`: builds approved changes via shared
@@ -565,6 +584,11 @@ curl -s localhost:8001/api/health
 
 ## Next up (candidate work, NOT started)
 - M1–M6 plan COMPLETE (last milestone M6 landed `94d961f`). Follow-ups:
+- PRIVACY RULE: no real customer domains/data on the public landing or
+  Analyze pages (app is unauthenticated). If a login/owner-gate is ever
+  added, "recent analyses" could return — until then keep those pages
+  static-only. The dashboard (after opening a job) is also unauthenticated:
+  anyone with a job id / sites list can view any analysis.
 - Apply-flow hardening: approve at least one action on `24fd33f6` and run
   `POST /api/actions/{job}/apply` end-to-end with a real GitHub token
   (repo `example-com` must exist under the token's owner); verify PR title/
