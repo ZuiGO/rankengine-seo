@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     competitor_crawl_max_pages: int = 1000
     competitor_psi_all_pages: bool = False
     competitor_psi_sample: int = 10
+    competitor_timeout_seconds: int = 1800
     psi_page_sample: int = 20
     mobile_sample_pages: int = 20
     metadata_only: bool = True

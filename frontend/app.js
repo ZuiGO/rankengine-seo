@@ -2962,10 +2962,7 @@ function renderCompetitorGaps(data, isSingle) {
       const err = (c.errors || []).filter(Boolean).join("; ");
       return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div>${err ? `<div class="insights-error" style="margin-top:6px">${escapeHtml(err)}</div>` : ""}</div>`;
     }
-    if (status === "error" || status === "blocked") {
-      const title = status === "blocked" ? `${escapeHtml(c.competitor)} — blocked` : escapeHtml(c.competitor);
-      return `<div class="insights-card"><h4>${title}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
-    }
+    if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
 
     const sr = c.se_rich || {};
     const ka = sr.keyword_analysis || {};
@@ -3024,11 +3021,17 @@ function renderCompetitorGaps(data, isSingle) {
       <div style="font-size:13px;opacity:.9;margin-top:4px">${escapeHtml(r.detail)}</div>
     </div>`).join("");
 
+    const blockedNote = status === "blocked"
+      ? `<div class="insights-error" style="margin-top:6px">Crawl blocked — robots.txt/sitemap.xml returned 403; report below is SE Ranking + SERP data only. <button class="btn-secondary" style="margin-top:4px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`
+      : "";
+
     return `<div class="insights-card" style="margin-top:12px">
+      ${status === "blocked" ? '<div style="display:inline-block;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;font-size:12px;font-weight:600;border-radius:4px;padding:3px 8px;margin-bottom:8px">Blocked crawl — partial report</div>' : ""}
       <h4 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <span>${escapeHtml(c.competitor)} <span class="count-label">${_fmtNum(c.pages_crawled)} pages</span></span>
         <span>${_oppBadge(opp)}</span>
       </h4>
+      ${blockedNote}
 
       <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:10px 0">${kpis}</div>
 

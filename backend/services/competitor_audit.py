@@ -768,53 +768,12 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 raise Exception("Competitor crawl returned no pages")
 
             blocked = crawl.get("total_pages", len(pages)) <= 1
-            if blocked:
-                result = {
-                    "competitor": comp_domain,
-                    "url": comp_url,
-                    "target_job_id": target_job_id,
-                    "status": "blocked",
-                    "pages_crawled": crawl.get("total_pages", len(pages)),
-                    "gap_count": 0,
-                    "errors": ["Site blocks automated access (robots.txt/sitemap.xml returned 403; only the homepage could be crawled)"],
-                    "generated_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
-                }
-                await db.competitor_gap_analyses.update_one(
-                    {"target_job_id": target_job_id, "competitor": comp_domain},
-                    {"$set": result},
-                    upsert=True,
-                )
-                await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"status": "error", "progress_message": "Competitor blocks automated access"}})
-                return result
-
             await db.competitor_gap_analyses.update_one(
                 {"target_job_id": target_job_id, "competitor": comp_domain},
                 {"$set": {"status": "running", "pages_crawled": crawl.get("total_pages", len(pages)), "updated_at": datetime.utcnow()}},
             )
-            await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"progress_message": "Analyzing competitor pages..."}})
-            from backend.services.seo_analyzer import analyze_pages
-            await analyze_pages(comp_job)
 
-            from backend.services.link_checker import check_links
-            await check_links(comp_job)
-
-            from backend.services.site_health import compute_site_health
-            comp_health = await compute_site_health(comp_job)
-
-            from backend.services.performance_service import fetch_performance
-            psi_max = min(len(pages), settings.competitor_psi_sample)
-            try:
-                await fetch_performance(comp_job, max_pages=psi_max)
-            except Exception as pe:
-                logger.warning("Competitor PSI failed job=%s: %s", comp_job, pe)
-
-            from backend.services.structured_data import audit_structured_data
-            comp_sd = await audit_structured_data(comp_job)
-
-            from backend.services.keyword_extractor import extract_keywords_from_content
-            comp_kw = await extract_keywords_from_content(comp_job, top_k=MAX_KEYWORDS)
-
+            comp_kw = None
             target_baseline = await _target_baseline(target_job_id)
             target_domain = _domain(target_url)
 
@@ -829,6 +788,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
             feature_gap = {"comp_only": {}, "errors": ["SERP key not configured"]}
             backlink_gap = {"gaps": [], "errors": ["SERP key not configured"]}
             if serp_enabled:
+                from backend.services.keyword_extractor import extract_keywords_from_content
                 try:
                     t_kw = await extract_keywords_from_content(target_job_id, top_k=MAX_KEYWORDS)
                     keyword_gap = await _serp_keyword_gaps(target_domain, comp_domain, t_kw or comp_kw)
@@ -844,11 +804,42 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 except Exception as e:
                     backlink_gap = {"gaps": [], "errors": [str(e)]}
 
-            content_gap = await _content_gap(pages, target_baseline)
-            technical_gap = await _technical_gap(comp_health, pages, target_baseline)
-            schema_gap = await _schema_gap(comp_sd, target_baseline)
-            onpage_gap = await _onpage_gap(comp_health, pages, target_baseline)
-            ux_gap = await _ux_gap(comp_health, pages, target_baseline)
+            if blocked:
+                await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"progress_message": "Competitor blocks automated access; building API-based report..."}})
+                content_gap = {"missing": [], "missing_count": 0, "comp_pages": len(pages)}
+                technical_gap = {"score": None, "checks": [], "errors": ["Crawl blocked; on-page metrics not measured"]}
+                schema_gap = {"missing_from_target": [], "errors": ["Crawl blocked; schema not measured"]}
+                onpage_gap = {"score": None, "checks": [], "errors": ["Crawl blocked; on-page metrics not measured"]}
+                ux_gap = {"score": None, "checks": [], "errors": ["Crawl blocked; UX metrics not measured"]}
+            else:
+                await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"progress_message": "Analyzing competitor pages..."}})
+                from backend.services.seo_analyzer import analyze_pages
+                await analyze_pages(comp_job)
+
+                from backend.services.link_checker import check_links
+                await check_links(comp_job)
+
+                from backend.services.site_health import compute_site_health
+                comp_health = await compute_site_health(comp_job)
+
+                from backend.services.performance_service import fetch_performance
+                psi_max = min(len(pages), settings.competitor_psi_sample)
+                try:
+                    await fetch_performance(comp_job, max_pages=psi_max)
+                except Exception as pe:
+                    logger.warning("Competitor PSI failed job=%s: %s", comp_job, pe)
+
+                from backend.services.structured_data import audit_structured_data
+                comp_sd = await audit_structured_data(comp_job)
+
+                from backend.services.keyword_extractor import extract_keywords_from_content
+                comp_kw = await extract_keywords_from_content(comp_job, top_k=MAX_KEYWORDS)
+
+                content_gap = await _content_gap(pages, target_baseline)
+                technical_gap = await _technical_gap(comp_health, pages, target_baseline)
+                schema_gap = await _schema_gap(comp_sd, target_baseline)
+                onpage_gap = await _onpage_gap(comp_health, pages, target_baseline)
+                ux_gap = await _ux_gap(comp_health, pages, target_baseline)
 
             se_rich = {}
             try:
@@ -871,7 +862,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "competitor": comp_domain,
                 "url": comp_url,
                 "target_job_id": target_job_id,
-                "status": "completed",
+                "status": "blocked" if blocked else "completed",
                 "pages_crawled": crawl.get("total_pages", len(pages)),
                 "gap_count": gap_count,
                 "keyword_gap": keyword_gap,
@@ -883,7 +874,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "ux_gap": ux_gap,
                 "serp_features_gap": feature_gap,
                 "se_rich": se_rich,
-                "errors": [],
+                "errors": ["Site blocks automated access (robots.txt/sitemap.xml returned 403; only the homepage could be crawled)"] if blocked else [],
                 "generated_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
             }
@@ -947,11 +938,11 @@ async def audit_competitors(target_job_id: str, competitors: list[str]) -> dict:
             try:
                 return await asyncio.wait_for(
                     _analyze_one(target_job_id, target_url, comp),
-                    timeout=900,
+                    timeout=settings.competitor_timeout_seconds,
                 )
             except asyncio.TimeoutError:
                 comp_domain = _domain(comp)
-                err_msg = "Competitor audit timed out (15-minute limit)"
+                err_msg = f"Competitor audit timed out ({settings.competitor_timeout_seconds // 60}-minute limit)"
                 logger.error("Competitor audit timed out target=%s comp=%s", target_job_id, comp)
                 await db.competitor_gap_analyses.update_one(
                     {"target_job_id": target_job_id, "competitor": comp_domain},

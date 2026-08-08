@@ -38,7 +38,19 @@ class FakeColl:
         return None
 
     def find(self, q, projection=None):
-        docs = [dict(v) for v in self._store.values() if all(v.get(k) == val for k, val in q.items())]
+        docs = []
+        for v in self._store.values():
+            ok = True
+            for k, val in q.items():
+                if isinstance(val, dict) and "$in" in val:
+                    if v.get(k) not in val["$in"]:
+                        ok = False
+                        break
+                elif v.get(k) != val:
+                    ok = False
+                    break
+            if ok:
+                docs.append(dict(v))
         return FakeCursor(docs)
 
     async def update_one(self, q, update, upsert=False):
@@ -104,6 +116,38 @@ def patched(monkeypatch):
     monkeypatch.setattr(ca_mod, "_create_competitor_job", _fake_create)
     monkeypatch.setattr(ca_mod, "_delete_competitor_job", _fake_delete)
 
+    async def _fake_serp_gap(*a, **k):
+        return {"gaps": ["flow valve"], "errors": []}
+
+    async def _fake_features_gap(*a, **k):
+        return {"comp_only": {"faq": 2}, "errors": []}
+
+    async def _fake_backlink_gap(*a, **k):
+        return {"gaps": ["www.parker.com"], "errors": []}
+
+    async def _fake_se_rich(*a, **k):
+        return {"opportunity_score": 42, "keyword_analysis": {"top_opportunities": []}}
+
+    async def _fake_baseline(*a, **k):
+        return {"titles": {}, "health": None, "sd": None, "perf": None, "lh": None}
+
+    monkeypatch.setattr(ca_mod, "_target_baseline", _fake_baseline)
+    monkeypatch.setattr(ca_mod, "_serp_keyword_gaps", _fake_serp_gap)
+    monkeypatch.setattr(ca_mod, "_serp_features_gap", _fake_features_gap)
+    monkeypatch.setattr(ca_mod, "_backlink_gap", _fake_backlink_gap)
+    monkeypatch.setattr(ca_mod, "_se_rich_gap", _fake_se_rich)
+    monkeypatch.setattr(ca_mod, "_build_recommendations", lambda d: [{"title": "Fix", "detail": "d", "priority": "high"}])
+    monkeypatch.setattr(ca_mod, "_opportunity_score", lambda d: 42)
+    import backend.config as config
+
+    monkeypatch.setattr(config.settings, "serp_api_key", "test-key")
+    import backend.services.keyword_extractor as kw_mod
+
+    async def _fake_kw(job_id, top_k=50):
+        return [{"keyword": "ball valve"}]
+
+    monkeypatch.setattr(kw_mod, "extract_keywords_from_content", _fake_kw)
+
 
 @pytest.mark.asyncio
 async def test_blocked_when_only_homepage_crawled(monkeypatch, patched):
@@ -112,11 +156,16 @@ async def test_blocked_when_only_homepage_crawled(monkeypatch, patched):
     result = await ca_mod._analyze_one("t1", "https://fluidcontrols.com", "parker.com")
     assert result["status"] == "blocked"
     assert result["pages_crawled"] == 1
-    assert result["gap_count"] == 0
     assert any("blocks automated access" in e for e in result["errors"])
+    assert result["se_rich"]["opportunity_score"] == 42
+    assert result["se_rich"]["keyword_analysis"] == {"top_opportunities": []}
+    assert result["keyword_gap"]["gaps"] == ["flow valve"]
+    assert result["backlink_gap"]["gaps"] == ["www.parker.com"]
+    assert "Crawl blocked" in result["technical_gap"]["errors"][0]
     stored = db._stores["competitor_gap_analyses"]["parker.com"]
     assert stored["status"] == "blocked"
     assert "blocks automated access" in stored["errors"][0]
+    assert stored["se_rich"]["opportunity_score"] == 42
 
 
 @pytest.mark.asyncio
@@ -186,3 +235,31 @@ async def test_multi_page_crawl_completes_normally(monkeypatch):
     result = await ca_mod._analyze_one("t1", "https://fluidcontrols.com", "comp.example")
     assert result["status"] == "completed"
     assert result["pages_crawled"] == 3
+
+
+@pytest.mark.asyncio
+async def test_report_route_includes_blocked_rows(monkeypatch):
+    from backend.routes import competitors as comp_route
+    from fastapi import HTTPException
+
+    db = FakeDb()
+    db._stores["competitor_gap_analyses"]["parker.com"] = {
+        "competitor": "parker.com",
+        "target_job_id": "t1",
+        "status": "blocked",
+        "pages_crawled": 1,
+        "se_rich": {"opportunity_score": 42},
+        "errors": ["Site blocks automated access (robots.txt/sitemap.xml returned 403; only the homepage could be crawled)"],
+    }
+    monkeypatch.setattr(comp_route, "get_db", lambda: db)
+
+    import backend.services.competitor_audit as mod
+    original = mod.build_competitor_report
+    try:
+        mod.build_competitor_report = lambda row: {"executive_overview": {"status": row["status"], "errors": row["errors"]}}
+        out = await comp_route.competitor_report("t1")
+        assert out["total"] == 1
+        assert out["competitors"][0]["executive_overview"]["status"] == "blocked"
+        assert "blocks automated access" in out["competitors"][0]["executive_overview"]["errors"][0]
+    finally:
+        mod.build_competitor_report = original

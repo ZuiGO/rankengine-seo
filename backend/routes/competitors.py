@@ -135,7 +135,7 @@ async def competitor_list(target_job_id: str):
 async def competitor_report(target_job_id: str):
     db = get_db()
     rows = await db.competitor_gap_analyses.find(
-        {"target_job_id": target_job_id, "status": "completed"}
+        {"target_job_id": target_job_id, "status": {"$in": ["completed", "blocked"]}}
     ).sort("competitor", 1).to_list(length=100)
     if not rows:
         raise HTTPException(404, "No completed analysis for this job")
