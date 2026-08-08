@@ -1291,30 +1291,21 @@ document.getElementById("check-links-btn").addEventListener("click", async () =>
 });
 
 
-async function loadActions(jobId) {
-  const statusFilter = document.getElementById("action-status-filter").value;
-  const severity = document.getElementById("action-severity-filter").value;
-  const sort = document.getElementById("action-sort-filter").value;
-  const params = new URLSearchParams();
-  if (statusFilter) params.set("status_filter", statusFilter);
-  if (severity) params.set("severity", severity);
-  if (sort) params.set("sort", sort);
-  const resp = await fetch(`${API_BASE}/actions/${jobId}?${params.toString()}`);
-  const data = await resp.json();
-  document.getElementById("actions-count").textContent = `${data.total} items`;
+let actionsOffset = 0;
+const ACTIONS_PAGE = 200;
 
-  const list = document.getElementById("actions-list");
-  if (data.actions.length === 0) {
-    list.innerHTML = '<p class="section-desc">No action items.</p>';
-  } else {
-    list.innerHTML = data.actions.map(a => `
-      <div class="action-card" data-id="${a.id}">
-        <div class="action-header">
-          <span class="action-type">${a.content_type}</span>
-          <span class="action-impact impact-${a.impact_on_ranking}">${a.impact_on_ranking} impact</span>
-        </div>
-        <div class="action-issues"><strong>Issues:</strong> ${(a.identified_issues || []).join("; ")}</div>
-        <div class="action-improvements"><strong>Improve:</strong> ${(a.improvement_suggestions || []).join("; ")}</div>
+function actionCardHtml(a) {
+  return `
+    <div class="action-card action-card-collapsible" data-id="${a.id}">
+      <div class="action-row" onclick="toggleActionCard(this)">
+        <span class="action-type">${escapeHtml(a.content_type)}</span>
+        <span class="action-impact impact-${a.impact_on_ranking}">${a.impact_on_ranking} impact</span>
+        <span class="action-summary-text">${escapeHtml((a.identified_issues || []).join("; ").substring(0, 110) || "(no issues listed)")}</span>
+        <span class="action-expand-icon">▸</span>
+      </div>
+      <div class="action-details" style="display:none">
+        <div class="action-issues"><strong>Issues:</strong> ${escapeHtml((a.identified_issues || []).join("; "))}</div>
+        <div class="action-improvements"><strong>Improve:</strong> ${escapeHtml((a.improvement_suggestions || []).join("; "))}</div>
         ${a.evidence && Object.keys(a.evidence).length ? `<div class="action-evidence"><strong>Evidence (from crawl):</strong> ${Object.entries(a.evidence).map(([k, v]) => `<span class="evidence-chip">${escapeHtml(String(k))}: ${escapeHtml(Array.isArray(v) ? v.slice(0, 5).join(", ") : String(v))}</span>`).join("")}</div>` : `<div class="action-evidence" style="color:var(--danger)"><strong>No evidence recorded — exclude this action before relying on it.</strong></div>`}
         ${a.status === "pending" ? `
           <div class="action-approve">
@@ -1323,8 +1314,114 @@ async function loadActions(jobId) {
           </div>
         ` : `<span style="font-size:13px;color:${a.status === 'approved' ? 'var(--success)' : 'var(--danger)'}">${a.status}</span>`}
       </div>
-    `).join("");
+    </div>`;
+}
+
+function toggleActionCard(rowEl) {
+  const details = rowEl.parentElement.querySelector(".action-details");
+  const icon = rowEl.querySelector(".action-expand-icon");
+  if (details) {
+    const open = details.style.display !== "none";
+    details.style.display = open ? "none" : "block";
+    if (icon) icon.textContent = open ? "▸" : "▾";
   }
+}
+
+async function groupBatch(jobId, contentType, status) {
+  const label = status === "approved" ? "Approve" : "Reject";
+  if (!confirm(`${label} ALL pending ${contentType} actions? This generates content for every one and cannot be undone per-item.`)) return;
+  const btn = document.querySelector(`[data-group-btn="${contentType}"][data-group-status="${status}"]`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Working...";
+  }
+  try {
+    const resp = await fetch(`${API_BASE}/actions/${jobId}/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, status_filter: "pending", content_type: contentType }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    showToast(`${label}d ${data.updated} ${contentType} action(s)`);
+  } catch (err) {
+    showToast(`${label} failed: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = `${label} group`;
+    }
+    if (currentJobId) loadActions(currentJobId, { reset: true });
+  }
+}
+
+async function loadActions(jobId, { reset } = {}) {
+  if (reset) actionsOffset = 0;
+  const statusFilter = document.getElementById("action-status-filter").value;
+  const severity = document.getElementById("action-severity-filter").value;
+  const sort = document.getElementById("action-sort-filter").value;
+  const params = new URLSearchParams({
+    limit: String(ACTIONS_PAGE),
+    offset: String(actionsOffset),
+    grouped: "true",
+  });
+  if (statusFilter) params.set("status_filter", statusFilter);
+  if (severity) params.set("severity", severity);
+  if (sort) params.set("sort", sort);
+  const resp = await fetch(`${API_BASE}/actions/${jobId}?${params.toString()}`);
+  const data = await resp.json();
+
+  const s = data.summary || {};
+  const countEl = document.getElementById("actions-count");
+  countEl.textContent = `${data.total} items${s.pending != null ? ` · ${s.pending} pending · ${s.approved} approved · ${s.rejected} rejected` : ""}`;
+
+  const list = document.getElementById("actions-list");
+  if (data.actions.length === 0) {
+    list.innerHTML = '<p class="section-desc">No action items.</p>';
+    document.getElementById("actions-more-wrap")?.remove();
+    loadVersions(jobId);
+    return;
+  }
+
+  const groups = new Map();
+  for (const a of data.actions) {
+    const t = a.content_type || "other";
+    if (!groups.has(t)) groups.set(t, []);
+    groups.get(t).push(a);
+  }
+
+  let html = "";
+  for (const [type, items] of groups) {
+    const groupTotal = (s.by_type || {})[type] ?? null;
+    html += `
+      <details class="action-group" open data-group="${escapeHtml(type)}">
+        <summary class="action-group-header">
+          <span class="action-type">${escapeHtml(type)}</span>
+          <span class="count-label">${groupTotal != null ? `${items.length} shown / ${groupTotal} total` : `${items.length}`}</span>
+          ${statusFilter !== "approved" && statusFilter !== "rejected" ? `
+            <button class="btn-approve" style="padding:3px 10px;font-size:12px" data-group-btn="${escapeHtml(type)}" data-group-status="approved" onclick="event.preventDefault();event.stopPropagation();groupBatch('${jobId}', '${escapeHtml(type)}', 'approved')">Approve group</button>
+            <button class="btn-reject" style="padding:3px 10px;font-size:12px" data-group-btn="${escapeHtml(type)}" data-group-status="rejected" onclick="event.preventDefault();event.stopPropagation();groupBatch('${jobId}', '${escapeHtml(type)}', 'rejected')">Reject group</button>
+          ` : ""}
+        </summary>
+        <div class="action-group-body">${items.map(actionCardHtml).join("")}</div>
+      </details>`;
+  }
+  list.innerHTML = html;
+
+  const hasMore = actionsOffset + data.actions.length < data.total;
+  document.getElementById("actions-more-wrap")?.remove();
+  if (hasMore) {
+    const wrap = document.createElement("div");
+    wrap.id = "actions-more-wrap";
+    wrap.style.marginTop = "12px";
+    wrap.innerHTML = `<button id="actions-more-btn" class="btn-secondary">Load more (${data.total - actionsOffset - data.actions.length} remaining)</button>`;
+    list.appendChild(wrap);
+    document.getElementById("actions-more-btn").addEventListener("click", async () => {
+      actionsOffset += ACTIONS_PAGE;
+      await loadActions(jobId);
+    });
+  }
+
   loadVersions(jobId);
 }
 
@@ -1357,15 +1454,15 @@ async function loadVersions(jobId) {
 }
 
 document.getElementById("action-status-filter")?.addEventListener("change", () => {
-  if (currentJobId) loadActions(currentJobId);
+  if (currentJobId) loadActions(currentJobId, { reset: true });
 });
 
 document.getElementById("action-severity-filter")?.addEventListener("change", () => {
-  if (currentJobId) loadActions(currentJobId);
+  if (currentJobId) loadActions(currentJobId, { reset: true });
 });
 
 document.getElementById("action-sort-filter")?.addEventListener("change", () => {
-  if (currentJobId) loadActions(currentJobId);
+  if (currentJobId) loadActions(currentJobId, { reset: true });
 });
 
 document.getElementById("reject-filtered-btn")?.addEventListener("click", async () => {
@@ -1390,7 +1487,7 @@ document.getElementById("reject-filtered-btn")?.addEventListener("click", async 
   } finally {
     btn.disabled = false;
     btn.textContent = "Reject Filtered";
-    if (currentJobId) loadActions(currentJobId);
+    if (currentJobId) loadActions(currentJobId, { reset: true });
   }
 });
 
@@ -1481,7 +1578,7 @@ document.getElementById("approve-all-btn")?.addEventListener("click", async () =
           clearInterval(poll);
           btn.disabled = false;
           btn.textContent = "Approve All";
-          if (currentJobId) loadActions(currentJobId);
+          if (currentJobId) loadActions(currentJobId, { reset: true });
           showToast(timedOut ? "Approve all is still running - check the Actions tab shortly" : "All changes approved. Export the patch or apply via GitHub.");
         }
       } catch (err) {
@@ -1512,10 +1609,10 @@ async function approveAction(actionId, status) {
     } else {
       showToast(`Action ${status}`);
     }
-    if (currentJobId) loadActions(currentJobId);
+    if (currentJobId) loadActions(currentJobId, { reset: true });
   } catch (err) {
     showToast("Error: " + err.message);
-    if (currentJobId) loadActions(currentJobId);
+    if (currentJobId) loadActions(currentJobId, { reset: true });
   }
 }
 
@@ -1528,7 +1625,7 @@ async function regenerateVersion(actionId) {
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || resp.statusText);
     showToast(data.version?.after ? `Regenerated: ${data.version.after.substring(0, 60)}...` : "Regenerated - still empty");
-    if (currentJobId) loadActions(currentJobId);
+    if (currentJobId) loadActions(currentJobId, { reset: true });
   } catch (err) {
     showToast("Regenerate failed: " + err.message);
   }

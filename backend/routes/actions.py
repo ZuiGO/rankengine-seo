@@ -186,6 +186,7 @@ class BatchRequest(BaseModel):
     ids: list[str] | None = None
     severity: str | None = None
     status_filter: str | None = None
+    content_type: str | None = None
 
 
 @router.post("/{job_id}/batch")
@@ -205,6 +206,8 @@ async def batch_update_actions(job_id: str, req: BatchRequest):
             raise HTTPException(400, "Invalid action id in ids")
     if req.severity:
         query["impact_on_ranking"] = req.severity
+    if req.content_type:
+        query["content_type"] = req.content_type
 
     items = await db.action_items.find(query).to_list(length=1000)
     if not items:

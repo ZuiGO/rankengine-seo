@@ -43,7 +43,7 @@ FALLBACK_AFTER = {
     "alt_text": "Image: {filename}",
     "meta_description": "{suggestion}",
     "link_text": "Download {filename}",
-    "title": "{suggestion}",
+    "title": "{page_title}",
     "structured_data": "{suggestion}",
     "eaat": "{suggestion}",
     "text": "{page_title}",
