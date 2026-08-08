@@ -10,8 +10,25 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: competitor audit incremental persistence & 15-min timeout fixed)
-- Round: Competitor analyses were stalling in `running` status when a single large site (e.g. `swagelok.com` 1,000 pages) took over 30 mins, holding faster competitors (`parker.com`, `hydac.com`) blocked in `asyncio.gather` memory without writing their `completed` status to MongoDB.
+## Status (last update: competitor blocked-status honesty)
+- Round: competitor audits that silently "completed" with 1 crawled page (site
+  bot-blocks: robots.txt/sitemap.xml 403, e.g. www.parker.com) are now marked
+  `status: "blocked"` with `errors` ["Site blocks automated access (...)"] —
+  the analysis returns early (before SERP/SE Ranking spend) and the frontend
+  renders a blocked card with Retry (`renderCompetitorGaps` error branch now
+  covers `blocked`).
+  - Also fixed: a worker-restart retry kept the stale "Audit cancelled
+    (worker restart or timeout)" message — `_analyze_one` now `$unset`s
+    `errors` when it sets `status: running`.
+  - Live-verified: re-running parker.com on `6294eef9` → `blocked | pages: 1 |
+    Site blocks automated access (robots.txt/sitemap.xml returned 403...)`.
+    swagelok.com (large site) legitimately times out at the 15-min
+    per-competitor cap → `error: Competitor audit timed out (15-minute limit)`.
+  - Tests: `backend/tests/test_competitor_blocked.py` (3 new; suite 326/326):
+    blocked when only homepage crawled (status/pages/gap_count/errors + stored
+    row), rerun clears stale cancel error, 2+ page crawl completes normally.
+  - Committed as `<D248B79>` replacement `d248b79`.. this round; pushed.
+- Round (earlier): Competitor analyses were stalling in `running` status when a single large site (e.g. `swagelok.com` 1,000 pages) took over 30 mins, holding faster competitors (`parker.com`, `hydac.com`) blocked in `asyncio.gather` memory without writing their `completed` status to MongoDB.
   - Fix 1 (Incremental Persistence): `_analyze_one` and `run_one` now immediately persist each competitor's completed result to MongoDB as soon as it finishes, allowing frontend polling to surface completed competitors immediately.
   - Fix 2 (15-min Per-Competitor Timeout): Wrapped `_analyze_one` calls in `asyncio.wait_for(..., timeout=900)`. If a competitor exceeds 15 minutes, it is cleanly saved with `status: "error"` without blocking the rest of the batch.
   - Fix 3 (DB Cleanup): Cleaned up stale `running` competitor rows and ephemeral jobs from past worker restarts.

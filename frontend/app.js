@@ -2962,7 +2962,10 @@ function renderCompetitorGaps(data, isSingle) {
       const err = (c.errors || []).filter(Boolean).join("; ");
       return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div>${err ? `<div class="insights-error" style="margin-top:6px">${escapeHtml(err)}</div>` : ""}</div>`;
     }
-    if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
+    if (status === "error" || status === "blocked") {
+      const title = status === "blocked" ? `${escapeHtml(c.competitor)} — blocked` : escapeHtml(c.competitor);
+      return `<div class="insights-card"><h4>${title}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
+    }
 
     const sr = c.se_rich || {};
     const ka = sr.keyword_analysis || {};

@@ -758,7 +758,7 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
         try:
             await db.competitor_gap_analyses.update_one(
                 {"target_job_id": target_job_id, "competitor": comp_domain},
-                {"$set": {"status": "running", "updated_at": datetime.utcnow()}},
+                {"$set": {"status": "running", "updated_at": datetime.utcnow()}, "$unset": {"errors": 1}},
                 upsert=True,
             )
             await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"status": "running", "progress_message": "Crawling competitor..."}})
@@ -766,6 +766,27 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
             pages = await db.pages.find({"job_id": comp_job}, {"html": 0, "html_mobile": 0}).to_list(length=None)
             if not pages:
                 raise Exception("Competitor crawl returned no pages")
+
+            blocked = crawl.get("total_pages", len(pages)) <= 1
+            if blocked:
+                result = {
+                    "competitor": comp_domain,
+                    "url": comp_url,
+                    "target_job_id": target_job_id,
+                    "status": "blocked",
+                    "pages_crawled": crawl.get("total_pages", len(pages)),
+                    "gap_count": 0,
+                    "errors": ["Site blocks automated access (robots.txt/sitemap.xml returned 403; only the homepage could be crawled)"],
+                    "generated_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                }
+                await db.competitor_gap_analyses.update_one(
+                    {"target_job_id": target_job_id, "competitor": comp_domain},
+                    {"$set": result},
+                    upsert=True,
+                )
+                await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"status": "error", "progress_message": "Competitor blocks automated access"}})
+                return result
 
             await db.competitor_gap_analyses.update_one(
                 {"target_job_id": target_job_id, "competitor": comp_domain},
