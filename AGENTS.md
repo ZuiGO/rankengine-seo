@@ -10,24 +10,42 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: competitor blocked-status honesty)
-- Round: competitor audits that silently "completed" with 1 crawled page (site
-  bot-blocks: robots.txt/sitemap.xml 403, e.g. www.parker.com) are now marked
-  `status: "blocked"` with `errors` ["Site blocks automated access (...)"] —
-  the analysis returns early (before SERP/SE Ranking spend) and the frontend
-  renders a blocked card with Retry (`renderCompetitorGaps` error branch now
-  covers `blocked`).
-  - Also fixed: a worker-restart retry kept the stale "Audit cancelled
-    (worker restart or timeout)" message — `_analyze_one` now `$unset`s
-    `errors` when it sets `status: running`.
-  - Live-verified: re-running parker.com on `6294eef9` → `blocked | pages: 1 |
-    Site blocks automated access (robots.txt/sitemap.xml returned 403...)`.
-    swagelok.com (large site) legitimately times out at the 15-min
-    per-competitor cap → `error: Competitor audit timed out (15-minute limit)`.
-  - Tests: `backend/tests/test_competitor_blocked.py` (3 new; suite 326/326):
-    blocked when only homepage crawled (status/pages/gap_count/errors + stored
-    row), rerun clears stale cancel error, 2+ page crawl completes normally.
-  - Committed as `<D248B79>` replacement `d248b79`.. this round; pushed.
+## Status (last update: blocked competitors now yield full partial reports)
+- Round (latest): bot-blocked competitors (≤1 page crawl, e.g. parker.com)
+  now produce a FULL partial report instead of being skipped after the
+  status was set: `_analyze_one` runs the shared SE-Ranking+SERP block first
+  (baseline + `_serp_keyword_gaps`/`_serp_features_gap`/`_backlink_gap` via
+  cached target keywords from `extract_keywords_from_content`) and only then
+  branches: blocked → stub crawl-gap dicts with "Crawl blocked; ... not
+  measured" errors; else → full crawl chain (analyze_pages/check_links/
+  compute_site_health/fetch_performance/audit_structured_data/content-gap
+  dicts). `se_rich` (opportunity score + recommendations) computed in both
+  paths; result status `blocked` when blocked.
+  - `config.py` gains `competitor_timeout_seconds: int = 1800`; `run_one`
+    uses it (30-min per-competitor cap; error message now "...(30-minute
+    limit)").
+  - `GET /api/competitors/{job}/report` accepts status `{"$in":
+    ["completed", "blocked"]}` so the sectioned JSON report includes blocked
+    competitors.
+  - Frontend `renderCompetitorGaps`: blocked rows render the full report card
+    with an amber "Blocked crawl — partial report" badge + note ("report
+    below is SE Ranking + SERP data only") + Retry button (was: dead-end
+    error card).
+  - Tests `test_competitor_blocked.py` now 4 (patched fixture mocks
+    `_target_baseline`/`_se_rich_gap`/`_serp_*/`_backlink_gap` +
+    extract_keywords import; blocked tests assert se_rich + keyword/backlink
+    gaps survive; new report-route test with `$in` FakeDb.find support).
+    Full suite 327/327.
+  - Live-verified on `6294eef9-1f42-4974-babb-170165f7736f`: parker.com →
+    `blocked` with se_rich opp 100, backlink_gap domains, traffic/authority
+    sections; Swagelok re-crawling (will hit 30-min cap legitimately);
+    Playwright verified badge + Retry on the live card, zero console
+    errors.
+  - Committed as `4bfed03`; pushed.
+- Round (earlier): competitor audits that "silently completed" ... (previous
+  status below) — blocked-status fix committed `8a0fa7e` (marked `blocked`
+  with errors, early return before SERP/SE spend, `$unset` stale errors on
+  rerun, blocked card with Retry).
 - Round (earlier): Competitor analyses were stalling in `running` status when a single large site (e.g. `swagelok.com` 1,000 pages) took over 30 mins, holding faster competitors (`parker.com`, `hydac.com`) blocked in `asyncio.gather` memory without writing their `completed` status to MongoDB.
   - Fix 1 (Incremental Persistence): `_analyze_one` and `run_one` now immediately persist each competitor's completed result to MongoDB as soon as it finishes, allowing frontend polling to surface completed competitors immediately.
   - Fix 2 (15-min Per-Competitor Timeout): Wrapped `_analyze_one` calls in `asyncio.wait_for(..., timeout=900)`. If a competitor exceeds 15 minutes, it is cleanly saved with `status: "error"` without blocking the rest of the batch.
