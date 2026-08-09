@@ -1002,7 +1002,8 @@ async function loadLinkHealth(jobId) {
         <div class="insights-card"><div class="insights-label">Checked</div><div class="insights-value">${s.checked ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">OK</div><div class="insights-value" style="color:var(--success)">${s.ok ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Broken (4xx/5xx)</div><div class="insights-value" style="color:var(--danger)">${s.broken ?? "N/A"}</div></div>
-        <div class="insights-card"><div class="insights-label">Redirects (301/302)</div><div class="insights-value" style="color:#d97706">${s.redirected_links ?? s.redirect ?? "N/A"}${s.max_redirect_chain ? ` (max chain ${s.max_redirect_chain})` : ""}</div></div>
+        <div class="insights-card"><div class="insights-label">Ends in redirect (301/302)</div><div class="insights-value" style="color:#d97706">${s.redirect ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Followed redirects</div><div class="insights-value" style="color:#d97706">${s.redirected_links ?? "N/A"}</div><div class="insights-label" style="font-size:10px;font-weight:400">links that redirected then resolved</div></div>
         <div class="insights-card"><div class="insights-label">Blocked (401/403)</div><div class="insights-value" style="color:#b45309">${s.blocked ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Unreachable</div><div class="insights-value">${s.unreachable ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Avg Link Length</div><div class="insights-value">${ls.avg ?? "-"} chars</div></div>
@@ -1064,15 +1065,18 @@ async function loadAllLinks(jobId, { reset } = {}) {
       <td><span class="page-type-badge" style="background:${l.status === "ok" ? "#dcfce7" : l.status === "unchecked" ? "#f1f5f9" : "#fee2e2"};color:${l.status === "ok" ? "#15803d" : l.status === "unchecked" ? "#64748b" : "#b91c1c"}">${l.status}</span></td>
       <td>${l.status_code ?? "-"}</td>
       <td class="page-url-cell" title="${l.url}">${l.external ? '<span class="page-type-badge" style="background:#e0e7ff;color:#4338ca">external</span> ' : ""}${linkify(l.url, 60)}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${(l.redirect_count || 0) > 0
+        ? (l.final_url ? `<span class="page-url-cell" title="${escapeHtml((l.redirect_chain || []).join(" -> ")) || ""}">${linkify(l.final_url, 45)}</span>` : "-")
+        : "-"}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${(l.pages || []).slice(0, 2).map(pg => linkify(pg, 30)).join("<br>") || "-"}</td>
     </tr>`).join("");
     el.innerHTML = `
       <p class="section-desc">${data.total} unique link target(s)${allLinksStatus ? ` (filter: ${allLinksStatus})` : allLinksExternal ? " (external links)" : ""}</p>
-      ${(data.links || []).some(l => l.status === "unchecked")
-        ? '<p class="section-desc" style="font-size:12px;color:var(--text-secondary)">External links recovered from the crawl are shown as "unchecked" — run Check Links to verify their HTTP status.</p>'
+      ${(data.unchecked_count || 0) > 0
+        ? `<p class="section-desc" style="font-size:12px;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin:8px 0;color:#854d0e">${data.unchecked_count} link(s) haven't had their HTTP status verified yet — they were recovered from the crawl (mostly external links). Click <strong>Check Links</strong> above to verify them.</p>`
         : ""}
-      <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>URL</th><th>Linked From</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">No links for this filter</td></tr>'}</tbody></table>
+      <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>URL</th><th>Redirected to</th><th>Linked From</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">No links for this filter</td></tr>'}</tbody></table>
       ${allLinksOffset + (data.links || []).length < data.total
         ? `<button id="all-links-more" class="btn-secondary" style="margin-top:10px">Load more (${data.total - allLinksOffset - (data.links || []).length} remaining)</button>`
         : ""}
@@ -2044,12 +2048,13 @@ function scoreFrom(value) {
   return v >= 70 ? "pass" : v >= 40 ? "attention" : "fail";
 }
 
-function auditCard(title, { status, label, score, verdict, detail, checks }) {
+function auditCard(title, { status, label, score, verdict, detail, checks, evidence }) {
   return `<div class="audit-card">
     <div class="audit-card-head"><span class="audit-title">${escapeHtml(title)}</span>${statusChip(status, label)}</div>
     ${score !== null && score !== undefined ? `<div class="bar-track" style="margin:6px 0"><div class="bar-fill" style="width:${Math.max(0, Math.min(100, score))}%;background:${score >= 70 ? "#16a34a" : score >= 40 ? "#d97706" : "#dc2626"}"></div></div>` : ""}
     <div class="audit-verdict">${verdict}</div>
     ${detail ? `<div class="audit-detail">${detail}</div>` : ""}
+    ${evidence || ""}
     ${checks && checks.length ? `<details class="audit-checks"><summary>Checks (${checks.length})</summary>${checks.map(c => `<div class="audit-check"><span class="check-mark ${c.passed ? "ok" : "issue"}">${c.passed ? "Pass" : "Issue"}</span> ${escapeHtml(c.label)}${c.detail ? ` <span class="count-label">— ${escapeHtml(c.detail)}</span>` : ""}</div>`).join("")}</details>` : ""}
   </div>`;
 }
@@ -2083,6 +2088,14 @@ function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, 
     ? (() => {
         const conflicts = (dup.canonical_conflicting ?? 0) + (dup.canonical_cross_domain ?? 0);
         const status = dupCount === 0 && conflicts === 0 ? "pass" : dupCount <= 5 && conflicts === 0 ? "attention" : "fail";
+        const groupsHtml = dupCount
+          ? `<details class="audit-checks" style="margin-top:8px"><summary>Duplicate groups (${dupCount}) — pages with near-identical content</summary>${(dup.duplicate_groups || []).map(g => `
+            <div class="audit-check" style="flex-direction:column;align-items:flex-start;gap:4px">
+              <span class="check-mark issue">Duplicate</span>
+              <div style="font-size:12px;line-height:1.5">${(g.urls || []).slice(0, 5).map(u => linkify(u, 90)).join("<span style='color:var(--text-secondary)'> ↔ </span>")}${(g.urls || []).length > 5 ? ` <span class="count-label">+${g.urls.length - 5} more</span>` : ""}</div>
+              <span class="count-label">similarity: ${escapeHtml(g.similarity || "high")}</span>
+            </div>`).join("")}</details>`
+          : "";
         return {
           status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
           score: dupCount === 0 && conflicts === 0 ? 100 : Math.max(0, 100 - dupCount * 10 - conflicts * 15),
@@ -2091,6 +2104,7 @@ function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, 
             : `${dupCount} duplicate group(s) and ${conflicts} canonical conflict(s) found — consolidate to one canonical URL per topic.`,
           detail: `${dup.duplicate_pages ?? 0} pages involved · ${dup.canonical_missing ?? 0} pages missing a canonical tag`,
           checks: (dup.canonical_flags || []).filter(f => f.canonical_conflicting || f.canonical_cross_domain).map(f => ({ passed: false, label: f.page_url, detail: f.canonical_target })),
+          evidence: groupsHtml,
         };
       })()
     : { status: "na", label: "Not run", verdict: "Duplicate-content audit not run for this job." }));
@@ -2598,6 +2612,10 @@ function renderCompetitors(rows, error) {
       const chipHtml = chips.length
         ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${chips.map(s => `<span class="keyword-chip">${escapeHtml(String(s).substring(0, 34))}</span>`).join("")}</div>`
         : "";
+      const noOverlap = !chips.length && !(c.common_keywords > 0);
+      const overlapNote = noOverlap
+        ? `<div class="insights-value" style="font-size:11px;color:#b45309;margin-top:4px">No keyword-overlap data — not verified as an organic competitor; check the Competitors tab.</div>`
+        : "";
       const statusBadge = tracked && c.status
         ? `<span class="badge" style="${c.status === "blocked" ? "background:#fef3c7;color:#92400e" : c.status === "partial" ? "background:#fef3c7;color:#92400e" : "background:#dcfce7;color:#15803d"}">${escapeHtml(c.status)}</span>`
         : "";
@@ -2609,6 +2627,7 @@ function renderCompetitors(rows, error) {
         <div class="insights-value" title="Keyword overlap">${c.common_keywords ?? "N/A"} shared keywords</div>
         ${tracked ? "" : `<div class="insights-value">Relevance: ${c.domain_relevance != null ? c.domain_relevance + "%" : "N/A"}</div>
         <div class="insights-value">Traffic: ${c.traffic_sum != null ? Number(c.traffic_sum).toLocaleString() : "N/A"}</div>`}
+        ${overlapNote}
         ${chipHtml}
       </div>`;
     }).join("");

@@ -10,7 +10,7 @@ from backend.db.mongo import get_db
 router = APIRouter(prefix="/api/seo-insights", tags=["seo-insights"])
 
 CACHE_TTL_MINUTES = 60
-CACHE_VERSION = 11
+CACHE_VERSION = 13
 
 
 class KeywordSearchRequest(BaseModel):

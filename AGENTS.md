@@ -10,7 +10,33 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: Report cleanup + external links — committed fe8c9a5)
+## Status (last update: truthfulness round — redirects/unchecked/keywords/competitors/duplicates — committed pending)
+- Links tab redirects made honest: "Ends in redirect (301/302)" (true 3xx bucket,
+  was 0 for live job) split from "Followed redirects" (links that redirected then
+  resolved, was 152 — previously shown under a "301/302" label). All Links table
+  gains a "Redirected to" column showing `final_url` when `redirect_count>0`
+  (tooltip = full chain).
+- Unchecked links explained: `/api/links/{job}/all` returns `unchecked_count`;
+  frontend always renders an amber note (count + "recovered from crawl, not yet
+  verified — run Check Links") whenever >0, regardless of which 200-row page is
+  shown (was: note only when the current page happened to contain one).
+- SEO Insights keyword cleanup: `keyword_engine.MODIFIERS` drops merchant-tone
+  terms (price/oem/for sale/wholesale/exporter), variants capped at 3 per stem
+  (`MAX_MODIFIERS_PER_PHRASE`), `overview` added to GREEDY_SLUGS + TITLE_STOP;
+  CACHE_VERSION 11 -> 13. Live: site terms are now union/union manufacturer/union
+  supplier/union manufacturer india + railway family; no "for sale" junk.
+- SEO Insights competitors: SE Ranking rows sorted by `domain_relevance` desc;
+  tracked/organic entries with zero overlap render an amber "No keyword-overlap
+  data — not verified as an organic competitor; check the Competitors tab" note
+  instead of looking like verified matches.
+- Duplicates evidence: Site Health "Duplicate Content & Canonicals" card now
+  lists the actual duplicate groups (URL pairs linkified, similarity label, cap 5
+  per group) via a new optional `evidence` block in auditCard.
+- 349/349 tests (4 new: unchecked_count, merchant-tone drop + 3-cap, competitor
+  relevance sort), node --check clean, live-verified on `6294eef9` (Playwright:
+  both redirect cards, REDIRECTED TO column, amber unchecked note w/ 77, duplicate
+  groups (59) evidence, no merchant keywords, no-overlap chips, zero console
+  errors). (Earlier: report/links round committed `fe8c9a5`.)
 - Report tab: standalone Indexation block and the Image-Optimization "Occurrences"
   stat card removed (image audit keeps Unique / WebP-AVIF / Without-dimensions /
   lazy counts; chat verdict no longer cites "occurrences"). Flow Count now means

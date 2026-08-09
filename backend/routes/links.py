@@ -41,6 +41,7 @@ async def all_links(job_id: str, status: str | None = None, external: bool | Non
     if fallback and external is not None:
         q.pop("external", None)
     total = await db.link_health.count_documents(q)
+    unchecked_count = await db.link_health.count_documents({"job_id": job_id, "status": "unchecked"})
     cursor = db.link_health.find(q).sort("url", 1).skip(offset).limit(limit)
     rows = []
     async for r in cursor:
@@ -60,7 +61,7 @@ async def all_links(job_id: str, status: str | None = None, external: bool | Non
         if external is not None:
             rows = [r for r in rows if r["external"] is external]
             total = len(rows)
-    return {"total": total, "links": rows, "offset": offset, "limit": limit}
+    return {"total": total, "links": rows, "offset": offset, "limit": limit, "unchecked_count": unchecked_count}
 
 
 @router.get("/{job_id}/backlinks")

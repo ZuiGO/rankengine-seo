@@ -95,7 +95,9 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
 
     try:
         comps = await se_ranking.domain_competitors(domain)
-        insights["competitors"] = comps
+        insights["competitors"] = sorted(
+            comps, key=lambda c: -(c.get("domain_relevance") or 0)
+        )
         insights["competitors_error"] = None
     except Exception as e:
         insights["competitors"] = []
@@ -129,8 +131,12 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
                 tracked.append(entry)
             if tracked:
                 tracked_names = {e.get("domain") for e in tracked}
+                se_ranking_sorted = sorted(
+                    se_ranking_competitors,
+                    key=lambda c: -(c.get("domain_relevance") or 0),
+                )
                 insights["competitors"] = tracked + [
-                    c for c in se_ranking_competitors
+                    c for c in se_ranking_sorted
                     if str(c.get("domain") or "").lower() not in tracked_names
                 ]
         except Exception as e:

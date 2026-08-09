@@ -16,9 +16,9 @@ from backend.logging_setup import get_logger
 logger = get_logger("keyword_engine")
 
 MODIFIERS = [
-    "manufacturer", "supplier", "manufacturer india", "supplier india",
-    "india", "price", "oem", "for sale", "wholesale", "exporter",
+    "manufacturer", "supplier", "manufacturer india", "supplier india", "india",
 ]
+MAX_MODIFIERS_PER_PHRASE = 3
 
 SLUG_SEP_RE = re.compile(r"[-_/]+")
 FILE_EXT_RE = re.compile(r"\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|mp4|mp3|mov|avi|web[mp]|jpe?g|png|gif|svg|ico|webp|txt|json|csv)$", re.I)
@@ -31,11 +31,12 @@ GREEDY_SLUGS = {
     "team", "careers", "career", "jobs", "clients", "partners", "partner",
     "distributors", "gallery", "downloads", "download", "videos", "video",
     "manual", "manuals", "tenders", "insurance", "csr", "sustainability", "china",
+    "overview",
 }
 TITLE_STOP = {
     "the", "and", "for", "of", "to", "in", "on", "with", "at", "a", "an",
     "or", "home", "page", "welcome", "product", "products", "buy", "shop",
-    "zui", "engine",
+    "overview", "zui", "engine",
 }
 WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9'\-]+")
 
@@ -111,9 +112,9 @@ def apply_modifiers(phrases: list[str], modifiers: list[str] | None = None, max_
             continue
         seen.add(low)
         out.append(p)
-        for m in mods:
-            if len(out) >= max_total:
-                return out
+        for i, m in enumerate(mods):
+            if i >= MAX_MODIFIERS_PER_PHRASE or len(out) >= max_total:
+                break
             cand = f"{p} {m}".strip()
             if cand.lower() in seen or len(cand) > 70:
                 continue

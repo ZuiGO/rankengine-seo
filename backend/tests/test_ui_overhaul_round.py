@@ -273,6 +273,14 @@ class TestKeywordEngine:
         out = ke.apply_modifiers(["a b", "a b", "a b manufacturer"], max_total=40)
         assert out.count("a b") == 1
 
+    def test_apply_modifiers_drops_merchant_tone_and_caps_variants(self):
+        out = ke.apply_modifiers(["union"], max_total=40)
+        assert any(k == "union manufacturer" or k == "union supplier" for k in out)
+        assert not any(("for sale" in k or "wholesale" in k or "exporter" in k
+                        or k.endswith(" oem") or k.endswith(" price")) for k in out)
+        variants = [k for k in out if k.startswith("union ")]
+        assert len(variants) <= 3
+
     def test_domain_from_urls(self):
         assert ke.domain_from_urls(["https://fluidcontrols.com/x"]) == "fluidcontrols.com"
 
@@ -438,6 +446,53 @@ class TestExternalInsightsSync:
         assert "parker.com" in comps
         assert comps["parker.com"]["status"] == "blocked"
 
+    @pytest.mark.asyncio
+    async def test_se_ranking_competitors_sorted_by_relevance(self, monkeypatch):
+        from backend.services import external_insights as ei
+        from backend.services import se_ranking
+        from backend.services import local_insights as li
+
+        db = FakeDb()
+        monkeypatch.setattr("backend.db.mongo.get_db", lambda: db)
+        monkeypatch.setattr(li, "get_db", lambda: db)
+
+        async def _none(*a, **k):
+            return None
+        monkeypatch.setattr(li, "local_keywords", _none)
+        monkeypatch.setattr(li, "local_backlinks", _none)
+        monkeypatch.setattr(li, "local_overview", _none)
+
+        async def _se_domain_competitors(domain):
+            return [
+                {"domain": "lowoverlap.com", "common_keywords": 1, "domain_relevance": 0.4},
+                {"domain": "strongfit.com", "common_keywords": 9, "domain_relevance": 6.2},
+                {"domain": "midfit.com", "common_keywords": 4, "domain_relevance": 3.1},
+            ]
+
+        async def _boom(*a, **k):
+            raise RuntimeError("nope")
+
+        monkeypatch.setattr(se_ranking, "domain_competitors", _se_domain_competitors)
+        for fn in ("domain_keywords", "backlink_summary", "domain_overview", "domain_overview_history",
+                   "backlink_authority", "backlink_anchors", "backlink_refdomains", "backlink_top_pages",
+                   "authority_history", "backlink_new_lost", "backlink_new_lost_counts", "ranked_keywords"):
+            monkeypatch.setattr(se_ranking, fn, _boom)
+
+        async def fake_serp(*a, **k):
+            return [], []
+
+        monkeypatch.setattr("backend.services.serp_api.run_serp_rankings", fake_serp)
+
+        async def fake_gsc(domain):
+            from backend.services.service_errors import ServiceError
+            raise ServiceError("gsc", "not connected")
+
+        monkeypatch.setattr("backend.services.gsc.fetch_gsc", fake_gsc)
+
+        out = await ei.fetch_all_insights("us.com")
+        domains = [c["domain"] for c in out["competitors"]]
+        assert domains == ["strongfit.com", "midfit.com", "lowoverlap.com"]
+
 
 class TestCompetitorPartial:
     @pytest.mark.asyncio
@@ -551,9 +606,11 @@ class TestLinksExternalFilter:
         assert out["total"] == 1
         assert out["links"][0]["url"] == "https://ext.example.com/x"
         assert out["links"][0]["id"] == "id0"
+        assert out.get("unchecked_count") == 0
 
         out_all = await links.all_links("j1", limit=200, offset=0)
         assert out_all["total"] == 3
+        assert out_all.get("unchecked_count") == 0
 
         out_broken = await links.all_links("j1", status="broken", limit=200, offset=0)
         assert out_broken["total"] == 1
@@ -578,11 +635,27 @@ class TestLinksExternalFilter:
         assert out["total"] == 1
         assert out["links"][0]["url"] == "https://ext.example.com/x"
         assert out["links"][0]["external"] is True
+        assert out.get("unchecked_count") == 0
 
         out_all = await links.all_links("j1", limit=200, offset=0)
         assert out_all["total"] == 2
         flagged = [r["external"] for r in out_all["links"]]
         assert sorted(flagged) == [False, True]
+
+    @pytest.mark.asyncio
+    async def test_all_links_reports_unchecked_count(self, monkeypatch):
+        from backend.routes import links
+
+        db = FakeDb(links=[
+            {"job_id": "j1", "url": "https://ext.example.com/x", "status": "unchecked", "external": True, "_id": "id0"},
+            {"job_id": "j1", "url": "https://internal.example.com/y", "status": "ok", "external": False, "_id": "id1"},
+        ])
+        monkeypatch.setattr(links, "get_db", lambda: db)
+        db._stores["analysis_jobs"]["j1"] = {"_id": "j1"}
+
+        out = await links.all_links("j1", limit=200, offset=0)
+        assert out["total"] == 2
+        assert out["unchecked_count"] == 1
 
 
 class TestUserFlows:
