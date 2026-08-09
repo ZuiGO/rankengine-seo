@@ -10,7 +10,7 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: truthfulness round — redirects/unchecked/keywords/competitors/duplicates — committed pending)
+## Status (last update: truthfulness round — redirects/unchecked/keywords/competitors/duplicates — committed d9690ce)
 - Links tab redirects made honest: "Ends in redirect (301/302)" (true 3xx bucket,
   was 0 for live job) split from "Followed redirects" (links that redirected then
   resolved, was 152 — previously shown under a "301/302" label). All Links table
