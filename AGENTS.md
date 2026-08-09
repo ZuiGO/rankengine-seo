@@ -10,7 +10,7 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: Report cleanup: Indexation/Occurrences removed, accurate Flow Count, external links surfaced — committed <HASH>)
+## Status (last update: Report cleanup + external links — committed fe8c9a5)
 - Report tab: standalone Indexation block and the Image-Optimization "Occurrences"
   stat card removed (image audit keeps Unique / WebP-AVIF / Without-dimensions /
   lazy counts; chat verdict no longer cites "occurrences"). Flow Count now means
