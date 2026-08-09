@@ -52,6 +52,38 @@ class FakeActionItems:
                 return False
         return True
 
+    def aggregate(self, pipeline):
+        rows = []
+        match = pipeline[0]["$match"]
+        stage = pipeline[-1]["$group"]
+        key = stage["_id"]
+        acc = {}
+        for d in self.docs:
+            if not self._matches(d, match):
+                continue
+            if isinstance(key, str):
+                k = d.get(key.lstrip("$"))
+            else:
+                k = tuple(d.get(vv.lstrip("$")) for vv in key.values())
+            acc[k] = acc.get(k, 0) + 1
+        for k, c in acc.items():
+            rows.append({"_id": k, "count": c})
+        return _AggCursor(rows)
+
+
+class _AggCursor:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def __aiter__(self):
+        return self._iter()
+
+    async def _iter(self):
+        for r in self._rows:
+            yield r
+
+
+class FakeActionItems(FakeActionItems):
     async def update_many(self, query, update):
         for d in self.docs:
             if self._matches(d, query):
@@ -128,6 +160,18 @@ class TestListActionsFilter:
         result = run(actions_module.list_actions("job1", status_filter="pending", severity="high"))
         assert result["total"] == 1
 
+    def test_grouped_by_issue_summary(self, fake_db):
+        fake_db.action_items.docs = [
+            make_action("a" * 24, "high", "pending"),
+            make_action("b" * 24, "high", "pending"),
+            {**make_action("c" * 24, "low", "pending"), "content_type": "page",
+             "page_url": "https://example.com/page", "issue_key": "meta_description_missing"},
+        ]
+        result = run(actions_module.list_actions("job1", grouped=True))
+        assert result["summary"]["by_issue"]["image|image_alt_missing"] == 2
+        assert result["summary"]["by_issue"]["page|meta_description_missing"] == 1
+        assert result["summary"]["by_type"]["image"] == 2
+
 
 class TestBatchReject:
     def test_rejects_pending_only(self, fake_db):
@@ -150,6 +194,16 @@ class TestBatchReject:
             "job1", actions_module.BatchRequest(status="rejected", ids=["b" * 24])))
         assert result["updated"] == 1
         assert fake_db.action_feedback.rows[0]["page_url"].endswith("b.jpg")
+
+    def test_reject_issue_key_scoped(self, fake_db):
+        fake_db.action_items.docs = [
+            make_action("a" * 24),
+            {**make_action("b" * 24), "issue_key": "image_oversized"},
+        ]
+        result = run(actions_module.batch_update_actions(
+            "job1", actions_module.BatchRequest(status="rejected", issue_key="image_alt_missing")))
+        assert result["updated"] == 1
+        assert fake_db.action_feedback.rows[0]["page_url"].endswith("a.jpg")
 
     def test_empty_set_noop(self, fake_db):
         result = run(actions_module.batch_update_actions(

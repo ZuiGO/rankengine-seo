@@ -10,7 +10,18 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: UI overhaul round + smart site-term keywords — committed 3f2114f)
+## Status (last update: SEO Actions de-duplicated UI — committed 4d1e9f7)
+- Actions tab no longer repeats identical suggestions: groups by
+  (content_type, issue_key) instead of content_type alone. Each group header
+  shows ONE suggestion line + "N shown / M total" (summary gains
+  `by_issue` counts from list_actions) with issue-scoped Approve/Reject group
+  buttons; body previews 8 cards then "Show all N more" toggle
+  (`toggleGroupExtra`). Batch endpoint accepts optional `issue_key` filter.
+  Full suite 344/344; live-verified on `6294eef9` (1,256 actions -> 20 issue
+  groups, e.g. `image|image_alt_missing` 481 collapsed to one header), zero
+  console errors. (Earlier round: UI overhaul + smart site-term keywords,
+  committed `13b875d`.)
+- Round (latest): blocked competitors now yield full partial reports
 - UI/backend overhaul round (full suite 342/342, node --check clean, live-verified on
   `6294eef9`):
   - Pages tab: Links column REMOVED (crawler summary still stores counts).

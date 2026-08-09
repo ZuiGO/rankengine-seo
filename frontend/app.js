@@ -1151,10 +1151,20 @@ function toggleActionCard(rowEl) {
   }
 }
 
-async function groupBatch(jobId, contentType, status) {
+function toggleGroupExtra(gi) {
+  const wrap = document.getElementById(`group-extra-${gi}`);
+  const btn = document.getElementById(`group-more-${gi}`);
+  if (!wrap) return;
+  const open = wrap.style.display !== "none";
+  wrap.style.display = open ? "none" : "block";
+  if (btn) btn.textContent = open ? `Show all ${wrap.children.length} more` : "Show fewer";
+}
+
+async function groupBatch(jobId, contentType, status, issueKey) {
   const label = status === "approved" ? "Approve" : "Reject";
-  if (!confirm(`${label} ALL pending ${contentType} actions? This generates content for every one and cannot be undone per-item.`)) return;
-  const btn = document.querySelector(`[data-group-btn="${contentType}"][data-group-status="${status}"]`);
+  const issueTxt = issueKey ? ` \`${issueKey}\`` : "";
+  if (!confirm(`${label} ALL pending ${contentType}${issueTxt} actions? This generates content for every one and cannot be undone per-item.`)) return;
+  const btn = document.querySelector(`[data-group-btn="${contentType}"][data-group-issue="${issueKey || ""}"][data-group-status="${status}"]`);
   if (btn) {
     btn.disabled = true;
     btn.textContent = "Working...";
@@ -1163,7 +1173,7 @@ async function groupBatch(jobId, contentType, status) {
     const resp = await fetch(`${API_BASE}/actions/${jobId}/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, status_filter: "pending", content_type: contentType }),
+      body: JSON.stringify({ status, status_filter: "pending", content_type: contentType, issue_key: issueKey || undefined }),
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || resp.statusText);
@@ -1210,25 +1220,45 @@ async function loadActions(jobId, { reset } = {}) {
   const groups = new Map();
   for (const a of data.actions) {
     const t = a.content_type || "other";
-    if (!groups.has(t)) groups.set(t, []);
-    groups.get(t).push(a);
+    const k = a.issue_key || "other";
+    const gkey = `${t}|${k}`;
+    if (!groups.has(gkey)) groups.set(gkey, []);
+    groups.get(gkey).push(a);
   }
 
+  const issueCounts = s.by_issue || {};
+  const GROUP_PREVIEW = 8;
   let html = "";
-  for (const [type, items] of groups) {
-    const groupTotal = (s.by_type || {})[type] ?? null;
+  let gi = 0;
+  for (const [gkey, items] of groups) {
+    const [type, issueKey] = gkey.split("|");
+    const groupTotal = issueCounts[gkey] ?? items.length;
+    const first = items[0];
+    const suggest = escapeHtml(
+      (first.improvement_suggestions || []).join("; ") ||
+      (first.identified_issues || []).join("; ") ||
+      "improve this item"
+    );
+    const preview = items.slice(0, GROUP_PREVIEW).map(actionCardHtml).join("");
+    const extra = items.slice(GROUP_PREVIEW);
+    const extraWrap = extra.length
+      ? `<div id="group-extra-${gi}" style="display:none">${extra.map(actionCardHtml).join("")}</div>
+         <button id="group-more-${gi}" class="btn-secondary" style="margin:6px 0 2px" onclick="toggleGroupExtra(${gi})">Show all ${extra.length} more</button>`
+      : "";
     html += `
-      <details class="action-group" open data-group="${escapeHtml(type)}">
+      <details class="action-group" open data-group="${escapeHtml(gkey)}">
         <summary class="action-group-header">
           <span class="action-type">${escapeHtml(type)}</span>
-          <span class="count-label">${groupTotal != null ? `${items.length} shown / ${groupTotal} total` : `${items.length}`}</span>
+          <span class="action-summary-text" style="flex:1;min-width:0">${suggest}</span>
+          <span class="count-label">${items.length} shown / ${groupTotal} total</span>
           ${statusFilter !== "approved" && statusFilter !== "rejected" ? `
-            <button class="btn-approve" style="padding:3px 10px;font-size:12px" data-group-btn="${escapeHtml(type)}" data-group-status="approved" onclick="event.preventDefault();event.stopPropagation();groupBatch('${jobId}', '${escapeHtml(type)}', 'approved')">Approve group</button>
-            <button class="btn-reject" style="padding:3px 10px;font-size:12px" data-group-btn="${escapeHtml(type)}" data-group-status="rejected" onclick="event.preventDefault();event.stopPropagation();groupBatch('${jobId}', '${escapeHtml(type)}', 'rejected')">Reject group</button>
+            <button class="btn-approve" style="padding:3px 10px;font-size:12px" data-group-btn="${escapeHtml(type)}" data-group-issue="${escapeHtml(issueKey)}" data-group-status="approved" onclick="event.preventDefault();event.stopPropagation();groupBatch('${jobId}', '${escapeHtml(type)}', 'approved', '${escapeHtml(issueKey)}')">Approve group</button>
+            <button class="btn-reject" style="padding:3px 10px;font-size:12px" data-group-btn="${escapeHtml(type)}" data-group-issue="${escapeHtml(issueKey)}" data-group-status="rejected" onclick="event.preventDefault();event.stopPropagation();groupBatch('${jobId}', '${escapeHtml(type)}', 'rejected', '${escapeHtml(issueKey)}')">Reject group</button>
           ` : ""}
         </summary>
-        <div class="action-group-body">${items.map(actionCardHtml).join("")}</div>
+        <div class="action-group-body">${preview}${extraWrap}</div>
       </details>`;
+    gi++;
   }
   list.innerHTML = html;
 

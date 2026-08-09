@@ -171,12 +171,25 @@ async def list_actions(job_id: str, status_filter: str | None = None, severity: 
             "approved": await db.action_items.count_documents({**base, "status": "approved"}),
             "rejected": await db.action_items.count_documents({**base, "status": "rejected"}),
             "by_type": {},
+            "by_issue": {},
         }
         async for row in db.action_items.aggregate([
             {"$match": base},
             {"$group": {"_id": "$content_type", "count": {"$sum": 1}}},
         ]):
             summary["by_type"][row["_id"]] = row["count"]
+        async for row in db.action_items.aggregate([
+            {"$match": base},
+            {"$group": {"_id": {"t": "$content_type", "k": "$issue_key"}, "count": {"$sum": 1}}},
+        ]):
+            g = row["_id"]
+            if isinstance(g, dict):
+                t, k = g.get("t"), g.get("k")
+            elif isinstance(g, tuple) and len(g) == 2:
+                t, k = g
+            else:
+                t, k = g, ""
+            summary["by_issue"][f"{t}|{k}"] = row["count"]
 
     return {"actions": items, "total": total, "summary": summary}
 
@@ -187,6 +200,7 @@ class BatchRequest(BaseModel):
     severity: str | None = None
     status_filter: str | None = None
     content_type: str | None = None
+    issue_key: str | None = None
 
 
 @router.post("/{job_id}/batch")
@@ -208,6 +222,8 @@ async def batch_update_actions(job_id: str, req: BatchRequest):
         query["impact_on_ranking"] = req.severity
     if req.content_type:
         query["content_type"] = req.content_type
+    if req.issue_key:
+        query["issue_key"] = req.issue_key
 
     items = await db.action_items.find(query).to_list(length=1000)
     if not items:
