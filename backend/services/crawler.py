@@ -61,7 +61,7 @@ async def _goto_polite(page, url: str, gate: asyncio.Lock, delay: float, timeout
     return resp
 
 
-async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None, concurrency: int = 5, seed_sitemap: bool = False, unlimited: bool = False, mobile: bool = True):
+async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None, concurrency: int = 5, seed_sitemap: bool = False, unlimited: bool = False, mobile: bool = True, use_playwright: bool = True):
     db = get_db()
     target_url = normalize_url(target_url) or target_url
     parsed = urlparse(target_url)
@@ -141,49 +141,57 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
             }}
         )
 
+    async def fetch_page_text(url: str):
+        """Return (html, status_code, headers, redirect_count) — HTTP-only mode."""
+        async with gate:
+            await asyncio.sleep(delay)
+        try:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, follow_redirects=True) as client:
+                r = await client.get(url, headers={"User-Agent": USER_AGENT})
+            return r.text, r.status_code, r.headers, len(r.history)
+        except Exception as e:
+            logger.warning("Plain fetch failed for %s: %s", url, e)
+            failed_urls.add(url)
+            return None
+
     async def crawl_and_process(browser, url: str):
         nonlocal total_internal, total_external
         async with semaphore:
             try:
-                page = await browser.new_page()
-                await page.set_extra_http_headers({
-                    "User-Agent": USER_AGENT
-                })
-                resp = None
-                try:
-                    resp = await _goto_polite(page, url, gate, delay)
-                except Exception as e:
-                    if "Download is starting" in str(e):
-                        logger.info("Skip download URL %s", url)
-                        await page.close()
+                if not use_playwright:
+                    fetched = await fetch_page_text(url)
+                    if fetched is None:
                         return None
-                    logger.warning("goto failed for %s: %s; falling back to plain fetch", url, e)
-
-                if resp is not None:
-                    html = await page.content()
-                    await page.close()
-                    status_code = resp.status
-                    headers = resp.headers
-                    redirect_count = 0
-                    req = resp.request
-                    while req and req.redirected_from:
-                        redirect_count += 1
-                        req = req.redirected_from
+                    html, status_code, headers, redirect_count = fetched
                 else:
-                    await page.close()
-                    async with gate:
-                        await asyncio.sleep(delay)
+                    page = await browser.new_page()
+                    resp = None
                     try:
-                        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                            r = await client.get(url, headers={"User-Agent": USER_AGENT})
+                        await page.set_extra_http_headers({"User-Agent": USER_AGENT})
+                        resp = await _goto_polite(page, url, gate, delay)
                     except Exception as e:
-                        logger.warning("Plain fetch failed for %s: %s", url, e)
-                        failed_urls.add(url)
-                        return None
-                    html = r.text
-                    status_code = r.status_code
-                    headers = r.headers
-                    redirect_count = 0
+                        if "Download is starting" in str(e):
+                            logger.info("Skip download URL %s", url)
+                            await page.close()
+                            return None
+                        logger.warning("goto failed for %s: %s; falling back to plain fetch", url, e)
+
+                    if resp is not None:
+                        html = await page.content()
+                        await page.close()
+                        status_code = resp.status
+                        headers = resp.headers
+                        redirect_count = 0
+                        req = resp.request
+                        while req and req.redirected_from:
+                            redirect_count += 1
+                            req = req.redirected_from
+                    else:
+                        await page.close()
+                        fetched = await fetch_page_text(url)
+                        if fetched is None:
+                            return None
+                        html, status_code, headers, redirect_count = fetched
 
                 if not html or not html.strip():
                     logger.warning("Empty HTML for %s", url)
@@ -320,63 +328,68 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
                 logger.error("Crawl error for %s: %s", url, e)
                 return None
 
-    async with async_playwright() as pw:
-        async with _chromium_slots:
-            browser = await pw.chromium.launch(headless=True)
+    from contextlib import nullcontext
+    pw_cm = async_playwright() if use_playwright else nullcontext(None)
+    async with pw_cm as pw:
+        browser = None
+        if use_playwright:
+            async with _chromium_slots:
+                browser = await pw.chromium.launch(headless=True)
 
-            crawled = 0
-            while queue and crawled < ceiling:
-                batch_size = min(concurrency, ceiling - crawled)
-                batch = queue[:batch_size]
-                queue[:] = queue[concurrency:]
+        crawled = 0
+        while queue and crawled < ceiling:
+            batch_size = min(concurrency, ceiling - crawled)
+            batch = queue[:batch_size]
+            queue[:] = queue[concurrency:]
 
-                tasks = []
-                urls_to_crawl = []
-                for u in batch:
-                    if u not in visited:
-                        visited.add(u)
-                        urls_to_crawl.append(u)
+            tasks = []
+            urls_to_crawl = []
+            for u in batch:
+                if u not in visited:
+                    visited.add(u)
+                    urls_to_crawl.append(u)
 
-                for u in urls_to_crawl:
-                    tasks.append(crawl_and_process(browser, u))
+            for u in urls_to_crawl:
+                tasks.append(crawl_and_process(browser, u))
 
-                results = await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
 
-                for result in results:
-                    if result:
-                        crawled += 1
-                        crawled_pages.append(result)
+            for result in results:
+                if result:
+                    crawled += 1
+                    crawled_pages.append(result)
 
-                        new_urls = []
-                        parent_depth = depth_map.get(result["url"], 0)
-                        for link in result.get("internal_link_urls", []):
-                            clean = normalize_url(link)
-                            if not clean:
-                                continue
-                            if clean not in visited and clean not in queue:
-                                new_urls.append(clean)
-                                if clean not in depth_map:
-                                    depth_map[clean] = parent_depth + 1
-                        queue.extend(new_urls)
+                    new_urls = []
+                    parent_depth = depth_map.get(result["url"], 0)
+                    for link in result.get("internal_link_urls", []):
+                        clean = normalize_url(link)
+                        if not clean:
+                            continue
+                        if clean not in visited and clean not in queue:
+                            new_urls.append(clean)
+                            if clean not in depth_map:
+                                depth_map[clean] = parent_depth + 1
+                    queue.extend(new_urls)
 
-                        page_for_db = dict(result)
-                        page_for_db.pop("internal_link_urls", None)
-                        page_for_db.pop("external_link_urls", None)
-                        await db.pages.insert_one({"job_id": job_id, **page_for_db})
+                    page_for_db = dict(result)
+                    page_for_db.pop("internal_link_urls", None)
+                    page_for_db.pop("external_link_urls", None)
+                    await db.pages.insert_one({"job_id": job_id, **page_for_db})
 
-                        await db.page_links.insert_one({
-                            "job_id": job_id,
-                            "url": result["url"],
-                            "internal_link_urls": result.get("internal_link_urls", []),
-                            "external_link_urls": result.get("external_link_urls", []),
-                        })
+                    await db.page_links.insert_one({
+                        "job_id": job_id,
+                        "url": result["url"],
+                        "internal_link_urls": result.get("internal_link_urls", []),
+                        "external_link_urls": result.get("external_link_urls", []),
+                    })
 
-                        await update_progress(crawled, f"Crawled {urlparse(result['url']).path or '/'}")
+                    await update_progress(crawled, f"Crawled {urlparse(result['url']).path or '/'}")
 
+        if browser is not None:
             await browser.close()
 
         mobile_ok = 0
-        if mobile:
+        if mobile and use_playwright:
             try:
                 async with _chromium_slots:
                     mobile_browser = await pw.chromium.launch(headless=True)

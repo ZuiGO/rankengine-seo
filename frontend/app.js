@@ -155,7 +155,6 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "links") loadLinks(currentJobId);
       if (currentTab === "actions") loadActions(currentJobId);
       if (currentTab === "report") loadReport(currentJobId);
-      if (currentTab === "analytics") loadAnalytics(currentJobId);
       if (currentTab === "chat") initChat();
       if (currentTab === "seo-insights") loadSeoInsights(currentJobId);
       if (currentTab === "competitors") loadCompetitors(currentJobId);
@@ -713,202 +712,6 @@ async function loadTrends(jobId) {
   }
 }
 
-let chartInstances = [];
-
-function destroyCharts() {
-  chartInstances.forEach(c => { try { c.destroy(); } catch (e) {} });
-  chartInstances = [];
-}
-
-function makeLineChart(canvasId, labels, datasets, yAxis = null) {
-  if (typeof Chart === "undefined") return null;
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return null;
-  const chart = new Chart(canvas.getContext("2d"), {
-    type: "line",
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: datasets.length > 1,
-          labels: { color: "#64748b", boxWidth: 12, font: { size: 11 } },
-        },
-      },
-      scales: {
-        x: {
-          ticks: { color: "#64748b", maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
-          grid: { color: "rgba(148,163,184,0.12)" },
-        },
-        y: yAxis || { ticks: { color: "#64748b" }, grid: { color: "rgba(148,163,184,0.12)" } },
-      },
-    },
-  });
-  chartInstances.push(chart);
-  return chart;
-}
-
-async function loadAnalytics(jobId) {
-  destroyCharts();
-  const el = document.getElementById("tab-analytics");
-  if (!el) return;
-  try {
-    if (typeof Chart === "undefined") {
-      el.innerHTML = '<p class="section-desc">Chart.js failed to load (check internet connection).</p>';
-      return;
-    }
-    Chart.defaults.color = "#64748b";
-    Chart.defaults.borderColor = "rgba(148,163,184,0.12)";
-    const summaryResp = await fetch(`${API_BASE}/analysis/${jobId}/summary`);
-    const summary = await summaryResp.json();
-    const domain = (summary.url || "").split("//").pop().split("/")[0];
-    if (!domain) return;
-    const resp = await fetch(`${API_BASE}/trends/${encodeURIComponent(domain)}`);
-    if (!resp.ok) {
-      el.innerHTML = '<p class="section-desc">No completed analyses yet for this domain — run another analysis to chart trends over time.</p>';
-      return;
-    }
-    const data = await resp.json();
-    const points = (data.points || []).filter(p => p.health_score !== null && p.health_score !== undefined);
-    if (points.length === 0) {
-      el.innerHTML = '<p class="section-desc">No completed analyses with a health score yet. Once this site is analyzed, trends will appear here.</p>';
-      return;
-    }
-    if (points.length === 1) {
-      renderSingleAnalytics(points[0]);
-    } else {
-      renderAnalyticsCharts(points);
-    }
-
-    const trackResp = await fetch(`${API_BASE}/tracking/${jobId}`);
-    const track = trackResp.ok ? await trackResp.json() : { history: [] };
-    const history = (track.history || []).slice().sort((a, b) => new Date(a.checked_at) - new Date(b.checked_at));
-    const kwBox = document.getElementById("chart-keywords");
-    if (kwBox) {
-      if (history.filter(h => (h.results || []).length).length >= 2) {
-        const kLabels = history.map(h => new Date(h.checked_at).toLocaleDateString());
-        const keywordOrder = [];
-        history.forEach(h => (h.results || []).forEach(r => {
-          if (r.keyword && !keywordOrder.includes(r.keyword)) keywordOrder.push(r.keyword);
-        }));
-        const palette = ["#6366f1", "#0ea5e9", "#f59e0b", "#ec4899", "#10b981", "#8b5cf6", "#ef4444", "#14b8a6"];
-        const datasets = keywordOrder.slice(0, 8).map((kw, i) => ({
-          label: kw.length > 24 ? kw.slice(0, 24) + "…" : kw,
-          data: history.map(h => {
-            const r = (h.results || []).find(x => x.keyword === kw);
-            return r && r.rank !== null && r.rank !== undefined ? r.rank : null;
-          }),
-          borderColor: palette[i % palette.length] || palette[0],
-          backgroundColor: palette[i % palette.length] || palette[0],
-          spanGaps: true, tension: 0.3, borderWidth: 2,
-        }));
-        makeLineChart("chart-keywords", kLabels, datasets, {
-          reverse: true,
-          ticks: { color: "#64748b" },
-          grid: { color: "rgba(148,163,184,0.12)" },
-          title: { display: true, text: "Rank (lower is better)", color: "#64748b" },
-        });
-      } else {
-        setChartEmpty("chart-keywords", "Run the Keyword Check at least twice to chart ranking trends.");
-      }
-    }
-  } catch {
-    el.innerHTML = '<p class="section-desc">Analytics unavailable right now — try again shortly.</p>';
-  }
-}
-
-function setChartEmpty(canvasId, message) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas || typeof Chart === "undefined") return;
-  if (chartInstances.some(c => c.canvas === canvas)) return;
-  canvas.style.display = "none";
-  const box = canvas.parentElement;
-  if (box) {
-    box.querySelectorAll(".chart-tip").forEach(t => t.remove());
-    const tip = document.createElement("p");
-    tip.className = "section-desc chart-tip";
-    tip.style.padding = "24px 12px";
-    tip.textContent = message;
-    box.appendChild(tip);
-  }
-}
-
-function _clearChartTips(canvasId) {
-  const canvas = document.getElementById(canvasId);
-  if (canvas) {
-    canvas.style.display = "";
-    if (canvas.parentElement) canvas.parentElement.querySelectorAll(".chart-tip").forEach(t => t.remove());
-  }
-}
-
-function renderSingleAnalytics(p) {
-  const date = p.completed_at ? new Date(p.completed_at).toLocaleDateString() : "latest analysis";
-  function bars(canvasId, seriesLabel, value, hex) {
-    _clearChartTips(canvasId);
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    canvas.style.display = "";
-    if (typeof Chart === "undefined") return;
-    chartInstances = chartInstances.filter(c => c.canvas !== canvas);
-    const chart = new Chart(canvas.getContext("2d"), {
-      type: "bar",
-      data: {
-        labels: [seriesLabel],
-        datasets: [{
-          label: seriesLabel,
-          data: [value ?? null],
-          backgroundColor: hex + "55",
-          borderColor: hex,
-          borderWidth: 2,
-          maxBarThickness: 120,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { title: () => seriesLabel, label: c => `${seriesLabel}: ${c.parsed.y ?? "N/A"}` } },
-        },
-        scales: {
-          y: { beginAtZero: true, grid: { color: "rgba(148,163,184,0.12)" }, ticks: { color: "#64748b" } },
-          x: { grid: { display: false }, ticks: { color: "#64748b" } },
-        },
-      },
-    });
-    chartInstances.push(chart);
-  }
-  bars("chart-health", "Health Score", p.health_score, "#16a34a");
-  bars("chart-broken", "Broken Links", p.broken_link_count ?? p.broken_links ?? 0, "#dc2626");
-  bars("chart-pages", "Pages Crawled", p.total_pages ?? 0, "#0ea5e9");
-  const box = document.getElementById("chart-pages")?.parentElement;
-  if (box) {
-    if (!box.querySelector(".chart-tip")) {
-      box.insertAdjacentHTML("beforeend", `<p class="section-desc chart-tip" style="padding:6px 12px 12px">One analysis so far (${escapeHtml(date)}) — run this site again to chart trends over time.</p>`);
-    }
-  }
-}
-
-function renderAnalyticsCharts(points) {
-  const labels = points.map(p => new Date(p.completed_at).toLocaleDateString());
-  makeLineChart("chart-health", labels, [{
-    label: "Health score",
-    data: points.map(p => p.health_score),
-    borderColor: "#16a34a", backgroundColor: "rgba(22,163,74,0.15)", fill: true, tension: 0.3,
-  }]);
-  makeLineChart("chart-broken", labels, [{
-    label: "Broken links",
-    data: points.map(p => p.broken_link_count ?? p.broken_links),
-    borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.15)", fill: true, tension: 0.3,
-  }]);
-  makeLineChart("chart-pages", labels, [{
-    label: "Pages",
-    data: points.map(p => p.total_pages),
-    borderColor: "#0ea5e9", backgroundColor: "rgba(14,165,233,0.15)", fill: true, tension: 0.3,
-  }]);
-}
-
 let pagesOffset = 0;
 
 function yesNo(v) {
@@ -965,7 +768,7 @@ async function loadPages(jobId) {
   table.innerHTML = `
     <table class="data-table">
       <thead><tr>
-        <th>URL</th><th>Type</th><th>Title</th><th>Words</th><th>Links</th><th>Images</th><th>Schema</th><th>Depth</th><th>Indexable</th>
+        <th>URL</th><th>Type</th><th>Title</th><th>Words</th><th>Images</th><th>Schema</th><th>Depth</th><th>Indexable</th>
       </tr></thead>
       <tbody>${data.pages.map(p => `
         <tr>
@@ -973,7 +776,6 @@ async function loadPages(jobId) {
           <td><span class="page-type-badge">${escapeHtml(p.page_type || "other")}</span></td>
           <td>${escapeHtml((p.title || "-").substring(0, 55))}</td>
           <td>${p.word_count || 0}</td>
-          <td>${p.internal_links || 0}i / ${p.external_links || 0}e</td>
           <td>${p.image_count || 0}</td>
           <td>${yesNo(p.has_structured_data)}</td>
           <td>${p.click_depth ?? "-"}</td>
@@ -1175,7 +977,6 @@ async function loadLinks(jobId) {
     <div class="stat-card"><div class="stat-value">${data.total_internal}</div><div class="stat-label">Internal Links</div></div>
     <div class="stat-card"><div class="stat-value">${data.total_external}</div><div class="stat-label">External Links</div></div>
     <div class="stat-card"><div class="stat-value">${data.total_links ? ((data.total_internal / data.total_links) * 100).toFixed(0) : 0}%</div><div class="stat-label">Internal Ratio</div></div>
-    <div class="stat-card"><div class="stat-value">${data.total_link_occurrences ?? 0}</div><div class="stat-label">Link Occurrences</div></div>
   `;
 
   const backlinksResp = await fetch(`${API_BASE}/links/${jobId}/backlinks`);
@@ -1201,7 +1002,7 @@ async function loadLinkHealth(jobId) {
         <div class="insights-card"><div class="insights-label">Checked</div><div class="insights-value">${s.checked ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">OK</div><div class="insights-value" style="color:var(--success)">${s.ok ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Broken (4xx/5xx)</div><div class="insights-value" style="color:var(--danger)">${s.broken ?? "N/A"}</div></div>
-        <div class="insights-card"><div class="insights-label">Redirects</div><div class="insights-value" style="color:#d97706">${s.redirect ?? "N/A"}</div></div>
+        <div class="insights-card"><div class="insights-label">Redirects (301/302)</div><div class="insights-value" style="color:#d97706">${s.redirected_links ?? s.redirect ?? "N/A"}${s.max_redirect_chain ? ` (max chain ${s.max_redirect_chain})` : ""}</div></div>
         <div class="insights-card"><div class="insights-label">Blocked (401/403)</div><div class="insights-value" style="color:#b45309">${s.blocked ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Unreachable</div><div class="insights-value">${s.unreachable ?? "N/A"}</div></div>
         <div class="insights-card"><div class="insights-label">Avg Link Length</div><div class="insights-value">${ls.avg ?? "-"} chars</div></div>
@@ -1236,16 +1037,25 @@ async function loadLinkHealth(jobId) {
 
 let allLinksOffset = 0;
 let allLinksStatus = "";
+let allLinksExternal = null;
 
 async function loadAllLinks(jobId, { reset } = {}) {
   const el = document.getElementById("all-links-card");
   if (!el) return;
   if (reset) {
     allLinksOffset = 0;
-    allLinksStatus = document.getElementById("all-links-filter")?.value || "";
+    const raw = document.getElementById("all-links-filter")?.value || "";
+    if (raw === "__external__") {
+      allLinksStatus = "";
+      allLinksExternal = true;
+    } else {
+      allLinksStatus = raw;
+      allLinksExternal = null;
+    }
   }
   const params = new URLSearchParams({ limit: "200", offset: String(allLinksOffset) });
   if (allLinksStatus) params.set("status", allLinksStatus);
+  if (allLinksExternal != null) params.set("external", String(allLinksExternal));
   try {
     const resp = await fetch(`${API_BASE}/links/${jobId}/all?${params}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -1253,11 +1063,11 @@ async function loadAllLinks(jobId, { reset } = {}) {
     const rows = (data.links || []).map(l => `<tr>
       <td><span class="page-type-badge" style="background:${l.status === "ok" ? "#dcfce7" : "#fee2e2"};color:${l.status === "ok" ? "#15803d" : "#b91c1c"}">${l.status}</span></td>
       <td>${l.status_code ?? "-"}</td>
-      <td class="page-url-cell" title="${l.url}">${linkify(l.url, 60)}</td>
+      <td class="page-url-cell" title="${l.url}">${l.external ? '<span class="page-type-badge" style="background:#e0e7ff;color:#4338ca">external</span> ' : ""}${linkify(l.url, 60)}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${(l.pages || []).slice(0, 2).map(pg => linkify(pg, 30)).join("<br>") || "-"}</td>
     </tr>`).join("");
     el.innerHTML = `
-      <p class="section-desc">${data.total} unique link target(s)${allLinksStatus ? ` (filter: ${allLinksStatus})` : ""}</p>
+      <p class="section-desc">${data.total} unique link target(s)${allLinksStatus ? ` (filter: ${allLinksStatus})` : allLinksExternal ? " (external links)" : ""}</p>
       <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>URL</th><th>Linked From</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">No links for this filter</td></tr>'}</tbody></table>
       ${allLinksOffset + (data.links || []).length < data.total
@@ -1278,7 +1088,9 @@ document.getElementById("all-links-filter")?.addEventListener("change", () => {
 });
 
 
-document.getElementById("check-links-btn").addEventListener("click", async () => {
+document.getElementById("check-links-btn").addEventListener("click", async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
   document.getElementById("link-health-summary").innerHTML = '<p class="section-desc">Checking links...</p>';
   try {
     const resp = await fetch(`${API_BASE}/links/${currentJobId}/check`, { method: "POST" });
@@ -1294,6 +1106,18 @@ document.getElementById("check-links-btn").addEventListener("click", async () =>
 let actionsOffset = 0;
 const ACTIONS_PAGE = 200;
 
+function evidenceHtml(value) {
+  if (Array.isArray(value)) {
+    const items = value.slice(0, 8).map(v => {
+      const s = String(v);
+      return /^https?:\/\//.test(s) ? linkify(s, 60) : escapeHtml(s);
+    });
+    return items.join(", ");
+  }
+  const s = String(value);
+  return /^https?:\/\//.test(s) ? linkify(s, 60) : escapeHtml(s);
+}
+
 function actionCardHtml(a) {
   return `
     <div class="action-card action-card-collapsible" data-id="${a.id}">
@@ -1306,7 +1130,7 @@ function actionCardHtml(a) {
       <div class="action-details" style="display:none">
         <div class="action-issues"><strong>Issues:</strong> ${escapeHtml((a.identified_issues || []).join("; "))}</div>
         <div class="action-improvements"><strong>Improve:</strong> ${escapeHtml((a.improvement_suggestions || []).join("; "))}</div>
-        ${a.evidence && Object.keys(a.evidence).length ? `<div class="action-evidence"><strong>Evidence (from crawl):</strong> ${Object.entries(a.evidence).map(([k, v]) => `<span class="evidence-chip">${escapeHtml(String(k))}: ${escapeHtml(Array.isArray(v) ? v.slice(0, 5).join(", ") : String(v))}</span>`).join("")}</div>` : `<div class="action-evidence" style="color:var(--danger)"><strong>No evidence recorded — exclude this action before relying on it.</strong></div>`}
+        ${a.evidence && Object.keys(a.evidence).length ? `<div class="action-evidence"><strong>Evidence (from crawl):</strong> ${Object.entries(a.evidence).map(([k, v]) => `<span class="evidence-chip"><strong>${escapeHtml(String(k))}:</strong> ${evidenceHtml(v)}</span>`).join("")}</div>` : `<div class="action-evidence" style="color:var(--danger)"><strong>No evidence recorded — exclude this action before relying on it.</strong></div>`}
         ${a.status === "pending" ? `
           <div class="action-approve">
             <button class="btn-approve" onclick="approveAction('${a.id}', 'approved')">Approve</button>
@@ -1463,6 +1287,18 @@ document.getElementById("action-severity-filter")?.addEventListener("change", ()
 
 document.getElementById("action-sort-filter")?.addEventListener("change", () => {
   if (currentJobId) loadActions(currentJobId, { reset: true });
+});
+
+document.getElementById("expand-all-actions-btn")?.addEventListener("click", () => {
+  document.querySelectorAll(".action-group").forEach(g => { g.open = true; });
+  document.querySelectorAll(".action-details").forEach(d => { d.style.display = "block"; });
+  document.querySelectorAll(".action-expand-icon").forEach(i => { i.textContent = "▾"; });
+});
+
+document.getElementById("collapse-all-actions-btn")?.addEventListener("click", () => {
+  document.querySelectorAll(".action-group").forEach(g => { g.open = false; });
+  document.querySelectorAll(".action-details").forEach(d => { d.style.display = "none"; });
+  document.querySelectorAll(".action-expand-icon").forEach(i => { i.textContent = "▸"; });
 });
 
 document.getElementById("reject-filtered-btn")?.addEventListener("click", async () => {
@@ -2660,7 +2496,7 @@ function renderKeywords(keywords, error, source) {
     emptyText: "No keyword data available.",
     render: kws => kws.slice(0, 15).map(k => `
       <div class="insights-card">
-        <div class="insights-label">${escapeHtml(k.keyword || "")}</div>
+        <div class="insights-label">${escapeHtml(k.keyword || "")}${k.site_derived ? ' <span class="kws-site-chip" title="Derived from your site\'s own URL slugs, titles and product pages">site term</span>' : ""}</div>
         <div class="insights-value">
           Vol: ${k.keyword_data?.keyword_info?.search_volume ?? "N/A"}
         </div>
@@ -2735,14 +2571,27 @@ function renderCompetitors(rows, error) {
   let html = "";
   if (error && !rows.length) html += insightErrorHtml(error);
   if (rows.length) {
-    html += `<p class="source-note">Top organic competitors ranked by keyword overlap (SE Ranking)</p>`;
-    html += rows.slice(0, 10).map(c => `
-      <div class="insights-card">
-        <div class="insights-label">${escapeHtml(c.domain)}</div>
+    html += `<p class="source-note">Top organic competitors — SE Ranking domains plus the competitors you track in the Competitors tab (marked "tracked").</p>`;
+    html += rows.slice(0, 12).map(c => {
+      const tracked = !!c.tracked;
+      const chips = (c.shared_keywords || []).slice(0, 8);
+      const chipHtml = chips.length
+        ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${chips.map(s => `<span class="keyword-chip">${escapeHtml(String(s).substring(0, 34))}</span>`).join("")}</div>`
+        : "";
+      const statusBadge = tracked && c.status
+        ? `<span class="badge" style="${c.status === "blocked" ? "background:#fef3c7;color:#92400e" : c.status === "partial" ? "background:#fef3c7;color:#92400e" : "background:#dcfce7;color:#15803d"}">${escapeHtml(c.status)}</span>`
+        : "";
+      return `<div class="insights-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+          <span class="insights-label" style="margin:0">${escapeHtml(c.domain)}${tracked ? ' <span class="badge" style="background:rgba(99,102,241,.12);color:#6366f1">tracked</span>' : ""}</span>
+          ${statusBadge}
+        </div>
         <div class="insights-value" title="Keyword overlap">${c.common_keywords ?? "N/A"} shared keywords</div>
-        <div class="insights-value">Relevance: ${c.domain_relevance != null ? c.domain_relevance + "%" : "N/A"}</div>
-        <div class="insights-value">Traffic: ${c.traffic_sum != null ? Number(c.traffic_sum).toLocaleString() : "N/A"}</div>
-      </div>`).join("");
+        ${tracked ? "" : `<div class="insights-value">Relevance: ${c.domain_relevance != null ? c.domain_relevance + "%" : "N/A"}</div>
+        <div class="insights-value">Traffic: ${c.traffic_sum != null ? Number(c.traffic_sum).toLocaleString() : "N/A"}</div>`}
+        ${chipHtml}
+      </div>`;
+    }).join("");
     if (error) html += insightWarningHtml(error);
   } else if (!error) {
     html = '<div class="insights-card">No competitor data available.</div>';
@@ -2854,22 +2703,50 @@ function renderBacklinkTable(elId, title, extraCols, rows, error, cellRender, fi
 }
 
 function renderOnpage(op, error, source) {
+  const el = document.getElementById("onpage-summary");
+  if (!el) return;
   const entries = op ? Object.entries(op).filter(([k]) => !["source"].includes(k)) : null;
-  renderInsightSection(document.getElementById("onpage-summary"), {
-    data: op,
-    error,
-    source,
-    emptyText: "No on-page data available.",
-    render: o => `
-      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-        ${entries.map(([k, v]) => `
-          <div class="insights-card">
-            <div class="insights-label">${escapeHtml(k.replace(/_/g, " "))}</div>
-            <div class="insights-value">${typeof v === "number" ? v : escapeHtml(String(v ?? "N/A").substring(0, 60))}</div>
-          </div>`).join("")}
-      </div>
-    `,
-  });
+  const imageKeys = ["images_total", "images_missing_alt", "pages_with_images"];
+  let html = "";
+  if (error && !op) {
+    html += `<p class="source-note">Source: ${sourceLabel(source)}</p>`;
+    html += insightErrorHtml(error);
+  }
+  if (op) {
+    html += `<p class="source-note">Source: ${sourceLabel(source || op.source)}</p>`;
+    const total = op.images_total ?? null;
+    const missing = op.images_missing_alt ?? null;
+    const pagesWith = op.pages_with_images ?? null;
+    const altShare = (typeof total === "number" && typeof missing === "number")
+      ? (total > 0 ? Math.max(0, Math.round(100 * (1 - missing / total))) : 100)
+      : null;
+    const imgCards = [
+      ["Images (unique)", total],
+      ["Missing alt text", missing],
+      ["Alt text coverage", altShare != null ? altShare + "%" : null],
+      ["Pages with images", pagesWith],
+    ].map(([lbl, val]) => `<div class="insights-card">
+      <div class="insights-label">${escapeHtml(lbl)}</div>
+      <div class="insights-value">${val === null || val === undefined ? "N/A" : escapeHtml(String(val))}</div>
+    </div>`).join("");
+    html += `<h4 style="margin:0 0 8px">Image accessibility</h4>
+      <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">${imgCards}</div>`;
+    const rest = entries.filter(([k]) => !imageKeys.includes(k));
+    if (rest.length) {
+      html += `<h4 style="margin:16px 0 8px">Page signals</h4>
+        <div class="insights-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+          ${rest.map(([k, v]) => `
+            <div class="insights-card">
+              <div class="insights-label">${escapeHtml(k.replace(/_/g, " "))}</div>
+              <div class="insights-value">${typeof v === "number" ? v : escapeHtml(String(v ?? "N/A").substring(0, 60))}</div>
+            </div>`).join("")}
+        </div>`;
+    }
+    if (error) html += insightWarningHtml(error);
+  } else if (!error) {
+    html = '<div class="insights-card">No on-page data available.</div>';
+  }
+  el.innerHTML = html;
 }
 
 function renderSerp(rankings, error, source) {
@@ -2960,7 +2837,7 @@ function renderCompetitorGaps(data, isSingle) {
     if (status === "queued") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Queued for full-page crawl...</div></div>`;
     if (status === "running") {
       const err = (c.errors || []).filter(Boolean).join("; ");
-      return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far)</div>${err ? `<div class="insights-error" style="margin-top:6px">${escapeHtml(err)}</div>` : ""}</div>`;
+      return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-label">Analyzing... (${escapeHtml(c.pages_crawled || 0)} pages so far — big sites can take ~20 min)</div>${err ? `<div class="insights-error" style="margin-top:6px">${escapeHtml(err)}</div>` : ""}</div>`;
     }
     if (status === "error") return `<div class="insights-card"><h4>${escapeHtml(c.competitor)}</h4><div class="insights-error">${escapeHtml((c.errors || []).join("; "))}</div><button class="btn-secondary" style="margin-top:8px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`;
 
@@ -3023,10 +2900,13 @@ function renderCompetitorGaps(data, isSingle) {
 
     const blockedNote = status === "blocked"
       ? `<div class="insights-error" style="margin-top:6px">Crawl blocked — robots.txt/sitemap.xml returned 403; report below is SE Ranking + SERP data only. <button class="btn-secondary" style="margin-top:4px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`
-      : "";
+      : status === "partial"
+        ? `<div class="insights-error" style="margin-top:6px">Partial crawl — analysis timed out before every page was measured; results below cover the ${_fmtNum(c.pages_crawled)} page(s) fetched plus SE Ranking + SERP data. <button class="btn-secondary" style="margin-top:4px" onclick="retryCompetitor('${escapeHtml(c.competitor)}')">Retry</button></div>`
+        : "";
 
     return `<div class="insights-card" style="margin-top:12px">
       ${status === "blocked" ? '<div style="display:inline-block;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;font-size:12px;font-weight:600;border-radius:4px;padding:3px 8px;margin-bottom:8px">Blocked crawl — partial report</div>' : ""}
+      ${status === "partial" ? '<div style="display:inline-block;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;font-size:12px;font-weight:600;border-radius:4px;padding:3px 8px;margin-bottom:8px">Partial crawl — timed out</div>' : ""}
       <h4 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <span>${escapeHtml(c.competitor)} <span class="count-label">${_fmtNum(c.pages_crawled)} pages</span></span>
         <span>${_oppBadge(opp)}</span>
@@ -3102,11 +2982,11 @@ async function loadCompetitors(jobId) {
     }
     renderCompetitorGaps(data, false);
     if (data.results && renderCompetitorStatus(data.results)) {
-      if (!competitorPollDeadline) competitorPollDeadline = Date.now() + 30 * 60 * 1000;
+      if (!competitorPollDeadline) competitorPollDeadline = Date.now() + 60 * 60 * 1000;
       if (Date.now() < competitorPollDeadline) {
         setTimeout(() => loadCompetitors(jobId), 4000);
       } else {
-        resultsEl.insertAdjacentHTML("beforeend", '<p class="insights-label" style="margin-top:8px">Polling stopped after 30 minutes — refresh to re-check live status.</p>');
+        resultsEl.insertAdjacentHTML("beforeend", '<p class="insights-label" style="margin-top:8px">Polling stopped after 60 minutes — big sites can take up to ~20 min each; refresh to re-check live status.</p>');
       }
     } else {
       competitorPollDeadline = 0;
@@ -3129,7 +3009,7 @@ document.getElementById("competitor-form")?.addEventListener("submit", async (e)
   }
   btn.disabled = true;
   btn.textContent = "Analyzing...";
-  resultsEl.innerHTML = '<div class="insights-label">Crawling every page of each competitor (free tools: Playwright crawl, PSI, SERP API)...</div>';
+  resultsEl.innerHTML = '<div class="insights-label">Crawling every page of each competitor up to ~400 pages (HTTP-first, ~20 min cap each)...</div>';
   try {
     const resp = await fetch(`${API_BASE}/competitors/${currentJobId}/analyze`, {
       method: "POST",
@@ -3539,18 +3419,11 @@ function formatInterval(hours) {
 
 // Logs & Alerts
 async function loadLogs() {
-  const filter = document.getElementById("audit-event-filter").value;
-
   const alertsEl = document.getElementById("alerts-list");
-  const auditEl = document.getElementById("audit-list");
 
   try {
-    const [alertsResp, auditResp] = await Promise.all([
-      fetch(`${API_BASE}/logs/alerts`),
-      fetch(`${API_BASE}/logs/audit?limit=100${filter ? `&event=${encodeURIComponent(filter)}` : ""}`),
-    ]);
+    const alertsResp = await fetch(`${API_BASE}/logs/alerts`);
     const alerts = await alertsResp.json();
-    const audit = await auditResp.json();
 
     const failed = alerts.failed_analyses || [];
     const broken = alerts.broken_schedules || [];
@@ -3570,30 +3443,12 @@ async function loadLogs() {
       `),
       ...(failed.length === 0 && broken.length === 0 ? ['<div class="insights-card">No alerts in the last 24h. All clear.</div>'] : []),
     ].join("");
-
-    const entries = audit.entries || [];
-    auditEl.innerHTML = entries.length === 0
-      ? '<div class="insights-card">No audit entries.</div>'
-      : `<table class="data-table">
-          <thead><tr><th>Timestamp</th><th>Event</th><th>Job</th><th>Details</th></tr></thead>
-          <tbody>
-            ${entries.map(e => `
-              <tr>
-                <td style="white-space:nowrap">${new Date(e.timestamp).toLocaleString()}</td>
-                <td><span class="site-status ${e.event.includes("failed") ? "status-failed" : e.event.includes("completed") ? "status-completed" : "status-running"}">${escapeHtml(e.event)}</span></td>
-                <td style="font-size:12px">${e.job_id ? e.job_id.slice(0, 8) + "…" : "—"}</td>
-                <td style="font-size:12px;color:var(--text-secondary)">${escapeHtml(JSON.stringify(e.details || {}).slice(0, 120))}</td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>`;
   } catch (err) {
     alertsEl.innerHTML = `<div class="insights-card">Error: ${escapeHtml(err.message)}</div>`;
   }
 }
 
 document.getElementById("refresh-logs-btn")?.addEventListener("click", loadLogs);
-document.getElementById("audit-event-filter")?.addEventListener("change", loadLogs);
 
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + " B";
@@ -3622,7 +3477,7 @@ function linkifyText(text, maxLen) {
   return escapeHtml(label).replace(/(https?:\/\/[^\s<>"']+)/g, m => `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
 }
 
-const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "analytics", "seo-insights", "competitors", "quality", "schedules", "logs", "settings"]);
+const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "seo-insights", "competitors", "quality", "schedules", "logs", "settings"]);
 
 function parseHash() {
   const m = window.location.hash.match(/^#job\/([a-zA-Z0-9-]+)(?:\/([a-z-]+))?/);

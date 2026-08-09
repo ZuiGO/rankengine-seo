@@ -29,6 +29,19 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["keywords"] = await local_keywords(job_id) if job_id else []
         insights["keywords_source"] = "local" if insights["keywords"] else "none"
 
+    if job_id:
+        try:
+            from backend.services.keyword_engine import get_smart_keywords
+            smart = await get_smart_keywords(job_id, max_total=12, use_llm=False)
+            existing = {str(k.get("keyword") or "").strip().lower() for k in insights.get("keywords") or []}
+            extras = [{"keyword": k, "site_derived": True} for k in smart if k.strip().lower() not in existing]
+            if extras:
+                insights["keywords"] = extras + (insights.get("keywords") or [])
+                ins_src = insights.get("keywords_source") or "none"
+                insights["keywords_source"] = (ins_src + "+site") if ins_src else "site"
+        except Exception as e:
+            insights["keywords_error"] = insights.get("keywords_error") or str(e)
+
     try:
         insights["backlinks"] = await se_ranking.backlink_summary(domain)
         if not insights["backlinks"]:
@@ -56,6 +69,17 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
         insights["onpage"] = await local_onpage(job_id) if job_id else None
         insights["onpage_source"] = "local" if insights["onpage"] else "none"
         insights["onpage_error"] = None
+        # Align image counts with the unique-image audit (accurate, recomputed on refresh).
+        if job_id and insights["onpage"]:
+            from backend.services.image_optimization import audit_image_optimization
+            img_audit = await audit_image_optimization(job_id)
+            if img_audit:
+                op = dict(insights["onpage"])
+                op["images_total"] = img_audit.get("total_images") or 0
+                op["images_missing_alt"] = img_audit.get("missing_alt") or 0
+                op["pages_with_images"] = img_audit.get("pages_with_images") or 0
+                op["image_occurrences"] = img_audit.get("image_occurrences") or 0
+                insights["onpage"] = op
     except Exception as e:
         insights["onpage"] = None
         insights["onpage_source"] = "none"
@@ -76,6 +100,41 @@ async def fetch_all_insights(domain: str, job_id: str | None = None) -> dict:
     except Exception as e:
         insights["competitors"] = []
         insights["competitors_error"] = str(e)
+
+    # Prefer real competitors: merge the ones the user actually analyzed against.
+    if job_id:
+        try:
+            from backend.db.mongo import get_db
+            db = get_db()
+            rows = await db.competitor_gap_analyses.find(
+                {"target_job_id": job_id, "status": {"$in": ["completed", "blocked", "partial"]}},
+                {"competitor": 1, "status": 1, "se_rich": 1},
+            ).to_list(length=50)
+            tracked = []
+            se_ranking_competitors = insights.get("competitors") or []
+            for r in rows:
+                comp = str(r.get("competitor") or "").lower()
+                if not comp:
+                    continue
+                sr = r.get("se_rich") or {}
+                ka = sr.get("keyword_analysis") or {}
+                shared = ka.get("shared") or []
+                entry = {
+                    "domain": comp,
+                    "common_keywords": len(shared),
+                    "tracked": True,
+                    "status": r.get("status"),
+                    "shared_keywords": shared[:8],
+                }
+                tracked.append(entry)
+            if tracked:
+                tracked_names = {e.get("domain") for e in tracked}
+                insights["competitors"] = tracked + [
+                    c for c in se_ranking_competitors
+                    if str(c.get("domain") or "").lower() not in tracked_names
+                ]
+        except Exception as e:
+            insights.setdefault("competitors_error", str(e))
 
     try:
         insights["backlink_anchors"] = await se_ranking.backlink_anchors(domain)

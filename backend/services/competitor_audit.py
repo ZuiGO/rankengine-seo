@@ -77,11 +77,12 @@ async def _crawl_competitor(comp_job: str, url: str) -> dict:
     from backend.services.crawler import crawl_site
     return await crawl_site(
         comp_job, url,
-        max_pages=None,
+        max_pages=settings.competitor_crawl_max_pages,
         concurrency=settings.crawl_concurrency,
         seed_sitemap=True,
         unlimited=True,
         mobile=False,
+        use_playwright=False,
     )
 
 
@@ -564,7 +565,7 @@ def build_competitor_report(row: dict) -> dict:
             "gap_count": row.get("gap_count"),
             "generated_at": row.get("generated_at"),
             "status": row.get("status"),
-            "errors": se_rich.get("errors") or row.get("errors") or [],
+            "errors": row.get("errors") or [],
         },
         "keyword": {
             "missing_from_target": (ka.get("missing_from_target") or [])[:50],
@@ -762,15 +763,24 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 upsert=True,
             )
             await db.analysis_jobs.update_one({"_id": comp_job}, {"$set": {"status": "running", "progress_message": "Crawling competitor..."}})
-            crawl = await _crawl_competitor(comp_job, comp_url)
+            crawl_timed_out = False
+            try:
+                crawl = await asyncio.wait_for(
+                    _crawl_competitor(comp_job, comp_url),
+                    timeout=settings.competitor_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                crawl_timed_out = True
+                crawl = {"total_pages": None}
+                logger.warning("Competitor crawl timed out target=%s comp=%s", target_job_id, comp_domain)
             pages = await db.pages.find({"job_id": comp_job}, {"html": 0, "html_mobile": 0}).to_list(length=None)
             if not pages:
                 raise Exception("Competitor crawl returned no pages")
 
-            blocked = crawl.get("total_pages", len(pages)) <= 1
+            blocked = not crawl_timed_out and crawl.get("total_pages", len(pages)) <= 1
             await db.competitor_gap_analyses.update_one(
                 {"target_job_id": target_job_id, "competitor": comp_domain},
-                {"$set": {"status": "running", "pages_crawled": crawl.get("total_pages", len(pages)), "updated_at": datetime.utcnow()}},
+                {"$set": {"status": "running", "pages_crawled": len(pages) or crawl.get("total_pages", 0), "updated_at": datetime.utcnow()}},
             )
 
             comp_kw = None
@@ -788,15 +798,18 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
             feature_gap = {"comp_only": {}, "errors": ["SERP key not configured"]}
             backlink_gap = {"gaps": [], "errors": ["SERP key not configured"]}
             if serp_enabled:
-                from backend.services.keyword_extractor import extract_keywords_from_content
                 try:
+                    from backend.services.keyword_engine import get_smart_keywords
+                    t_kw = await get_smart_keywords(target_job_id, max_total=MAX_KEYWORDS, use_llm=False)
+                except Exception:
+                    from backend.services.keyword_extractor import extract_keywords_from_content
                     t_kw = await extract_keywords_from_content(target_job_id, top_k=MAX_KEYWORDS)
+                try:
                     keyword_gap = await _serp_keyword_gaps(target_domain, comp_domain, t_kw or comp_kw)
                 except Exception as e:
                     keyword_gap = {"gaps": [], "errors": [str(e)]}
                 try:
-                    t_kw2 = await extract_keywords_from_content(target_job_id, top_k=MAX_KEYWORDS)
-                    feature_gap = await _serp_features_gap(target_domain, comp_domain, t_kw2 or comp_kw)
+                    feature_gap = await _serp_features_gap(target_domain, comp_domain, t_kw or comp_kw)
                 except Exception as e:
                     feature_gap = {"comp_only": {}, "errors": [str(e)]}
                 try:
@@ -862,8 +875,8 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "competitor": comp_domain,
                 "url": comp_url,
                 "target_job_id": target_job_id,
-                "status": "blocked" if blocked else "completed",
-                "pages_crawled": crawl.get("total_pages", len(pages)),
+                "status": "partial" if crawl_timed_out else ("blocked" if blocked else "completed"),
+                "pages_crawled": len(pages) or crawl.get("total_pages", 0),
                 "gap_count": gap_count,
                 "keyword_gap": keyword_gap,
                 "content_gap": content_gap,
@@ -874,7 +887,11 @@ async def _analyze_one(target_job_id: str, target_url: str, competitor: str) -> 
                 "ux_gap": ux_gap,
                 "serp_features_gap": feature_gap,
                 "se_rich": se_rich,
-                "errors": ["Site blocks automated access (robots.txt/sitemap.xml returned 403; only the homepage could be crawled)"] if blocked else [],
+                "errors": (
+                    ["Site blocks automated access (robots.txt/sitemap.xml returned 403; only the homepage could be crawled)"]
+                    if blocked
+                    else ([f"Competitor crawl timed out after {settings.competitor_timeout_seconds}s; {len(pages)} page(s) analyzed (partial data)"] if crawl_timed_out else [])
+                ),
                 "generated_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
             }

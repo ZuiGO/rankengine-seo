@@ -6,7 +6,7 @@ keyed by (target_job_id, competitor).
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from backend.db.mongo import get_db
 
@@ -74,6 +74,18 @@ async def competitor_analyze(target_job_id: str, req: GapRequest):
     for comp, raw in zip(competitors, raw_forms):
         await _migrate_stale_key(db, target_job_id, comp, [comp, raw])
 
+    # Recover rows stuck in queued/running for > 60 min (worker restarts, cancelled jobs):
+    # mark them error so the user sees a Retryable state instead of an eternal spinner.
+    stale_before = datetime.utcnow() - timedelta(minutes=60)
+    await db.competitor_gap_analyses.update_many(
+        {
+            "target_job_id": target_job_id,
+            "status": {"$in": ["queued", "running"]},
+            "updated_at": {"$lt": stale_before},
+        },
+        {"$set": {"status": "error", "errors": ["Worker interrupted (stale run); please retry"], "updated_at": datetime.utcnow()}},
+    )
+
     to_enqueue = []
     for comp in competitors:
         existing = await db.competitor_gap_analyses.find_one(
@@ -121,6 +133,15 @@ async def competitor_analyze(target_job_id: str, req: GapRequest):
 @router.get("/{target_job_id}")
 async def competitor_list(target_job_id: str):
     db = get_db()
+    stale_before = datetime.utcnow() - timedelta(minutes=60)
+    await db.competitor_gap_analyses.update_many(
+        {
+            "target_job_id": target_job_id,
+            "status": {"$in": ["queued", "running"]},
+            "updated_at": {"$lt": stale_before},
+        },
+        {"$set": {"status": "error", "errors": ["Worker interrupted (stale run); please retry"], "updated_at": datetime.utcnow()}},
+    )
     rows = await db.competitor_gap_analyses.find(
         {"target_job_id": target_job_id}
     ).sort("competitor", 1).to_list(length=100)
@@ -135,7 +156,7 @@ async def competitor_list(target_job_id: str):
 async def competitor_report(target_job_id: str):
     db = get_db()
     rows = await db.competitor_gap_analyses.find(
-        {"target_job_id": target_job_id, "status": {"$in": ["completed", "blocked"]}}
+        {"target_job_id": target_job_id, "status": {"$in": ["completed", "blocked", "partial"]}}
     ).sort("competitor", 1).to_list(length=100)
     if not rows:
         raise HTTPException(404, "No completed analysis for this job")

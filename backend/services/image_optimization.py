@@ -37,6 +37,7 @@ async def audit_image_optimization(job_id: str) -> dict:
     modern_imgs = 0
     lazy_imgs = 0
     dims_missing = 0
+    alt_missing = 0
     pages_with_imgs = 0
     occurrences = 0
     seen: set[str] = set()
@@ -60,6 +61,8 @@ async def audit_image_optimization(job_id: str) -> dict:
                 continue
             seen.add(key)
             total_imgs += 1
+            if not (img.get("alt") or "").strip():
+                alt_missing += 1
             srcset = (img.get("srcset") or "").strip().lower()
             loading = (img.get("loading") or "").strip().lower()
             if loading == "lazy":
@@ -83,6 +86,7 @@ async def audit_image_optimization(job_id: str) -> dict:
     modern_share = modern_imgs / total if total_imgs else 0
     lazy_share = lazy_imgs / total if total_imgs else 0
     dim_share = dims_missing / total if total_imgs else 0
+    alt_share = alt_missing / total if total_imgs else 0
 
     subscores = {
         "modern_formats": 40 if modern_share >= 0.7 else 20 if modern_share > 0 else 15 if total_imgs else 40,
@@ -108,6 +112,11 @@ async def audit_image_optimization(job_id: str) -> dict:
             "label": "Width/height attributes set (CLS reduction)",
             "detail": f"{dims_missing} of {total_imgs} unique image(s) lack explicit dimensions.",
         },
+        {
+            "passed": alt_share <= 0.3,
+            "label": "Descriptive alt text on images",
+            "detail": f"{alt_missing} of {total_imgs} unique image(s) are missing alt text.",
+        },
     ]
 
     summary = {
@@ -120,10 +129,12 @@ async def audit_image_optimization(job_id: str) -> dict:
         "modern_images": modern_imgs,
         "lazy_images": lazy_imgs,
         "missing_dimensions": dims_missing,
+        "missing_alt": alt_missing,
         "pages_with_images": pages_with_imgs,
         "modern_share": round(modern_share, 3),
         "lazy_share": round(lazy_share, 3),
         "dimensions_share": round(dim_share, 3),
+        "alt_share": round(alt_share, 3),
         "generated_at": datetime.utcnow(),
     }
     await db.image_optimization_audits.update_one(

@@ -3,14 +3,14 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.services.external_insights import fetch_all_insights
-from backend.services.serp_api import search_keyword, bulk_keyword_search, extract_keywords_from_content
+from backend.services.serp_api import search_keyword, bulk_keyword_search
 from backend.services.backlinks import get_backlinks, fetch_backlinks
 from backend.db.mongo import get_db
 
 router = APIRouter(prefix="/api/seo-insights", tags=["seo-insights"])
 
 CACHE_TTL_MINUTES = 60
-CACHE_VERSION = 4
+CACHE_VERSION = 11
 
 
 class KeywordSearchRequest(BaseModel):
@@ -107,7 +107,8 @@ async def bulk_search(req: BulkKeywordRequest):
 
 @router.get("/{job_id}/suggested-keywords")
 async def suggested_keywords(job_id: str):
-    keywords = await extract_keywords_from_content(job_id)
+    from backend.services.keyword_engine import get_smart_keywords
+    keywords = await get_smart_keywords(job_id, max_total=45, use_llm=True)
     return {"keywords": keywords}
 
 

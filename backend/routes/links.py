@@ -25,7 +25,7 @@ async def get_link_summary(job_id: str):
 
 
 @router.get("/{job_id}/all")
-async def all_links(job_id: str, status: str | None = None, limit: int = Query(200, le=1000), offset: int = Query(0)):
+async def all_links(job_id: str, status: str | None = None, external: bool | None = None, limit: int = Query(200, le=1000), offset: int = Query(0)):
     db = get_db()
     job = await db.analysis_jobs.find_one({"_id": job_id}, {"_id": 1})
     if not job:
@@ -33,6 +33,8 @@ async def all_links(job_id: str, status: str | None = None, limit: int = Query(2
     q: dict = {"job_id": job_id}
     if status:
         q["status"] = status
+    if external is not None:
+        q["external"] = external
     total = await db.link_health.count_documents(q)
     cursor = db.link_health.find(q).sort("url", 1).skip(offset).limit(limit)
     rows = []

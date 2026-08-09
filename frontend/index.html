@@ -190,10 +190,6 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg>
           <span>Report</span>
         </button>
-        <button class="tab" data-tab="analytics">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4M4 20h16"/><rect x="7" y="11" width="3" height="6" rx="0.5"/><rect x="12" y="7" width="3" height="10" rx="0.5"/><rect x="17" y="13" width="3" height="4" rx="0.5"/></svg>
-          <span>Analytics</span>
-        </button>
         <button class="tab" data-tab="seo-insights">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
           <span>SEO Insights</span>
@@ -290,24 +286,45 @@
 
       <div class="tab-content hidden" id="tab-links">
         <div class="stats-grid" id="links-stats"></div>
-        <h3 style="display:flex;align-items:center;gap:10px">Link Health
-          <button id="check-links-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px">Run Check</button>
-        </h3>
+        <details class="audit-card" open>
+          <summary class="audit-check-summary">Link Health
+            <span class="count-label">status check</span>
+            <button id="check-links-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px">Run Check</button>
+          </summary>
         <div id="link-health-summary" class="insights-card"></div>
         <div id="link-health-issues" class="insights-card"></div>
-        <h3 style="display:flex;align-items:center;gap:10px">All Links
-          <select id="all-links-filter" class="filter-select" style="font-size:12px;padding:4px 8px">
-            <option value="">All statuses</option>
-            <option value="ok">OK</option>
-            <option value="broken">Broken</option>
-            <option value="redirect">Redirect</option>
-            <option value="blocked">Blocked</option>
-            <option value="unreachable">Unreachable</option>
-          </select>
-        </h3>
-        <div id="all-links-card" class="insights-card"></div>
-        <h3>Backlinks</h3>
-        <div id="backlinks-list"></div>
+        <details style="margin-top:10px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary)">What are redirects and why is the count often 0?</summary>
+          <div class="section-desc" style="margin-top:8px;font-size:13px;line-height:1.6">
+            A <strong>redirect</strong> is a server response (301 = permanent, 302 = temporary)
+            that points your visitors from one URL to another — e.g. <code>parker.com</code> →
+            <code>www.parker.com</code>. This is normal and healthy for a site.<br>
+            The count below only reflects links that returned a redirect chain during the
+            last check. Most sites link directly to final URLs, so the count is usually 0 —
+            a 0 here simply means no checked link redirected, not that redirects are missing.<br>
+            To inspect a URL's redirects yourself: <code>curl -I https://example.com/page</code>
+            or open Chrome DevTools → Network and look at any 301/302 rows.
+          </div>
+        </details>
+        </details>
+        <details class="audit-card" open>
+          <summary class="audit-check-summary">All Links
+            <select id="all-links-filter" class="filter-select" style="font-size:12px;padding:4px 8px" onclick="event.stopPropagation()">
+              <option value="">All statuses</option>
+              <option value="ok">OK</option>
+              <option value="broken">Broken</option>
+              <option value="redirect">Redirect</option>
+              <option value="blocked">Blocked</option>
+              <option value="unreachable">Unreachable</option>
+              <option value="__external__">External links</option>
+            </select>
+          </summary>
+          <div id="all-links-card" class="insights-card"></div>
+        </details>
+        <details class="audit-card" open>
+          <summary class="audit-check-summary">Backlinks (external sites linking to you)</summary>
+          <div id="backlinks-list"></div>
+        </details>
       </div>
 
       <div class="tab-content hidden" id="tab-actions">
@@ -333,6 +350,8 @@
           <button id="approve-all-btn" class="btn-approve" style="padding:6px 14px;font-size:13px">Approve All</button>
           <button id="patch-json-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Export JSON</button>
           <button id="patch-md-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Export Markdown</button>
+          <button id="expand-all-actions-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Expand All</button>
+          <button id="collapse-all-actions-btn" class="btn-secondary" style="padding:6px 14px;font-size:13px">Collapse All</button>
           <span id="actions-count" class="count-label"></span>
         </div>
         <div id="actions-list"><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>
@@ -358,14 +377,6 @@
         <div id="report-preview" class="report-preview"><div class="skeleton skeleton-report"></div></div>
       </div>
 
-      <div class="tab-content hidden" id="tab-analytics">
-        <p class="section-desc">Longitudinal charts across repeated analyses of this site.</p>
-        <div class="chart-card"><h3>Health Score</h3><div class="chart-box"><canvas id="chart-health"></canvas></div></div>
-        <div class="chart-card"><h3>Broken Links</h3><div class="chart-box"><canvas id="chart-broken"></canvas></div></div>
-        <div class="chart-card"><h3>Pages Crawled</h3><div class="chart-box"><canvas id="chart-pages"></canvas></div></div>
-        <div class="chart-card"><h3>Keyword Rankings <span class="count-label">(lower = better)</span></h3><div class="chart-box"><canvas id="chart-keywords"></canvas></div></div>
-      </div>
-
       <div class="tab-content hidden" id="tab-seo-insights">
         <div class="insights-controls">
           <button id="refresh-insights-btn" class="btn-secondary">Refresh Insights</button>
@@ -373,31 +384,51 @@
           <span id="insights-last-checked" class="count-label" style="align-self:center"></span>
         </div>
         <div id="insights-error" class="insights-error hidden"></div>
-        <div id="insights-keywords" class="insights-section">
-          <h3>Keywords</h3>
-          <div id="keywords-list" class="insights-grid"></div>
-        </div>
-        <div id="insights-backlinks" class="insights-section">
-          <h3>Backlinks</h3>
+        <details class="explainer">
+          <summary>How to use SEO Insights</summary>
+          <p>This tab pulls together everything about how your site is found: which keywords you actually use (extracted from your page URLs, titles and meta descriptions, then cleaned by an LLM), where you rank on Google for them, who links to you, and key on-page signals. Start with <strong>Keywords</strong> and <strong>SERP Rankings</strong> to see what to target, then use <strong>Backlinks</strong> and <strong>Competitors</strong> to find link and content opportunities.</p>
+        </details>
+        <details class="insights-section" open id="insights-keywords">
+          <summary>
+            <h3>Keywords</h3>
+          </summary>
+          <div id="keywords-list" class="insights-grid" style="margin-top:12px"></div>
+          <details class="explainer" style="margin-top:10px">
+            <summary>Where do these keywords come from?</summary>
+            <p>Keywords are extracted from your site itself — page URL slugs, titles and meta descriptions — then merged with any keywords you track, and tidied up by an LLM into natural search phrases (e.g. "double ferrule fittings manufacturer"). The SERP Rankings section below checks where you rank for these exact phrases. Click "Suggest Keywords" to refresh with more terms.</p>
+          </details>
+        </details>
+        <details class="insights-section" open id="insights-backlinks">
+          <summary>
+            <h3>Backlinks</h3>
+          </summary>
           <div id="backlinks-summary" class="insights-card"></div>
-        </div>
-        <div id="insights-backlink-sources" class="insights-section">
-          <h3 style="display:flex;align-items:center;gap:10px">Backlink Sources
-            <button id="refresh-backlinks-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px">Refresh</button>
-          </h3>
+        </details>
+        <details class="insights-section" open id="insights-backlink-sources">
+          <summary>
+            <h3 style="display:flex;align-items:center;gap:10px">Backlink Sources
+              <button id="refresh-backlinks-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px" onclick="event.stopPropagation()">Refresh</button>
+            </h3>
+          </summary>
           <div id="backlink-sources-list" class="insights-card"></div>
-        </div>
-        <div id="insights-overview" class="insights-section">
-          <h3>Domain Overview</h3>
+        </details>
+        <details class="insights-section" open id="insights-overview">
+          <summary>
+            <h3>Domain Overview</h3>
+          </summary>
           <div id="domain-overview" class="insights-card"></div>
           <div id="overview-history" class="insights-card" style="margin-top:10px"></div>
-        </div>
-        <div id="insights-competitors" class="insights-section">
-          <h3>Top Organic Competitors</h3>
+        </details>
+        <details class="insights-section" open id="insights-competitors">
+          <summary>
+            <h3>Top Organic Competitors</h3>
+          </summary>
           <div id="competitors-list" class="insights-grid"></div>
-        </div>
-        <div id="insights-backlink-profile" class="insights-section">
-          <h3>Backlink Profile</h3>
+        </details>
+        <details class="insights-section" open id="insights-backlink-profile">
+          <summary>
+            <h3>Backlink Profile</h3>
+          </summary>
           <div id="backlink-authority" class="insights-card"></div>
           <div id="backlink-refdomains" class="insights-card" style="margin-top:10px"></div>
           <div id="backlink-anchors" class="insights-card" style="margin-top:10px"></div>
@@ -405,28 +436,38 @@
           <div id="authority-history" class="insights-card" style="margin-top:10px"></div>
           <div id="backlink-new-lost" class="insights-card" style="margin-top:10px"></div>
           <div id="backlink-new-lost-counts" class="insights-card" style="margin-top:10px"></div>
-        </div>
-        <div id="insights-gsc" class="insights-section">
-          <h3 style="display:flex;align-items:center;gap:10px">Google Search Console
-            <span id="gsc-status-badge"></span>
-            <button id="gsc-refresh-btn" class="btn-secondary hidden" style="font-size:12px;padding:4px 10px">Refresh Data</button>
-            <button id="gsc-disconnect-btn" class="btn-secondary hidden" style="font-size:12px;padding:4px 10px">Disconnect</button>
-          </h3>
+        </details>
+        <details class="insights-section" open id="insights-gsc">
+          <summary>
+            <h3 style="display:flex;align-items:center;gap:10px">Google Search Console
+              <span id="gsc-status-badge"></span>
+              <button id="gsc-refresh-btn" class="btn-secondary hidden" style="font-size:12px;padding:4px 10px" onclick="event.stopPropagation()">Refresh Data</button>
+              <button id="gsc-disconnect-btn" class="btn-secondary hidden" style="font-size:12px;padding:4px 10px" onclick="event.stopPropagation()">Disconnect</button>
+            </h3>
+          </summary>
           <div id="gsc-connect" class="insights-card"></div>
           <div id="gsc-data" class="insights-card" style="margin-top:10px"></div>
-        </div>
-        <div id="insights-onpage" class="insights-section">
-          <h3>On-Page Analysis</h3>
+        </details>
+        <details class="insights-section" open id="insights-onpage">
+          <summary>
+            <h3>On-Page Analysis</h3>
+          </summary>
           <div id="onpage-summary" class="insights-card"></div>
-        </div>
-        <div id="insights-serp" class="insights-section">
-          <h3>SERP Rankings</h3>
+        </details>
+        <details class="insights-section" open id="insights-serp">
+          <summary>
+            <h3>SERP Rankings</h3>
+          </summary>
           <div id="serp-rankings" class="insights-card"></div>
+          <details class="explainer" style="margin-top:10px">
+            <summary>How do I read these rankings?</summary>
+            <p>Each row is a keyword your site uses, with your current position on Google: <strong>lower numbers are better</strong> (1 = top result). "Not in top 100" means the phrase didn't appear in the first 100 organic results. Rankings are a point-in-time snapshot — they change daily. Search a specific term below to check its exact result today.</p>
+          </details>
           <div class="serp-search-form" style="margin-top:12px;display:flex;gap:8px">
             <input type="text" id="serp-keyword-input" placeholder="Check keyword ranking..." style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text)">
             <button id="serp-search-btn" class="btn-secondary">Search</button>
           </div>
-        </div>
+        </details>
       </div>
       <div class="tab-content hidden" id="tab-competitors">
         <p class="section-desc">Crawl every page of a competitor and diff 8 gap dimensions against this site: keyword, content, backlink, technical, schema, on-page, UX, and SERP features.</p>
@@ -477,24 +518,11 @@
       <div class="tab-content hidden" id="tab-logs">
         <div class="logs-controls">
           <button id="refresh-logs-btn" class="btn-secondary">Refresh</button>
-          <select id="audit-event-filter" class="filter-select">
-            <option value="">All Events</option>
-            <option value="analysis_started">Analysis Started</option>
-            <option value="analysis_completed">Analysis Completed</option>
-            <option value="analysis_failed">Analysis Failed</option>
-            <option value="action_approved">Action Approved</option>
-            <option value="action_rejected">Action Rejected</option>
-          </select>
         </div>
 
         <div class="logs-section">
           <h3>Alerts</h3>
           <div id="alerts-list" class="insights-grid"></div>
-        </div>
-
-        <div class="logs-section">
-          <h3>Audit Trail</h3>
-          <div id="audit-list" class="table-container"></div>
         </div>
       </div>
 

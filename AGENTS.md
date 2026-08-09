@@ -10,10 +10,65 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: blocked competitors now yield full partial reports)
-- Round (latest): bot-blocked competitors (≤1 page crawl, e.g. parker.com)
-  now produce a FULL partial report instead of being skipped after the
-  status was set: `_analyze_one` runs the shared SE-Ranking+SERP block first
+## Status (last update: UI overhaul round + smart site-term keywords — committed 3f2114f)
+- UI/backend overhaul round (full suite 342/342, node --check clean, live-verified on
+  `6294eef9`):
+  - Pages tab: Links column REMOVED (crawler summary still stores counts).
+  - Links tab: full collapsible rows (`details`), external-link filter option,
+    external badge + explainer; "Link Occurrences" card kept honest.
+  - Contributors of SEO Actions: Expand All / Collapse All buttons
+    (`#expand-all-actions-btn`/`#collapse-all-actions-btn`); each action card
+    now a `<details>` with evidence linkified + capped at 8 items.
+  - Analytics tab REMOVED entirely (nav, `#tab-analytics` block, Chart.js CDN,
+    all chart helpers `renderSingleAnalytics`/`renderAnalyticsCharts`/
+    `chartInstances`/`destroyCharts` etc.; zero `Chart`/`analytics` strings
+    in frontend/; VALID_TABS updated).
+  - Alerts tab: Audit Trail section + `audit-event-filter` REMOVED; loadLogs
+    renders alerts only.
+  - SEO Insights: every section is now `<details class="insights-section"
+    open>` + "How to use SEO Insights" explainer at top + per-section
+    explainers (keywords, SERP); image accessibility card group (unique
+    images, missing-alt, alt coverage %, pages with images) with accurate
+    per-image counts from image_optimization audit; `renderCompetitors`
+    shows tracked competitor cards (from competitor_gap_analyses, merged via
+    external_insights with filters on job_id+status+domain) with "tracked"
+    badge, status badge (partial/blocked), shared_keywords chips (capped 8);
+    `loadTrackedCompetitors` + `#tracked-competitors-list` removed.
+  - REAL BUGS FIXED (found by new tests): `external_insights.py` competitor
+    merge crashed on missing `get_db` import (silently swallowed, so tracked
+    competitors never merged) and dedupe seeded from `se_names` (filtered out
+    every SE Ranking lookalike; now `tracked_names` only).
+  - Keywords section merged smart site-derived terms: `fetch_all_insights`
+    prepends `get_smart_keywords(use_llm=False)` output (flagged
+    `site_derived: True`); frontend renders "site term" chip for them.
+    `routes/seo_insights.py` CACHE_VERSION 5 -> 11 (multiple bumps).
+  - `keyword_engine.py::slug_phrases` noise filters: strip file extensions
+    (`.pdf .mp4 ...`), skip numeric-part-number leaves (e.g. `/pn-03/` ->
+    "pn"), skip single-word phrases that are just modifiers (india/price/oem),
+    skip slugs ending in a generic section word, GREEDY_SLUGS extended
+    (randd/rnd/uk/usa/awards/certifications/quality/team/careers/clients/
+    partners/gallery/downloads/videos/manuals/tenders/csr/...). Live keywords
+    now exact-match product terms ("union manufacturer india",
+    "double ferrule fittings", ...) + SE Ranking volume terms.
+  - Reliability pack for competitor scans (HTTP-first crawl, 400-page cap,
+    20-min/competitor timeout -> `partial` status with error text, `blocked`
+    on robots-403, stale-row recovery, frontend poll 60 min) shipped
+    previously; live job shows parker.com `blocked`, swagelok re-crawl,
+    status badges + Retry buttons.
+  - New tests: `backend/tests/test_ui_overhaul_round.py` (15) — slug_phrases
+    modifiers/part-numbers/extensions/generic-tail; keyword_engine smart
+    merge in seo-insights route; fetch_all_insights competitors
+    merge/dedupe/degradation (partial rows, blocked), keywords site terms
+    prepend + no-dup; local_insights/image_optimization host patched via
+    module attr (bound import) not just `backend.db.mongo.get_db`.
+  - Live-verified via API + Playwright (seo-insights: 12 site-term chips +
+    15 keyword cards + 9 collapsible sections; competitors: 12 cards with
+    tracked badges, 93 gap cards + Retry btns, zero console errors).
+- Round (latest): blocked competitors now yield full partial reports
+  (committed `4bfed03` recapped below). Bot-blocked competitors (≤1 page
+  crawl, e.g. parker.com) produce a FULL partial report instead of being
+  skipped after the status was set:
+  - `_analyze_one` runs the shared SE-Ranking+SERP block first
   (baseline + `_serp_keyword_gaps`/`_serp_features_gap`/`_backlink_gap` via
   cached target keywords from `extract_keywords_from_content`) and only then
   branches: blocked → stub crawl-gap dicts with "Crawl blocked; ... not

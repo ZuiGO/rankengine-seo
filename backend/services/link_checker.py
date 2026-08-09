@@ -81,6 +81,7 @@ async def check_links(job_id: str) -> dict:
     """Check every unique internal link URL and store health in the link_health collection."""
     db = get_db()
     unique_urls = set()
+    external_urls = set()
     page_map = {}
     cursor = db.page_links.find({"job_id": job_id})
     async for doc in cursor:
@@ -91,7 +92,17 @@ async def check_links(job_id: str) -> dict:
                 continue
             unique_urls.add(norm)
             page_map.setdefault(norm, set()).add(page_url)
+        for target in doc.get("external_link_urls", []):
+            norm = normalize_url(target)
+            if not norm:
+                continue
+            external_urls.add(norm)
+            page_map.setdefault(norm, set()).add(page_url)
 
+    # External targets join the check (capped) and are flagged `external: true`.
+    MAX_EXTERNAL_CHECK = 300
+    external_urls = sorted(external_urls)[:MAX_EXTERNAL_CHECK]
+    unique_urls = unique_urls | set(external_urls)
     unique_urls = sorted(unique_urls)
     if not unique_urls:
         return {"checked": 0, "status": "no_links"}
@@ -147,6 +158,7 @@ async def check_links(job_id: str) -> dict:
                        "redirect_count": 0, "redirect_chain": []}
             res["job_id"] = job_id
             res["pages"] = sorted(page_map.get(res["url"], []))
+            res["external"] = res["url"] in external_urls
             results.append(res)
 
     await db.link_health.delete_many({"job_id": job_id})

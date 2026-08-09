@@ -316,7 +316,7 @@ async def _serp_cache_put(db, cache_key: str, data: dict) -> None:
         pass
 
 
-async def run_serp_rankings(domain: str, job_id: str | None, max_keywords: int = 5) -> tuple[list[dict], list[str]]:
+async def run_serp_rankings(domain: str, job_id: str | None, max_keywords: int = 10) -> tuple[list[dict], list[str]]:
     """Check SERP ranking for a handful of job keywords. Returns (results, per-keyword errors).
 
     Per-keyword results are cached for 24h (with the rank stamped at crawl time)
@@ -324,7 +324,11 @@ async def run_serp_rankings(domain: str, job_id: str | None, max_keywords: int =
     """
     keywords = []
     if job_id:
-        keywords = await extract_keywords_from_content(job_id)
+        try:
+            from backend.services.keyword_engine import get_smart_keywords
+            keywords = await get_smart_keywords(job_id, max_total=max_keywords, use_llm=False)
+        except Exception:
+            keywords = await extract_keywords_from_content(job_id)
     keywords = keywords[:max_keywords]
     results = []
     errors = []
