@@ -50,6 +50,8 @@ def _matches(doc, q):
                 return False
             if "$lt" in val and not (doc.get(k) is not None and doc[k] < val["$lt"]):
                 return False
+            if "$exists" in val and (k in doc) != val["$exists"]:
+                return False
             if isinstance(val, int) and not isinstance(val, bool) and False:
                 pass
             continue
@@ -127,6 +129,86 @@ class FakeColl:
             if _matches(v, q):
                 del self._store[k]
                 return
+
+    def aggregate(self, pipeline):
+        docs = [dict(v) for v in self._store.values()]
+        for stage in pipeline:
+            if "$match" in stage:
+                docs = [d for d in docs if _matches(d, stage["$match"])]
+            elif "$group" in stage:
+                spec = stage["$group"]
+                acc = []
+                seen = {}
+                for d in docs:
+                    key = tuple(
+                        (kk, d.get(vv.lstrip("$")))
+                        for kk, vv in spec["_id"].items()
+                    ) if isinstance(spec["_id"], dict) else d.get(str(spec["_id"]).lstrip("$"))
+                    if key not in seen:
+                        if isinstance(spec["_id"], dict):
+                            seen[key] = {"_id": {kk: vv2 for kk, vv2 in key}}
+                        else:
+                            seen[key] = {"_id": key}
+                    row = seen[key]
+                    for field, val in spec.items():
+                        if field == "_id":
+                            continue
+                        if isinstance(val, dict) and "$addToSet" in val:
+                            expr = val["$addToSet"]
+                            val_expr = None
+                            if isinstance(expr, dict) and "$cond" in expr:
+                                cond, then_v, else_v = expr["$cond"]
+                                eq = cond.get("$eq", [])
+                                if len(eq) == 2:
+                                    use_then = str(d.get(str(eq[0]).lstrip("$"))) == str(eq[1]) if eq[1] is not None else False
+                                else:
+                                    use_then = False
+                                branch = then_v if use_then else else_v
+                                if isinstance(branch, dict) and "$ifNull" in branch:
+                                    f1, f2 = branch["$ifNull"]
+                                    s_val = d.get(str(f1).lstrip("$"))
+                                    s_val = s_val if s_val is not None else d.get(str(f2).lstrip("$"))
+                                elif isinstance(branch, str):
+                                    s_val = d.get(branch.lstrip("$"))
+                                else:
+                                    s_val = None
+                            elif isinstance(expr, str):
+                                s_val = d.get(expr.lstrip("$"))
+                            else:
+                                s_val = None
+                            row.setdefault(field, set()).add(s_val)
+                docs = []
+                for row in self._seen_set_rows(seen):
+                    docs.append(row)
+            elif "$project" in stage:
+                proj = stage["$project"]
+                new_docs = []
+                for d in docs:
+                    out = {"_id": d["_id"]}
+                    for field, val in proj.items():
+                        if field == "_id":
+                            continue
+                        if isinstance(val, dict) and "$size" in val:
+                            set_val = d.get(val["$size"].lstrip("$"))
+                            out[field] = len(set_val) if set_val is not None else 0
+                        else:
+                            out[field] = d.get(field)
+                    new_docs.append(out)
+                docs = new_docs
+            elif "$sort" in stage:
+                for field, direction in reversed(list(stage["$sort"].items())):
+                    docs.sort(key=lambda d: d.get(field) or 0, reverse=(direction < 0))
+            elif "$limit" in stage:
+                docs = docs[: stage["$limit"]]
+        return FakeCursor(docs)
+
+    def _seen_set_rows(self, seen):
+        for _id, row in seen.items():
+            row = dict(row)
+            for field in tuple(row):
+                if isinstance(row[field], set):
+                    row[field] = list(row[field])
+            yield row
 
 
 class FakeDb:
@@ -476,3 +558,62 @@ class TestLinksExternalFilter:
         out_broken = await links.all_links("j1", status="broken", limit=200, offset=0)
         assert out_broken["total"] == 1
         assert out_broken["links"][0]["external"] is False
+
+    @pytest.mark.asyncio
+    async def test_all_links_external_fallback_for_unflagged_rows(self, monkeypatch):
+        from backend.routes import links
+
+        db = FakeDb(links=[
+            {"job_id": "j1", "url": "https://ext.example.com/x", "status": "ok", "_id": "id0"},
+            {"job_id": "j1", "url": "https://internal.example.com/y", "status": "ok", "_id": "id1"},
+        ])
+        db._stores["page_links"] = {
+            "p0": {"job_id": "j1", "url": "https://internal.example.com/y",
+                   "external_link_urls": ["https://ext.example.com/x/", "https://cdn.example.net/img.png"]},
+        }
+        monkeypatch.setattr(links, "get_db", lambda: db)
+        db._stores["analysis_jobs"]["j1"] = {"_id": "j1"}
+
+        out = await links.all_links("j1", external=True, limit=200, offset=0)
+        assert out["total"] == 1
+        assert out["links"][0]["url"] == "https://ext.example.com/x"
+        assert out["links"][0]["external"] is True
+
+        out_all = await links.all_links("j1", limit=200, offset=0)
+        assert out_all["total"] == 2
+        flagged = [r["external"] for r in out_all["links"]]
+        assert sorted(flagged) == [False, True]
+
+
+class TestUserFlows:
+    def test_top_flows_counts_distinct_funnel_pages(self, monkeypatch):
+        from backend.services import user_flow as uf
+
+        db = FakeDb()
+        db._stores["user_flows"] = {
+            f"f{i}": {
+                "job_id": "j1",
+                "target_url": "https://site.com/contact",
+                "target_type": "action",
+                "depth": 2,
+                "start_url": f"https://site.com/start{i}",
+                "intermediate_url": "https://site.com/browse" if i % 2 == 0 else "https://site.com/other",
+            }
+            for i in range(6)
+        }
+        db._stores["user_flows"]["f9"] = {
+            "job_id": "j1",
+            "target_url": "https://site.com/contact",
+            "target_type": "action",
+            "depth": 1,
+            "start_url": "https://site.com/entry9",
+        }
+        monkeypatch.setattr(uf, "get_db", lambda: db)
+
+        top = asyncio.run(uf.get_top_flows("j1", limit=10))
+        assert len(top) == 2
+        depth2 = next(f for f in top if f["depth"] == 2)
+        depth1 = next(f for f in top if f["depth"] == 1)
+        assert depth2["flow_count"] == 2
+        assert depth1["flow_count"] == 1
+        assert depth2["target_url"] == "https://site.com/contact"

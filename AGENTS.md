@@ -10,17 +10,26 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: SEO Actions de-duplicated UI — committed 4d1e9f7)
-- Actions tab no longer repeats identical suggestions: groups by
-  (content_type, issue_key) instead of content_type alone. Each group header
-  shows ONE suggestion line + "N shown / M total" (summary gains
-  `by_issue` counts from list_actions) with issue-scoped Approve/Reject group
-  buttons; body previews 8 cards then "Show all N more" toggle
-  (`toggleGroupExtra`). Batch endpoint accepts optional `issue_key` filter.
-  Full suite 344/344; live-verified on `6294eef9` (1,256 actions -> 20 issue
-  groups, e.g. `image|image_alt_missing` 481 collapsed to one header), zero
-  console errors. (Earlier round: UI overhaul + smart site-term keywords,
-  committed `13b875d`.)
+## Status (last update: Report cleanup: Indexation/Occurrences removed, accurate Flow Count, external links surfaced — committed <HASH>)
+- Report tab: standalone Indexation block and the Image-Optimization "Occurrences"
+  stat card removed (image audit keeps Unique / WebP-AVIF / Without-dimensions /
+  lazy counts; chat verdict no longer cites "occurrences"). Flow Count now means
+  TRUE distinct funnel pages per target (depth 2 = unique `intermediate_url`,
+  depth 1 = unique `start_url`) via `$addToSet` aggregation in
+  `backend/services/user_flow.py`; `detect_user_flows` re-run on live job
+  `6294eef9` (12,172 flows, top targets now 101 distinct vs fake 1429 before).
+- Links tab: external links are now actually visible. Root cause: old
+  `link_health` rows carry no `external` field. New `scripts/backfill_link_external.py`
+  inserts missing external targets as `status:"unchecked"` rows (ran for
+  `6294eef9` and `1c460760`: +77 external rows each, 533->610 total; DB rows
+  keep the flag, so the fallback is only for jobs never backfilled). Route
+  fallback in `links.py` all_links: when zero flagged rows exist, derives the
+  external set from `page_links.external_link_urls` (normalize_url) and
+  re-filters; `external=true` API + filter dropdown + gray "Unchecked" badge +
+  "Run Check Links" hint for stale rows. 346/346 tests, node --check clean,
+  live-verified on `6294eef9` (external=true -> 77 rows, 0 console errors).
+  (Earlier round: Actions dedupe with per-issue groups + batch issue_key,
+  committed `94bb3fb`.)
 - Round (latest): blocked competitors now yield full partial reports
 - UI/backend overhaul round (full suite 342/342, node --check clean, live-verified on
   `6294eef9`):

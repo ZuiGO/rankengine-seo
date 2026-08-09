@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query
 from backend.db.mongo import get_db
 from backend.services.backlinks import get_backlinks
 from backend.services.link_checker import check_links, get_link_health
+from backend.services.url_normalizer import normalize_url
 
 router = APIRouter(prefix="/api/links", tags=["links"])
 
@@ -35,12 +36,30 @@ async def all_links(job_id: str, status: str | None = None, external: bool | Non
         q["status"] = status
     if external is not None:
         q["external"] = external
+    flagged = await db.link_health.count_documents({"job_id": job_id, "external": {"$exists": True}})
+    fallback = flagged == 0
+    if fallback and external is not None:
+        q.pop("external", None)
     total = await db.link_health.count_documents(q)
     cursor = db.link_health.find(q).sort("url", 1).skip(offset).limit(limit)
     rows = []
     async for r in cursor:
         r["id"] = str(r.pop("_id"))
         rows.append(r)
+
+    if fallback:
+        external_urls = set()
+        page_cursor = db.page_links.find({"job_id": job_id}, {"external_link_urls": 1})
+        async for doc in page_cursor:
+            for target in doc.get("external_link_urls", []) or []:
+                norm = normalize_url(target)
+                if norm:
+                    external_urls.add(norm)
+        for r in rows:
+            r["external"] = r.get("url") in external_urls
+        if external is not None:
+            rows = [r for r in rows if r["external"] is external]
+            total = len(rows)
     return {"total": total, "links": rows, "offset": offset, "limit": limit}
 
 

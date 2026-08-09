@@ -1061,13 +1061,16 @@ async function loadAllLinks(jobId, { reset } = {}) {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     const rows = (data.links || []).map(l => `<tr>
-      <td><span class="page-type-badge" style="background:${l.status === "ok" ? "#dcfce7" : "#fee2e2"};color:${l.status === "ok" ? "#15803d" : "#b91c1c"}">${l.status}</span></td>
+      <td><span class="page-type-badge" style="background:${l.status === "ok" ? "#dcfce7" : l.status === "unchecked" ? "#f1f5f9" : "#fee2e2"};color:${l.status === "ok" ? "#15803d" : l.status === "unchecked" ? "#64748b" : "#b91c1c"}">${l.status}</span></td>
       <td>${l.status_code ?? "-"}</td>
       <td class="page-url-cell" title="${l.url}">${l.external ? '<span class="page-type-badge" style="background:#e0e7ff;color:#4338ca">external</span> ' : ""}${linkify(l.url, 60)}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${(l.pages || []).slice(0, 2).map(pg => linkify(pg, 30)).join("<br>") || "-"}</td>
     </tr>`).join("");
     el.innerHTML = `
       <p class="section-desc">${data.total} unique link target(s)${allLinksStatus ? ` (filter: ${allLinksStatus})` : allLinksExternal ? " (external links)" : ""}</p>
+      ${(data.links || []).some(l => l.status === "unchecked")
+        ? '<p class="section-desc" style="font-size:12px;color:var(--text-secondary)">External links recovered from the crawl are shown as "unchecked" — run Check Links to verify their HTTP status.</p>'
+        : ""}
       <table class="data-table"><thead><tr><th>Status</th><th>Code</th><th>URL</th><th>Linked From</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary)">No links for this filter</td></tr>'}</tbody></table>
       ${allLinksOffset + (data.links || []).length < data.total
@@ -1757,18 +1760,6 @@ async function loadReportExtras(jobId, preview) {
     }
   } catch (_) {}
   try {
-    const idx = await fetch(`${API_BASE}/quality/${jobId}/indexation`);
-    if (idx.ok) {
-      const d = await idx.json();
-      preview.insertAdjacentHTML("beforeend", `
-        <h4 style="margin:20px 0 10px">Indexation ${d.status === "measured" ? `(≈${d.indexed_estimate ?? "?"} of ${d.crawled_pages ?? d.crawled ?? "?"} pages indexed)` : "(not measured)"}</h4>
-        ${d.status === "unmeasured"
-          ? `<p style="font-size:12px;color:var(--text-secondary)">SERP indexation check is not available (no SERP API key configured / no spend left).</p>`
-          : `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Adwords-indexed estimate from a live SERP sample${d.message ? ` — ${escapeHtml(d.message)}` : ""}.</p>
-             ${(d.top_indexed_pages || []).length ? `<p style="font-size:12px;color:var(--text-secondary);margin-top:6px">Top indexed: ${d.top_indexed_pages.slice(0, 5).map(p => escapeHtml(p.url || p)).join(" · ")}</p>` : ""}`}`);
-    }
-  } catch (_) {}
-  try {
     const im = await fetch(`${API_BASE}/quality/${jobId}/image-optimization`);
     if (im.ok) {
       const d = await im.json();
@@ -1776,7 +1767,6 @@ async function loadReportExtras(jobId, preview) {
         <h4 style="margin:20px 0 10px">Image Optimization (${d.score}/100)</h4>
         <div class="stat-grid">
           ${kv("Unique images", d.total_images ?? d.total_imgs ?? 0)}
-          ${kv("Occurrences", d.image_occurrences ?? d.total_images ?? 0)}
           ${kv("WebP / AVIF", d.modern_images ?? d.modern ?? 0)}
           ${kv("Without dimensions", d.missing_dimensions ?? d.dims_missing ?? 0)}
           ${kv("Lazy-loaded", d.lazy_images ?? d.lazy ?? 0)}
@@ -2233,7 +2223,7 @@ function renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, 
         return {
           status, label: status === "pass" ? "Pass" : status === "attention" ? "Attention" : "Fail",
           score: imgScore,
-          verdict: `${imgOpt.total_images ?? 0} unique image(s) (${imgOpt.image_occurrences ?? imgOpt.total_images ?? 0} occurrences) · ${imgOpt.modern_images ?? 0} WebP/AVIF · ${imgOpt.lazy_images ?? 0} lazy-loaded · ${imgOpt.missing_dimensions ?? 0} missing dimensions.`,
+          verdict: `${imgOpt.total_images ?? 0} unique image(s) · ${imgOpt.modern_images ?? 0} WebP/AVIF · ${imgOpt.lazy_images ?? 0} lazy-loaded · ${imgOpt.missing_dimensions ?? 0} missing dimensions.`,
           checks: (imgOpt.checks || []).map(c => ({ passed: !!c.passed, label: c.label, detail: c.detail })),
         };
       })()

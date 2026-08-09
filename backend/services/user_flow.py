@@ -159,14 +159,26 @@ async def get_user_flows(job_id: str, limit: int = 100) -> dict:
 
 
 async def get_top_flows(job_id: str, limit: int = 10) -> list:
+    """Top action targets by funnel size: distinct pages that link into the target
+    (unique intermediate browse pages for 2-hop flows, unique entry pages for
+    1-hop flows). Avoids the combinatorial entry x browse path inflation."""
     db = get_db()
     pipeline = [
         {"$match": {"job_id": job_id}},
         {"$group": {
             "_id": {"target": "$target_url", "target_type": "$target_type", "depth": "$depth"},
-            "count": {"$sum": 1},
+            "funnel": {"$addToSet": {
+                "$cond": [
+                    {"$eq": ["$depth", 2]},
+                    {"$ifNull": ["$intermediate_url", "$start_url"]},
+                    "$start_url",
+                ]
+            }},
         }},
-        {"$sort": {"count": -1}},
+        {"$project": {
+            "flow_count": {"$size": "$funnel"},
+        }},
+        {"$sort": {"flow_count": -1}},
         {"$limit": limit},
     ]
     rows = []
@@ -176,6 +188,6 @@ async def get_top_flows(job_id: str, limit: int = 10) -> list:
             "target_url": row["_id"]["target"],
             "target_type": row["_id"]["target_type"],
             "depth": row["_id"]["depth"],
-            "flow_count": row["count"],
+            "flow_count": row["flow_count"],
         })
     return rows

@@ -596,7 +596,6 @@ async def _report_html(job_id: str):
 
     hreflang_audit = await db.hreflang_audits.find_one({"job_id": job_id})
     url_hygiene = await db.url_hygiene_audits.find_one({"job_id": job_id})
-    indexation = await db.indexation_audits.find_one({"job_id": job_id})
     image_opt = await db.image_optimization_audits.find_one({"job_id": job_id})
 
     hreflang_html = ""
@@ -676,25 +675,6 @@ async def _report_html(job_id: str):
             + _checks_html(url_hygiene.get("checks"))
         )
 
-    indexation_html = ""
-    if indexation:
-        if indexation.get("status") == "unmeasured":
-            indexation_html = (
-                "<h2 class='section-title'>Indexation</h2>"
-                "<p class='muted'>SERP indexation check not measured (no SERP API key configured or spend exhausted).</p>"
-            )
-        else:
-            top_pages = (indexation.get("top_indexed_pages") or [])
-            indexation_html = (
-                "<h2 class='section-title'>Indexation</h2>"
-                "<p>Estimate: <b>%s</b> of <b>%s</b> crawled pages indexed (adwords-indexed sample).</p>"
-                % (_esc(indexation.get("indexed_estimate")),
-                   _esc(indexation.get("crawled_pages") if indexation.get("crawled_pages") is not None else indexation.get("crawled", "N/A")))
-                + (('<p class="muted">%s</p>' % _esc(indexation.get("message"))) if indexation.get("message") else "")
-                + (('<p class="muted">Sample indexed pages: %s</p>'
-                    % _esc(", ".join(str((p.get("url") if isinstance(p, dict) else p)) for p in top_pages[:10]))) if top_pages else "")
-            )
-
     image_opt_html = ""
     if image_opt:
         subs = image_opt.get("subscores") or {}
@@ -702,10 +682,9 @@ async def _report_html(job_id: str):
             "<h2 class='section-title'>Image Optimization</h2>"
             "<p>Score: <b>%s</b> / 100%s</p>"
             % (_esc(image_opt.get("score")), _bar(image_opt.get("score")))
-            + "<p class='muted'>%s unique images (across %s pages; %s total occurrences) · %s WebP/AVIF · %s lazy-loaded · %s missing explicit dimensions</p>"
+            + "<p class='muted'>%s unique images (across %s pages) · %s WebP/AVIF · %s lazy-loaded · %s missing explicit dimensions</p>"
             % (_esc(image_opt.get("total_images", image_opt.get("total_imgs", 0))),
                _esc(image_opt.get("pages_with_images", 0)),
-               _esc(image_opt.get("image_occurrences", image_opt.get("total_images", 0))),
                _esc(image_opt.get("modern_images", image_opt.get("modern", 0))),
                _esc(image_opt.get("lazy_images", image_opt.get("lazy", 0))),
                _esc(image_opt.get("missing_dimensions", image_opt.get("dims_missing", 0))))
@@ -766,7 +745,7 @@ async def _report_html(job_id: str):
         + '<h2 class="section-title">Page-Type Breakdown</h2>'
         '<table><tr><th>Page type</th><th>Count</th></tr>%s</table>' % page_type_rows
         + insights_html + ov_html + gsc_html
-        + sitemap_html + ai_html + local_html + hreflang_html + url_hygiene_html + indexation_html + image_opt_html + programmatic_html
+        + sitemap_html + ai_html + local_html + hreflang_html + url_hygiene_html + image_opt_html + programmatic_html
         + '<h2 class="section-title">User Flows</h2>'
         '<table><tr><th>Target type</th><th>Depth</th><th>Visits</th><th>Target URL</th></tr>%s</table>'
         % flow_rows
