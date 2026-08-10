@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     competitor_psi_all_pages: bool = False
     competitor_psi_sample: int = 10
     competitor_timeout_seconds: int = 1200
+    competitor_audit_headroom_seconds: int = 2400
     psi_page_sample: int = 20
     mobile_sample_pages: int = 20
     metadata_only: bool = True

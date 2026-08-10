@@ -955,11 +955,12 @@ async def audit_competitors(target_job_id: str, competitors: list[str]) -> dict:
             try:
                 return await asyncio.wait_for(
                     _analyze_one(target_job_id, target_url, comp),
-                    timeout=settings.competitor_timeout_seconds,
+                    timeout=settings.competitor_timeout_seconds + settings.competitor_audit_headroom_seconds,
                 )
             except asyncio.TimeoutError:
                 comp_domain = _domain(comp)
-                err_msg = f"Competitor audit timed out ({settings.competitor_timeout_seconds // 60}-minute limit)"
+                budget_min = (settings.competitor_timeout_seconds + settings.competitor_audit_headroom_seconds) // 60
+                err_msg = f"Competitor audit timed out ({budget_min}-minute limit)"
                 logger.error("Competitor audit timed out target=%s comp=%s", target_job_id, comp)
                 await db.competitor_gap_analyses.update_one(
                     {"target_job_id": target_job_id, "competitor": comp_domain},

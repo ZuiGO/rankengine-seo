@@ -25,6 +25,7 @@ USER_AGENT = "ZuiGO-Engine/1.0 (+https://zuigo.ai)"
 
 CHROMIUM_SLOTS = 2
 _chromium_slots = asyncio.Semaphore(CHROMIUM_SLOTS)
+REQUEST_TIMEOUT = 15
 
 
 async def _robots_delay(origin: str) -> float:
