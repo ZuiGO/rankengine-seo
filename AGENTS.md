@@ -10,7 +10,61 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: competitor re-run: swagelok/parker/tu-lok/divineengg/stauff reports — committed 1e3e11f)
+## Status (last update: UI round 2 — dashboard rails + crawl screen dashboard; frontend-only, committed UI-ROUND2)
+- UI round 2 (frontend-only, no backend change, no server restart needed):
+  - Full rails: `.main` 1120 -> 1440px; `#dashboard-grid` wraps results: 1-col <1100px,
+    2-col `232px + 1fr` >=1100px, 3-col `232px + 1fr + 308px` >=1360px. Left rail
+    (sticky): job context card (`renderRailJob` — health ring as conic-gradient from
+    `summary.summary.score`/`metrics.score` when it's a number, else NO ring; pages /
+    content items / actions lines), quick nav (`buildRailNav` mirrors all 13 tabs,
+    active state + per-tab count badges via `setTabBadge` — lazy, set when each
+    loader succeeds; `999+` cap; hidden when 0), per-tab explainer
+    (`TAB_GUIDES` map, refreshed in the tab click handler + `switchTab`), static
+    Tip of the day (rotates by day-of-month). Right rail: Live activity feed
+    (`pushActivity`, severity dots ok/info/warn/err, cap 20, honest empty state —
+    fed from `pollJob` progress_message ticks + failed/broken alerts on loadLogs),
+    chat dock (`#chat-dock`): the SAME `#chat-widget` node is DOM-moved between the
+    rail and `document.body` by `applyRailMode()` on a `(min-width:1360px)`
+    matchMedia change — single instance, panel auto-opens when docked unless the
+    user closed it (`chatUserClosed`), floats as before below 1360), quick links
+    (Report / SEO Insights / Competitors / Quality / Schedules / Settings / New
+    Analysis). `body.app-wide` toggled for docked-chat CSS.
+  - Crawl screen: progress card gains phase chips (Queued → Crawling → Analyzing →
+    Done; `updateCrawlPhase` from job.status + `current_stage`; done chips for
+    passed stages, `.fail` on Analyzing when failed), live stats strip
+    (`#crawl-stats`: pages crawled = real `pages_crawled`, pages/min = derived from
+    tick deltas, elapsed = client-side timer from first tick, last URL = parsed
+    from progress_message only when it contains a real URL, else "—"), and a 2-col
+    `.progress-info` zone below (static "What the audit checks" checklist from the
+    landing copy + 5-item static SEO FAQ accordion: partial audits, not-measured
+    checks, timings, redirects, competitor block). `#progress-pages` element
+    removed (n/a to pollJob/showProgress). Crawl screen verified mid-run on
+    example.org (stages through site_health in ~41s; queued → analyzing → done
+    transitions observed; zero console errors).
+  - Per-tab polish: Overview content-type cards are clickable (jump to Content tab
+    + set the type filter; only when the type is a valid filter option and job open);
+    Quality tab gains Expand All / Collapse All buttons (toggle `open` on
+    `#quality-content .audit-card`); SEO Insights Overview History gains a sparkline
+    of the monthly `traffic_sum` series (`sparkline()` helper, inline SVG, only when
+    >=2 numeric points, else honest "—"); rail nav badges wired into loadPages /
+    loadContent / loadActions / loadSites / loadSchedules / loadLogs /
+    loadCompetitors / loadQuality success paths.
+  - Dead Chart.js CDN tag removed from index.html (was never used — zero
+    `Chart`/`analytics` refs remain in frontend/).
+  - Verified via Playwright (port 8001): 1440px — both rails visible, 13 rail nav
+    entries, job card + ring, badges populated/updating (pages 261, content 807,
+    actions 999+, sites 4), chat docked inside right rail (bounding-box check,
+    panel fills slot), tab explainer + rail active state for all 13 tabs, quality
+    expand/collapse (15 cards), theme toggle flips body bg (245,247,251 ↔
+    11,18,32), no horizontal overflow; 375px — rails hidden, chat floats, crawl
+    dashboard (4 stats, 2 info zones) no overflow; reduced-motion landing renders;
+    zero console errors everywhere (checked 3 viewports). Layout geometry checked
+    programmatically (this model cannot view screenshots). Test jobs
+    (example.com/org/net) hard-deleted after verification; Sites list back to
+    zuigo.ai + fluidcontrols.com × 2.
+  - Deferred (in "Next up"): keyboard shortcuts; deeper per-tab widgets (ratio
+    rings, run-now on schedules, status-chip filters on Pages/Links) — skipped to
+    stay frontend-only + honest with data shapes that exist today.
 - REAL BUG FIXED (found mid-run): `crawler.py::fetch_page_text` referenced undefined
   `REQUEST_TIMEOUT` (NameError) — every plain-fetch fallback crashed, so ALL
   competitor crawls died with "Competitor crawl returned no pages" and the first
@@ -939,6 +993,13 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
+- UI follow-ups from round 2 (deferred deliberately): keyboard shortcuts (e.g.
+  tab-jump keys, Ctrl/Cmd+K to focus search on Pages); Pages/Links status-chip
+  click filters (needs the API to accept a status filter or adds a param);
+  Schedules per-card "Run now" + live countdown from `next_run_at`; Actions
+  approved-ratio ring (needs unfiltered counts — current label has them, a render
+  can reuse `summary.pending/approved/rejected`); Report sticky TOC; rail job card
+  could show completed-at timestamp when summary exposes one.
 - Optional competitor polish: also surface `seo_insights_cache`-based target
   keyword overlap per competitor in the report's "overlap" table when SE
   Ranking data is missing (currently shows "no data" honestly).

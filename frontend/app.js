@@ -144,6 +144,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       applyCounts(target);
     }
     currentTab = tab.dataset.tab;
+    updateRailExplain(currentTab);
 
     if (currentJobId) {
       history.replaceState(null, "", `#job/${currentJobId}/${currentTab}`);
@@ -170,6 +171,154 @@ document.querySelectorAll(".tab").forEach(tab => {
       if (currentTab === "settings") loadSettings();
     }
   });
+});
+
+// Dashboard rails: context, quick nav, activity feed, docked chat
+const RAIL_TAB_LABELS = {
+  sites: "Sites", overview: "Overview", pages: "Pages", content: "Content",
+  links: "Links", actions: "SEO Actions", report: "Report", "seo-insights": "SEO Insights",
+  competitors: "Competitors", quality: "Quality", schedules: "Schedules",
+  logs: "Alerts", settings: "Settings",
+};
+const TAB_GUIDES = {
+  overview: "Site-level health: pages, content, actions, user flows, the execution summary and deltas vs previous analyses.",
+  sites: "Every analyzed site with health grades. Select two or more and compare them side by side.",
+  pages: "All crawled pages with search, type filter and sorting.",
+  content: "Every extracted content item (images, PDFs, video, documents...) with preview and the page it lives on.",
+  links: "Link health, the full link list (OK / broken / redirect / blocked / unreachable / external), backlinks and honest redirect counts.",
+  actions: "Impact-ranked SEO actions with evidence. Approve or reject — approved changes become versioned before/after snippets.",
+  report: "The full branded analysis: KPIs, findings with evidence, quick wins, methodology, download and email options.",
+  "seo-insights": "Live keyword, SERP, backlink and competitor data (SE Ranking) merged with what the crawl found locally.",
+  competitors: "Crawl competitor sites and diff 8 gap dimensions against this site. Blocked crawls still yield a partial SE Ranking + SERP report.",
+  quality: "The Site Health & Audits dashboard: each measured audit with pass / attention / fail and expandable checks.",
+  schedules: "Recurring crawls and keyword re-checks. Each run creates a new analysis job in Sites.",
+  logs: "Alerts from the last 24h: failed analyses and broken schedules.",
+  settings: "Provider credentials (GSC, SE Ranking, GitHub, SMTP) stored in the app database.",
+};
+const RAIL_TIPS = [
+  "URL slugs do double duty for search engines: keep them short, lowercase and keyword-first instead of using long IDs or dates.",
+  "Alt text is an image-search signal — describe what the image shows in 5–10 words instead of stuffing keywords.",
+  "Internal links pass authority: every key page should be reachable within 2–3 clicks from the homepage.",
+  "Duplicate titles make search engines pick one URL per query — a unique title per page is a quick win.",
+  "An XML sitemap only helps if it is listed in robots.txt and kept up to date with lastMod dates.",
+  "Core Web Vitals are field-measured: metrics from real visitors matter more than lab tests.",
+];
+
+const railNavEl = document.getElementById("rail-nav");
+const railExplainEl = document.getElementById("rail-explain");
+const railTipEl = document.getElementById("rail-tip");
+const railActivityEl = document.getElementById("rail-activity");
+const railJobEl = document.getElementById("rail-job");
+let chatUserClosed = false;
+const crawlTick = { startedAt: 0, lastPages: 0, lastAt: 0, lastMsg: "" };
+
+function buildRailNav() {
+  if (!railNavEl) return;
+  railNavEl.innerHTML = Object.keys(RAIL_TAB_LABELS).map(key => `
+    <button type="button" class="rail-nav-btn" data-tab="${key}">
+      <span>${RAIL_TAB_LABELS[key]}</span>
+      <span class="rail-badge hidden-badge" data-badge-for="${key}"></span>
+    </button>
+  `).join("");
+  railNavEl.querySelectorAll(".rail-nav-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+  if (railTipEl) {
+    const idx = new Date().getDate() % RAIL_TIPS.length;
+    railTipEl.innerHTML = `<small>Tip of the day</small>${escapeHtml(RAIL_TIPS[idx])}`;
+  }
+  updateRailExplain(currentTab);
+}
+
+function updateRailExplain(tab) {
+  if (railExplainEl) {
+    railExplainEl.textContent = TAB_GUIDES[tab] || "Pick a section to see what it covers.";
+  }
+  if (railNavEl) {
+    railNavEl.querySelectorAll(".rail-nav-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.tab === tab);
+    });
+  }
+}
+
+function setTabBadge(tab, count) {
+  const badge = railNavEl ? railNavEl.querySelector(`.rail-badge[data-badge-for="${tab}"]`) : null;
+  if (!badge) return;
+  if (count === null || count === undefined) {
+    badge.classList.add("hidden-badge");
+    return;
+  }
+  badge.textContent = count > 999 ? "999+" : String(count);
+  badge.classList.toggle("hidden-badge", count <= 0);
+  badge.title = count + " in " + (RAIL_TAB_LABELS[tab] || tab);
+}
+
+function renderRailJob(summary) {
+  if (!railJobEl || !summary) return;
+  const nested = summary.summary || {};
+  const score = typeof nested.score === "number" ? nested.score
+    : typeof nested.metrics?.score === "number" ? nested.metrics.score : null;
+  let ring = "";
+  if (score !== null) {
+    const pct = Math.max(0, Math.min(100, score));
+    const color = score >= 70 ? "#16a34a" : score >= 40 ? "#d97706" : "#dc2626";
+    ring = `<div class="health-ring" style="--pct:${pct};background:conic-gradient(${color} ${pct}%, var(--surface-hover) 0)"><span>${score}</span></div>`;
+  }
+  const lines = [
+    ["Pages crawled", summary.total_pages ?? "—"],
+    ["Content items", summary.total_content_items ?? "—"],
+    ["SEO actions", summary.total_action_items ?? "—"],
+  ];
+  railJobEl.innerHTML = `<div class="ring-wrap">${ring}<div>
+      <div class="rail-domain">${escapeHtml(summary.url || "")}</div>
+      <div class="rail-sub">Analysis · complete</div>
+    </div></div>
+    ${lines.map(([l, v]) => `<div class="rail-job-line"><span>${l}</span><b>${v}</b></div>`).join("")}`;
+}
+
+function pushActivity(severity, text) {
+  if (!railActivityEl) return;
+  const empty = railActivityEl.querySelector(".rail-empty");
+  if (empty) empty.remove();
+  const time = new Date().toLocaleTimeString([], { hour12: false });
+  const item = document.createElement("div");
+  item.className = "activity-item";
+  item.innerHTML = `<span class="a-dot ${severity}"></span><span class="a-time">${time}</span><span class="a-text">${escapeHtml(text)}</span>`;
+  railActivityEl.prepend(item);
+  while (railActivityEl.children.length > 20) {
+    railActivityEl.lastElementChild.remove();
+  }
+}
+
+function applyRailMode() {
+  const wide = window.matchMedia("(min-width: 1360px)").matches;
+  document.body.classList.toggle("app-wide", wide);
+  const chat = document.getElementById("chat-widget");
+  if (!chat) return;
+  const dock = document.getElementById("chat-dock");
+  if (wide && dock && chat.parentElement !== dock) {
+    dock.appendChild(chat);
+    const panel = document.getElementById("chat-panel");
+    if (panel && !chatUserClosed) panel.classList.remove("hidden");
+  } else if (!wide && chat.parentElement !== document.body) {
+    document.body.appendChild(chat);
+  }
+}
+
+buildRailNav();
+applyRailMode();
+const railModeQuery = window.matchMedia("(min-width: 1360px)");
+if (railModeQuery.addEventListener) railModeQuery.addEventListener("change", applyRailMode);
+else railModeQuery.addListener(applyRailMode);
+
+document.getElementById("rail-links")?.addEventListener("click", e => {
+  const btn = e.target.closest("button[data-go]");
+  if (!btn) return;
+  if (btn.dataset.go === "new") {
+    document.getElementById("new-analysis-btn")?.click();
+  } else {
+    switchTab(btn.dataset.go);
+  }
 });
 
 async function loadSettings() {
@@ -401,14 +550,35 @@ async function pollJob(jobId) {
     } else if (job.status === "running") {
       progressTitle.textContent = "Running audit...";
     }
-    const progressPages = document.getElementById("progress-pages");
-    if (progressPages) {
-      progressPages.textContent = job.status === "running" && job.pages_crawled
-        ? `${job.pages_crawled} pages crawled` : "";
+    updateCrawlPhase(job.status, job.current_stage || "");
+    const pages = job.pages_crawled || 0;
+    const csPages = document.getElementById("cs-pages");
+    const csRate = document.getElementById("cs-rate");
+    const csElapsed = document.getElementById("cs-elapsed");
+    const csLast = document.getElementById("cs-last");
+    if (csPages) csPages.textContent = String(pages);
+    if (!crawlTick.startedAt) crawlTick.startedAt = Date.now();
+    const nowMs = Date.now();
+    if (csElapsed) {
+      const secs = Math.round((nowMs - crawlTick.startedAt) / 1000);
+      csElapsed.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
     }
+    if (csRate && crawlTick.lastAt && pages > crawlTick.lastPages) {
+      const mins = (nowMs - crawlTick.lastAt) / 60000;
+      csRate.textContent = String(Math.max(1, Math.round((pages - crawlTick.lastPages) / (mins || 1))));
+    }
+    const lastUrl = (job.progress_message || "").match(/https?:\/\/[^\s'"<>]+/);
+    if (csLast) csLast.textContent = lastUrl ? lastUrl[0].replace(/[.]+$/, "") : "—";
+    if (job.progress_message && job.progress_message !== crawlTick.lastMsg) {
+      pushActivity("info", job.progress_message);
+      crawlTick.lastMsg = job.progress_message;
+    }
+    crawlTick.lastAt = nowMs;
+    crawlTick.lastPages = pages;
 
     if (job.status === "completed") {
       stopPolling();
+      pushActivity("ok", "Analysis completed — opening the dashboard.");
       showResults(jobId);
     } else if (job.status === "failed") {
       stopPolling();
@@ -417,11 +587,28 @@ async function pollJob(jobId) {
       statusBadge.className = "status-badge status-failed";
       analyzeBtn.disabled = false;
       analyzeBtn.textContent = "Analyze";
+      pushActivity("err", "Analysis failed: " + (job.error_message || "Unknown error"));
       showToast("Analysis failed: " + (job.error_message || "Unknown error"));
     }
   } catch (err) {
     // keep polling
   }
+}
+
+function updateCrawlPhase(status, stage) {
+  const chips = document.getElementById("phase-chips");
+  if (!chips) return;
+  const order = ["queued", "crawling", "analyzing", "done"];
+  let phase = "queued";
+  if (status === "running") phase = stage === "crawling" ? "crawling" : "analyzing";
+  else if (status === "completed") phase = "done";
+  const activeIdx = order.indexOf(phase);
+  chips.querySelectorAll(".phase-chip").forEach(c => {
+    const i = order.indexOf(c.dataset.phase);
+    c.classList.toggle("active", i === activeIdx);
+    c.classList.toggle("done", i >= 0 && i < activeIdx);
+    c.classList.toggle("fail", status === "failed" && c.dataset.phase === "analyzing");
+  });
 }
 
 async function showResults(jobId, opts = {}) {
@@ -499,6 +686,20 @@ function loadOverview(summary) {
       <div class="stat-card"><div class="stat-value">${summary.total_user_flows || 0}</div><div class="stat-label">User Flows Identified</div></div>
     `;
   }
+
+  renderRailJob(summary);
+  breakdown.querySelectorAll(".content-type-card").forEach(card => {
+    card.classList.add("clickable");
+    card.addEventListener("click", () => {
+      const type = card.querySelector(".ct-name").textContent.trim();
+      const select = document.getElementById("content-type-filter");
+      if (select && [...select.options].some(o => o.value === type)) {
+        select.value = type;
+        switchTab("content");
+        if (currentJobId) loadContent(currentJobId);
+      }
+    });
+  });
 }
 
 async function loadExecSummary(jobId) {
@@ -755,6 +956,7 @@ async function loadPages(jobId) {
 
   populatePageTypeFilter(data.types);
   document.getElementById("pages-count").textContent = `${data.total} pages`;
+  setTabBadge("pages", data.total);
   const prevBtn = document.getElementById("pages-prev-btn");
   const nextBtn = document.getElementById("pages-next-btn");
   if (prevBtn) prevBtn.disabled = pagesOffset <= 0;
@@ -831,6 +1033,7 @@ async function loadContent(jobId) {
   }
 
   document.getElementById("content-count").textContent = `${data.total} items`;
+  setTabBadge("content", data.total);
 
   const items = data.items || [];
   if (items.length === 0) {
@@ -1215,6 +1418,7 @@ async function loadActions(jobId, { reset } = {}) {
   const s = data.summary || {};
   const countEl = document.getElementById("actions-count");
   countEl.textContent = `${data.total} items${s.pending != null ? ` · ${s.pending} pending · ${s.approved} approved · ${s.rejected} rejected` : ""}`;
+  setTabBadge("actions", data.total);
 
   const list = document.getElementById("actions-list");
   if (data.actions.length === 0) {
@@ -1837,6 +2041,7 @@ initChat();
 document.getElementById("chat-toggle").addEventListener("click", () => {
   const panel = document.getElementById("chat-panel");
   panel.classList.toggle("hidden");
+  chatUserClosed = panel.classList.contains("hidden");
   if (!panel.classList.contains("hidden")) {
     const messages = document.getElementById("chat-messages");
     messages.scrollTop = messages.scrollHeight;
@@ -1846,6 +2051,7 @@ document.getElementById("chat-toggle").addEventListener("click", () => {
 
 document.getElementById("chat-close").addEventListener("click", () => {
   document.getElementById("chat-panel").classList.add("hidden");
+  chatUserClosed = true;
 });
 
 document.getElementById("chat-form").addEventListener("submit", async e => {
@@ -1892,9 +2098,19 @@ function showProgress() {
   statusBadge.className = "status-badge status-queued";
   const progressPercent = document.getElementById("progress-percent");
   if (progressPercent) progressPercent.textContent = "0%";
-  const progressPages = document.getElementById("progress-pages");
-  if (progressPages) progressPages.textContent = "";
   statusBadge.textContent = "Queued";
+  crawlTick.startedAt = 0;
+  crawlTick.lastPages = 0;
+  crawlTick.lastAt = 0;
+  crawlTick.lastMsg = "";
+  const csRate = document.getElementById("cs-rate");
+  if (csRate) csRate.textContent = "—";
+  const csElapsed = document.getElementById("cs-elapsed");
+  if (csElapsed) csElapsed.textContent = "0:00";
+  const csLast = document.getElementById("cs-last");
+  if (csLast) csLast.textContent = "—";
+  updateCrawlPhase("queued", "");
+  pushActivity("info", "Analysis queued for " + (resultsUrl.textContent || "this site") + ".");
 }
 
 function hideProgress() {
@@ -2007,9 +2223,17 @@ async function loadQuality(jobId) {
   const nested = summary?.summary || summary || {};
   renderSiteHealth(health, nested);
   el.innerHTML = renderQuality(dup, sd, perf, geo, orphans, nested, decay, hl, uh, idx, imgOpt, sitemap, aiVis, local, links);
+  setTabBadge("quality", el.querySelectorAll(".audit-card").length);
   const spendEl = document.getElementById("quality-spend");
   if (spendEl) spendEl.innerHTML = renderSpend(spend);
 }
+
+document.getElementById("quality-expand-btn")?.addEventListener("click", () => {
+  document.querySelectorAll("#quality-content .audit-card").forEach(d => d.setAttribute("open", ""));
+});
+document.getElementById("quality-collapse-btn")?.addEventListener("click", () => {
+  document.querySelectorAll("#quality-content .audit-card").forEach(d => d.removeAttribute("open"));
+});
 
 function renderSpend(spend) {
   if (!spend) return "";
@@ -2579,13 +2803,31 @@ function renderDomainOverview(ov, error, source) {
   });
 }
 
+function sparkline(values, w, h) {
+  const nums = (values || []).map(Number).filter(v => Number.isFinite(v));
+  if (nums.length < 2) return '<span class="count-label">—</span>';
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const span = max - min || 1;
+  const step = w / (nums.length - 1);
+  const pts = nums.map((v, i) =>
+    `${(i * step).toFixed(1)},${(h - 3 - ((v - min) / span) * (h - 6)).toFixed(1)}`).join(" ");
+  return `<svg class="sparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="traffic trend">
+    <polyline points="${pts}" fill="none" stroke="var(--primary)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
 function renderOverviewHistory(rows, error) {
   const el = document.getElementById("overview-history");
   if (!el) return;
   let html = "";
   if (error && !rows.length) html += insightErrorHtml(error);
   if (rows.length) {
-    html += `<p class="source-note">Monthly organic traffic & keyword history (SE Ranking)</p>`;
+    const traffic = rows.map(r => Number(r.traffic_sum)).filter(v => Number.isFinite(v));
+    html += `<p class="source-note">Monthly organic traffic & keyword history (SE Ranking)${traffic.length > 1 ? " — line shows the traffic trend" : ""}</p>`;
+    if (traffic.length > 1) {
+      html += `<div style="margin:8px 0 12px">${sparkline(traffic, 320, 54)}</div>`;
+    }
     html += `<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Month</th><th>Organic Traffic</th><th>Organic Keywords</th><th>Est. Value</th></tr></thead><tbody>${rows.map(r => `<tr>
       <td>${escapeHtml(r.month)}</td>
       <td>${r.traffic_sum ?? "-"}</td>
@@ -3020,6 +3262,7 @@ async function loadCompetitors(jobId) {
       return;
     }
     renderCompetitorGaps(data, false);
+    setTabBadge("competitors", (data.results || []).length);
     if (data.results && renderCompetitorStatus(data.results)) {
       if (!competitorPollDeadline) competitorPollDeadline = Date.now() + 60 * 60 * 1000;
       if (Date.now() < competitorPollDeadline) {
@@ -3179,6 +3422,7 @@ async function loadSites() {
     const data = await resp.json();
     const sites = data.sites || [];
     document.getElementById("sites-count").textContent = `${sites.length} site(s) analyzed`;
+    setTabBadge("sites", sites.length);
     if (sites.length === 0) {
       grid.innerHTML = '<div class="insights-card">No sites analyzed yet. Run an analysis first.</div>';
       updateCompareBtn();
@@ -3343,6 +3587,7 @@ async function loadSchedules() {
     const resp = await fetch(`${API_BASE}/scheduler`);
     const data = await resp.json();
     const schedules = data.schedules || [];
+    setTabBadge("schedules", schedules.length);
     if (schedules.length === 0) {
       list.innerHTML = '<div class="insights-card">No schedules yet. Add one above to auto-crawl a site on an interval.</div>';
       return;
@@ -3482,6 +3727,10 @@ async function loadLogs() {
       `),
       ...(failed.length === 0 && broken.length === 0 ? ['<div class="insights-card">No alerts in the last 24h. All clear.</div>'] : []),
     ].join("");
+    setTabBadge("logs", failed.length + broken.length);
+    [...failed, ...broken].slice(0, 3).forEach(a => {
+      pushActivity("err", (a.url || a.domain || "") + " — " + String(a.error || a.last_error || "").slice(0, 140));
+    });
   } catch (err) {
     alertsEl.innerHTML = `<div class="insights-card">Error: ${escapeHtml(err.message)}</div>`;
   }

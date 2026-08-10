@@ -137,6 +137,15 @@
 
     <div id="progress-section" class="progress-section hidden">
       <div class="progress-card">
+        <div class="phase-chips" id="phase-chips" aria-label="Analysis pipeline stages">
+          <span class="phase-chip active" data-phase="queued">Queued</span>
+          <span class="phase-arrow" aria-hidden="true"></span>
+          <span class="phase-chip" data-phase="crawling">Crawling</span>
+          <span class="phase-arrow" aria-hidden="true"></span>
+          <span class="phase-chip" data-phase="analyzing">Analyzing</span>
+          <span class="phase-arrow" aria-hidden="true"></span>
+          <span class="phase-chip" data-phase="done">Done</span>
+        </div>
         <h3 id="progress-title">Crawling...</h3>
         <div class="progress-bar-track">
           <div id="progress-bar" class="progress-bar-fill"></div>
@@ -146,10 +155,79 @@
           <span id="progress-live" class="progress-live"><span class="live-dot"></span> Live</span>
         </div>
         <p id="progress-message" class="progress-message">Starting...</p>
-        <p id="progress-pages" class="progress-message" style="opacity:.75;margin-top:6px;font-size:13px"></p>
+        <div class="crawl-stats" id="crawl-stats">
+          <div class="crawl-stat"><span id="cs-pages">0</span><small>pages crawled</small></div>
+          <div class="crawl-stat"><span id="cs-rate">—</span><small>pages / min</small></div>
+          <div class="crawl-stat"><span id="cs-elapsed">0:00</span><small>elapsed</small></div>
+          <div class="crawl-stat"><span id="cs-last">—</span><small>last URL</small></div>
+        </div>
         <div id="status-badge" class="status-badge status-queued">Queued</div>
       </div>
+
+      <div class="progress-info">
+        <section class="p-zone">
+          <h3>What the audit checks</h3>
+          <p class="p-note">While the crawl runs, every page found is scored against these checks:</p>
+          <div class="checks-grid p-check-list">
+            <ul>
+              <li>Missing, duplicate or too-short title tags and meta descriptions</li>
+              <li>Missing or duplicate H1 / heading structure</li>
+              <li>Broken and redirected outgoing links</li>
+              <li>Orphan pages and internal linking gaps</li>
+              <li>Noindex, blocked-by-robots and indexation issues</li>
+              <li>Duplicate content and thin or template-driven pages</li>
+            </ul>
+            <ul>
+              <li>Thin content and missing E-E-A-T signals</li>
+              <li>Missing or poorly written alt text on images</li>
+              <li>Slow pages, failing Core Web Vitals, weak mobile layout</li>
+              <li>Missing structured data / schema markup</li>
+              <li>AI agents blocked from your content, no llms.txt</li>
+              <li>Local SEO gaps and hreflang / international errors</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="p-zone">
+          <h3>SEO FAQ</h3>
+          <div class="faq-list">
+            <details class="faq-item">
+              <summary>What happens if the crawl is very slow or large?</summary>
+              <div>The crawler seeds from your XML sitemap and walks internal links, with a page cap per job. If the time or page budget runs out first, the audit continues with the pages already crawled and marks the report <strong>partial</strong> — you'll see an amber note explaining what was and wasn't measured.</div>
+            </details>
+            <details class="faq-item">
+              <summary>Why are some checks "not measured"?</summary>
+              <div>Indexation and some live-insight checks use paid APIs. When no credits are configured or a provider is unavailable, the check honestly reports "not measured" with a hint instead of guessing a number.</div>
+            </details>
+            <details class="faq-item">
+              <summary>How long does an audit take?</summary>
+              <div>Short: from a couple of minutes for small sites to longer for large ones — the crawl, then analysis, run in waves. You can leave the tab and come back; the job stays open under its link (your browser keeps the job id in the URL).</div>
+            </details>
+            <details class="faq-item">
+              <summary>Why are redirects usually on 0?</summary>
+              <div>A redirect is a server response (301 / 302) pointing a URL elsewhere — healthy when a site links directly to final URLs. The count reflects links that returned a redirect chain during the last check; a 0 means none did, not that redirects are missing.</div>
+            </details>
+            <details class="faq-item">
+              <summary>Can it analyze competitors?</summary>
+              <div>Yes — the Competitors tab crawls each competitor and diffs 8 gap dimensions (keywords, content, backlinks, technical, schema, on-page, UX, SERP features). If a competitor blocks the crawler (e.g. robots.txt), you get a partial report from SE Ranking + SERP data with a clear "blocked" note.</div>
+            </details>
+          </div>
+        </section>
+      </div>
     </div>
+
+    <div class="dashboard-grid" id="dashboard-grid">
+      <aside class="rail left-rail" id="left-rail" aria-label="Analysis context and quick navigation">
+        <section class="rail-section rail-job" id="rail-job">
+          <p class="rail-empty">Open an analysis to see its context here.</p>
+        </section>
+        <nav class="rail-section rail-nav" id="rail-nav" aria-label="Quick section navigation"></nav>
+        <section class="rail-section">
+          <h4 class="rail-title">This tab</h4>
+          <p id="rail-explain" class="rail-explain">Pick a section on the right to see what it covers.</p>
+          <div class="rail-tip" id="rail-tip"></div>
+        </section>
+      </aside>
 
     <div id="results-section" class="results-section hidden">
       <div class="results-header">
@@ -511,6 +589,10 @@
 
       <div class="tab-content hidden" id="tab-quality">
         <p class="section-desc">Site health & audits: every measured audit with pass/attention/fail status, plain-language verdicts and expandable checks.</p>
+        <div class="table-controls" style="margin-bottom:12px">
+          <button id="quality-expand-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px">Expand All</button>
+          <button id="quality-collapse-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px">Collapse All</button>
+        </div>
         <div id="quality-health-card" class="insights-card" style="margin-bottom:14px"></div>
         <div id="quality-content"></div>
         <div id="quality-spend"></div>
@@ -631,6 +713,29 @@
         </div>
       </div>
     </div>
+
+      <aside class="rail right-rail" id="right-rail" aria-label="Live activity, assistant and quick links">
+        <section class="rail-section">
+          <h4 class="rail-title">Live activity</h4>
+          <div id="rail-activity" class="rail-activity">
+            <p class="rail-empty">Crawl events, alerts and lifecycle messages will appear here.</p>
+          </div>
+        </section>
+        <section class="rail-section" id="chat-dock"></section>
+        <section class="rail-section">
+          <h4 class="rail-title">Quick links</h4>
+          <div class="rail-links" id="rail-links">
+            <button type="button" data-go="report">Report</button>
+            <button type="button" data-go="seo-insights">SEO Insights</button>
+            <button type="button" data-go="competitors">Competitors</button>
+            <button type="button" data-go="quality">Quality</button>
+            <button type="button" data-go="schedules">Schedules</button>
+            <button type="button" data-go="settings">Settings</button>
+            <button type="button" data-go="new">New Analysis</button>
+          </div>
+        </section>
+      </aside>
+    </div>
   </main>
 </div>
 
@@ -666,7 +771,6 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>
