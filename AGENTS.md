@@ -10,7 +10,30 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: UI round 2 — dashboard rails + crawl screen dashboard; frontend-only, committed UI-ROUND2)
+## Status (last update: UI round 3 — fit ≤1280px laptops + human-readable chat; committed `012dd05`, pushed)
+- UI round 3 (`012dd05`, pushed; backend prompt change -> server restarted via launchd):
+  - Screen fit: left rail appears >=1024px (was >=1100) and the top tab strip is
+    `display:none` >=1024px (the rail's 13-button nav — active state + badges — is the
+    navigator; strip clicks still work via `switchTab()` since programmatic `.click()`
+    fires handlers on hidden elements). Right rail + docked chat move to >=1280px
+    (was >=1360); columns narrower (`minmax(176px,206px) | 1fr | minmax(264px,288px)`);
+    `.main` padding `clamp(16px,3vw,28px)`; rails `max-height: calc(100vh - 96px)`;
+    floating chat panel `max-height: min(460px, calc(100vh-96px))`; docked panel
+    `min(400px, calc(100vh-190px))`, chat box `min(320px, calc(100vh-280px))`. Tab strip
+    `flex-wrap: wrap` below 1024 (no more invisible sideways scroll). Playwright: zero
+    horizontal overflow at 375/1024/1280/1366/1440/1920; rail-nav verified to switch
+    every tab with the strip hidden (pages 24 rows loaded via rail click at 1280).
+  - Chat replies: `CHAT_FORMAT_RULE` constant in `chat_service.py` appended to
+    SYSTEM_PROMPT + GENERAL_SYSTEM_PROMPT (verdict sentence first, <=8 dash bullets,
+    numbers inline, NEVER markdown tables/pipes/**bold**; full-site chat system =
+    SYSTEM_PROMPT + FULL_SITE_PROMPT so the rule reaches it). Frontend safety net:
+    `renderBotReply()` (app.js) used for bot messages — escapes first (XSS-safe),
+    collapses stray `|` table blocks into `<details class="chat-collapse">Full
+    breakdown</details>` with `.chat-table`, `- `/`* ` runs -> `.chat-bullets` ul/ol,
+    `**bold**` -> strong, URLs -> links. New tests
+    `backend/tests/test_chat_format.py` (5); suite 354/354; node --check clean;
+    live-verified injecting the real markdown reply (2 collapsible tables, 3 bullets,
+    1 strong, 1 link, zero raw pipes/asterisks, zero console errors).
 - UI round 2 (frontend-only, no backend change, no server restart needed):
   - Full rails: `.main` 1120 -> 1440px; `#dashboard-grid` wraps results: 1-col <1100px,
     2-col `232px + 1fr` >=1100px, 3-col `232px + 1fr + 308px` >=1360px. Left rail
