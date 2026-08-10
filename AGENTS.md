@@ -10,7 +10,56 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: UI round 3 — fit ≤1280px laptops + human-readable chat; committed `012dd05`, pushed)
+## Status (last update: bigger chatbot + Docker demo stack; committed `353b72b`, pushed)
+- Bigger chatbot + fresh Docker demo (`353b72b`, pushed; no backend logic change
+  except crawler.py no-sandbox):
+  - Chatbot: floating panel 390 -> 520px wide, chat-box 420 -> 560px tall (also
+    fixed a leftover `.chat-panel .chat-box { height:400px }` override that had
+    silently capped it), toggle 13px/24px @15px font, messages/input 15px,
+    chat-table 12.5px. Docked (>=1280): right rail `minmax(264,288)` ->
+    `minmax(304,348)px`, panel `min(540px, calc(100vh-190px))`, box
+    `min(480px, calc(100vh-280px))`. Note: with NO job open the right rail
+    auto-places into the middle grid column (results-section display:none) and
+    becomes ~780px wide — pre-existing behavior, deliberate. Playwright at
+    375/1024/1280/1440/1920: zero overflow, floating 520x560 (capped by
+    viewport on short windows), docked 314x528/480 box, zero console errors.
+  - DOCKER DEMO (`deploy/demo/docker-compose.yml` == THE demo stack now; the
+    repo-root `docker-compose.yml` is back to dev-infra only: mongodb
+    community-server + redis + neo4j): services mongodb (mongo:7, NO host-
+    published ports), redis, one-shot `mongo-seed` (mongo:7 image,
+    `mongorestore --nsInclude='rankengine.*' --drop /seed/dump`, mounts
+    `../../seed:/seed:ro`), one-shot `seed-vectors` (`python scripts/seed_demo.py`
+    -> `vector_service.index_job_vectors` per completed job; idempotent wipe+
+    rebuild), `app` (port `${DEMO_PORT:-8001}:8000`) and `worker`
+    (`python -m arq backend.worker.WorkerSettings`) sharing the image (build
+    context `../..`, Dockerfile at repo root). `env_file: .env.docker` (example
+    committed; real keys gitignored via `.env.docker` + `seed/` patterns).
+    Dockerfile: py3.12-slim + libmagic1/libglib/fonts-dejavu + playwright
+    chromium + install-deps; crawler launches chromium with `args=["--no-sandbox"]`
+    (both sites in crawler.py) so crawls work as root in containers.
+  - COMPOSE GOTCHA (cost ~1h): docker compose v5 with a project-dir `.env`
+    injects that `.env` into every container and it BEAT the anchor `env_file:`
+    (real keys + localhost URIs leaked into containers, mongod unreachable).
+    Fix: the demo compose lives in `deploy/demo/` whose project dir has NO
+    `.env` — isolated from the dev `.env` entirely. Also: `mongorestore` needs
+    `--nsInclude=` (not `--db`) + the dump-root arg; `docker compose run`
+    path caveats on `env_file` in anchors; seed script must
+    `sys.path.insert(0, repo-root)` + call `connect_db(settings.mongodb_uri)`
+    (get_db returns None otherwise).
+  - Seed data: `mongodump` of local rankengine DB -> `seed/dump` (165MB,
+    gitignored; excludes `app_settings` + `gsc_credentials` = no secrets).
+    3 jobs: zuigo.ai (24pg), fluidcontrols.com `6294eef9` (261pg, full audits)
+    + a 2nd fluidcontrols `1c460760`. Config via `python -c` script expected
+    key=value lines; plain `split("=")` readers can fail on trailing/odd chars
+    (used regex `^KEY=(.+)$`).
+  - Live-verified on port 8002 (8001 busy with launchd): health ok, sites list
+    = 3, vectors 72+500+500 indexed (Gemini 429 -> hash fallback, still indexes),
+    overview/insights(9)/competitors/report tabs render, live Groq chat answered
+    "261 pages, grade D" with 7 clean bullets (no raw pipes/asterisks), zero
+    console errors, idempotent second `up` (seed one-shots stay exited,
+    `restart: "no"`, app/worker `unless-stopped`). README has a Docker demo
+    section. Full reset: `cd deploy/demo && docker compose down -v && up -d --build`.
+- UI round 3 (`012dd05`, pushed; backend prompt change -> server restarted via launchd):
 - UI round 3 (`012dd05`, pushed; backend prompt change -> server restarted via launchd):
   - Screen fit: left rail appears >=1024px (was >=1100) and the top tab strip is
     `display:none` >=1024px (the rail's 13-button nav — active state + badges — is the
