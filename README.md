@@ -46,6 +46,37 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8001
 
 Open http://localhost:8001, enter a URL, and analyze.
 
+## Docker demo (zero-setup, seeded data)
+
+The fastest way to demo the app. Includes MongoDB + Redis + a pre-loaded
+analysis (fluidcontrols.com 261 pages + zuigo.ai) and a Chroma index, so every
+tab has data before the first crawl.
+
+```bash
+cd deploy/demo
+cp .env.docker.example .env.docker   # paste real API keys (optional, see below)
+docker compose up -d --build         # first run seeds the DB (~1-2 min)
+open http://localhost:8001           # or: DEMO_PORT=8080 docker compose up -d
+```
+
+What happens on first `up`:
+1. `mongodb` + `redis` start, `mongo-seed` restores the demo dump
+   (`seed/` at the repo root — gitignored, re-generate with `mongodump`).
+2. `seed-vectors` rebuilds the Chroma semantic index for the seeded jobs
+   (exit code 0 required before `app` starts).
+3. `app` (FastAPI + frontend, port `8001`) and `worker` (Arq) start.
+
+Later `up`s are no-ops for the seed services. Full reset:
+`docker compose down -v && docker compose up -d --build`.
+
+Demo keys: paste into `deploy/demo/.env.docker`. Without a `GROQ_API_KEY` chat
+runs simulated; without `GEMINI_API_KEY` new crawls fall back to hash
+embeddings (seeded chat search already works). `SE_RANKING_API_KEY` / `SERP_API_KEY`
+power the SEO Insights tab for new analyses.
+
+Note: the demo image contains real customer analysis data by design (the seeded
+sites). Don't distribute the image or the `seed/` folder outside your machine.
+
 ## Environment Variables
 
 See `.env.example`:

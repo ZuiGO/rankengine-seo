@@ -1,0 +1,17 @@
+.git
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.env
+.env.docker
+seed/
+chroma_data/
+downloads/
+logs/
+dummy_site/
+node_modules/
+.DS_Store
+.idea/
+.vscode/

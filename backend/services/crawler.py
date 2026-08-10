@@ -335,7 +335,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
         browser = None
         if use_playwright:
             async with _chromium_slots:
-                browser = await pw.chromium.launch(headless=True)
+                browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
 
         crawled = 0
         while queue and crawled < ceiling:
@@ -393,7 +393,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
         if mobile and use_playwright:
             try:
                 async with _chromium_slots:
-                    mobile_browser = await pw.chromium.launch(headless=True)
+                    mobile_browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
                     iphone = pw.devices["iPhone 13"]
                     mobile_sem = asyncio.Semaphore(settings.mobile_crawl_concurrency)
                     mobile_lock = asyncio.Lock()

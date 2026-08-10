@@ -1,0 +1,84 @@
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  env_file: .env.docker
+  depends_on:
+    mongodb:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  volumes:
+    - chroma:/app/chroma_data
+    - downloads:/app/downloads
+    - logs:/app/logs
+
+services:
+  mongodb:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  mongo-seed:
+    image: mongo:7
+    volumes:
+      - ../../seed:/seed:ro
+    command: mongorestore --host mongodb:27017 --nsInclude="rankengine.*" --drop /seed/dump
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: "no"
+
+  seed-vectors:
+    <<: *app
+    command: python scripts/seed_demo.py
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      mongo-seed:
+        condition: service_completed_successfully
+    restart: "no"
+
+  app:
+    <<: *app
+    ports:
+      - "${DEMO_PORT:-8001}:8000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo-seed:
+        condition: service_completed_successfully
+      seed-vectors:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: python -m arq backend.worker.WorkerSettings
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongo-seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  chroma:
+  downloads:
+  logs:

@@ -36,3 +36,7 @@ htmlcov/
 # Playwright
 playwright-report/
 test-results/
+
+# Docker demo (contains real DB dump)
+.env.docker
+seed/
