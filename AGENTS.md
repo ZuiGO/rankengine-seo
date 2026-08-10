@@ -10,7 +10,27 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: truthfulness round — redirects/unchecked/keywords/competitors/duplicates — committed d9690ce)
+## Status (last update: competitor re-run: swagelok/parker/tu-lok/divineengg/stauff reports — committed 1e3e11f)
+- REAL BUG FIXED (found mid-run): `crawler.py::fetch_page_text` referenced undefined
+  `REQUEST_TIMEOUT` (NameError) — every plain-fetch fallback crashed, so ALL
+  competitor crawls died with "Competitor crawl returned no pages" and the first
+  batch (5x) errored out. Fixed: `REQUEST_TIMEOUT = 15` module constant.
+- Timed-out giant crawls now produce HONEST partial reports instead of dead
+  errors: `audit_competitors` outer wait was the same 1200s as the crawl cap, so
+  the whole audit died (and deleted the ephemeral job) right when a big crawl hit
+  its cap. Now `competitor_audit_headroom_seconds = 2400` (config) extends the
+  outer budget to crawl-cap + analysis headroom; the inner crawl cap still
+  interrupts at 1200s and `_analyze_one` proceeds with the crawled slice
+  (`status: partial`, pages_analyzed, "[crawl] timed out ... partial data").
+- Re-ran competitor analyses on `6294eef9` (fluidcontrols.com) after clearing all
+  rows: swagelok.com completed (400 pages), parker.com blocked (robots 403),
+  tu-lok.com partial (163 pages, crawl cap), divineengg.in completed (68),
+  stauff.com completed (400). `/report` returns all 5; SEO Insights tracked
+  competitors = exactly these 5 (CACHE_VERSION 14 -> 15). Playwright: 5 cards,
+  zero console errors.
+- Ops note: after a worker kickstart arq may re-queue interrupted tasks — flush
+  `arq:*` redis keys before re-enqueueing to avoid duplicate concurrent audits.
+- (Earlier: truthfulness round committed `d9690ce`; report/links round `fe8c9a5`.)
 - Links tab redirects made honest: "Ends in redirect (301/302)" (true 3xx bucket,
   was 0 for live job) split from "Followed redirects" (links that redirected then
   resolved, was 152 — previously shown under a "301/302" label). All Links table
