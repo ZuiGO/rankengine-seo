@@ -154,7 +154,7 @@ body {
 .main {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 40px 24px 72px;
+  padding: clamp(24px, 3vw, 40px) clamp(16px, 3vw, 28px) 72px;
 }
 
 .input-section {
@@ -495,10 +495,10 @@ body {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 26px;
-  overflow-x: auto;
   padding-bottom: 0;
 }
 
@@ -902,7 +902,7 @@ body {
 .chat-panel {
   width: 390px;
   max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 100px);
+  max-height: min(460px, calc(100vh - 96px));
   background: var(--card);
   border-radius: 16px;
   box-shadow: 0 20px 50px rgba(16, 24, 40, 0.28);
@@ -1029,6 +1029,27 @@ body {
   margin-left: auto;
   border-bottom-right-radius: 4px;
 }
+
+.chat-render { white-space: normal; word-wrap: break-word; }
+.chat-render p { margin: 6px 0; }
+.chat-render ul.chat-bullets,
+.chat-render ol.chat-bullets { margin: 6px 0; padding-left: 18px; }
+.chat-render li { margin: 3px 0; }
+.chat-render strong { font-weight: 700; }
+.chat-collapse { margin-top: 8px; }
+.chat-collapse summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  user-select: none;
+  list-style: none;
+}
+.chat-collapse summary::-webkit-details-marker { display: none; }
+.chat-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-top: 6px; }
+.chat-table th,
+.chat-table td { padding: 4px 6px; border: 1px solid var(--border-soft); text-align: left; vertical-align: top; }
+.chat-table th { background: var(--surface); font-weight: 700; }
 
 .chat-input-group {
   display: flex;
@@ -2090,7 +2111,7 @@ body {
   position: sticky;
   top: 84px;
   align-self: start;
-  max-height: calc(100vh - 100px);
+  max-height: calc(100vh - 96px);
   overflow-y: auto;
   flex-direction: column;
   gap: 14px;
@@ -2280,22 +2301,23 @@ body {
 }
 
 /* Grid breakpoints + docked chat */
-@media (min-width: 1100px) {
-  .dashboard-grid { grid-template-columns: 232px minmax(0, 1fr); align-items: start; }
+@media (min-width: 1024px) {
+  .dashboard-grid { grid-template-columns: minmax(176px, 206px) minmax(0, 1fr); align-items: start; }
   .left-rail { display: flex; }
+  .tabs { display: none; }
 }
-@media (min-width: 1360px) {
-  .dashboard-grid { grid-template-columns: 232px minmax(0, 1fr) 308px; }
+@media (min-width: 1280px) {
+  .dashboard-grid { grid-template-columns: minmax(176px, 206px) minmax(0, 1fr) minmax(264px, 288px); }
   .right-rail { display: flex; }
   body.app-wide .chat-widget { position: static; }
   body.app-wide .chat-widget .chat-toggle { font-size: 12px; padding: 7px 14px; }
   body.app-wide .chat-widget .chat-panel {
     width: 100%;
     max-width: none;
-    max-height: 380px;
+    max-height: min(400px, calc(100vh - 190px));
     margin-top: 8px;
   }
-  body.app-wide .chat-widget .chat-box { height: 320px; }
+  body.app-wide .chat-widget .chat-box { height: min(320px, calc(100vh - 280px)); }
 }
 
 /* Crawl dashboard: phase chips + live stats */

@@ -50,6 +50,15 @@ AI_SEO_GUIDANCE = """AI-search (AEO/GEO) guidance (vendored from the ai-seo skil
   site without rendering JavaScript; opaque pricing gets filtered out of AI-mediated purchases.
 - Semantic HTML (main/article/nav, labelled controls) makes pages agent-accessible."""
 
+CHAT_FORMAT_RULE = (
+    "\n\nFormatting rules for the chat panel:\n"
+    "- Answer in plain text with short sentences.\n"
+    "- Start with one verdict sentence, then at most 8 dash bullets ('- ').\n"
+    "- Put numbers inline inside the bullet text (e.g. '- Pages crawled: 261; broken links: 25').\n"
+    "- NEVER use markdown tables, pipe characters, or **bold** asterisks.\n"
+    "- If a full breakdown table is genuinely useful, summarise it in bullets instead.\n"
+)
+
 SYSTEM_PROMPT = """You are an SEO analysis assistant. Answer questions about the crawled website based on the provided context.
 
 Rules:
@@ -59,7 +68,7 @@ Rules:
 - Reference specific URLs and content types when relevant.
 - When answering questions about backlinks, keyword rankings, or domain metrics, use the "External SEO Insights" section of the context.
 
-""" + SEO_AUDIT_GUIDANCE + "\n" + PROGRAMMATIC_SEO_GUIDANCE + "\n" + AI_SEO_GUIDANCE
+""" + CHAT_FORMAT_RULE + SEO_AUDIT_GUIDANCE + "\n" + PROGRAMMATIC_SEO_GUIDANCE + "\n" + AI_SEO_GUIDANCE
 
 SECTION_PROMPTS = {
     "overview": (
@@ -540,7 +549,7 @@ GENERAL_SYSTEM_PROMPT = (
     "programmatic-SEO at scale, AI-search (AEO/GEO) readiness, and how to use the ZuiGO Engine app. "
     "Be concise, practical, and accurate. If the question "
     "is about a specific analyzed website, ask the user to open that site in ZuiGO Engine first.\n\n"
-    + SEO_AUDIT_GUIDANCE + "\n" + PROGRAMMATIC_SEO_GUIDANCE + "\n" + AI_SEO_GUIDANCE
+    + CHAT_FORMAT_RULE + SEO_AUDIT_GUIDANCE + "\n" + PROGRAMMATIC_SEO_GUIDANCE + "\n" + AI_SEO_GUIDANCE
 )
 
 

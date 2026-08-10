@@ -291,7 +291,7 @@ function pushActivity(severity, text) {
 }
 
 function applyRailMode() {
-  const wide = window.matchMedia("(min-width: 1360px)").matches;
+  const wide = window.matchMedia("(min-width: 1280px)").matches;
   document.body.classList.toggle("app-wide", wide);
   const chat = document.getElementById("chat-widget");
   if (!chat) return;
@@ -307,7 +307,7 @@ function applyRailMode() {
 
 buildRailNav();
 applyRailMode();
-const railModeQuery = window.matchMedia("(min-width: 1360px)");
+const railModeQuery = window.matchMedia("(min-width: 1280px)");
 if (railModeQuery.addEventListener) railModeQuery.addEventListener("change", applyRailMode);
 else railModeQuery.addListener(applyRailMode);
 
@@ -2080,7 +2080,7 @@ document.getElementById("chat-form").addEventListener("submit", async e => {
     if (!resp.ok) {
       messages.innerHTML += `<div class="chat-message bot">Error: ${escapeHtml(data.detail || ("Service error (" + resp.status + ")"))}</div>`;
     } else {
-      messages.innerHTML += `<div class="chat-message bot">${escapeHtml(data.reply)}</div>`;
+      messages.innerHTML += `<div class="chat-message bot"><div class="chat-render">${renderBotReply(data.reply)}</div></div>`;
     }
     messages.scrollTop = messages.scrollHeight;
   } catch (err) {
@@ -3793,3 +3793,54 @@ async function restoreFromHash() {
 
 window.addEventListener("hashchange", restoreFromHash);
 document.addEventListener("DOMContentLoaded", restoreFromHash);
+
+function formatInline(s) {
+  return s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+          .replace(/(https?:\/\/[^\s<>"']+)/g, m => `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
+}
+
+function renderBotBlock(lines) {
+  const out = [];
+  let group = [];
+  const flush = () => {
+    if (!group.length) return;
+    const bullet = /^\s*[-*] /.test(group[0]);
+    const items = group.map(l => {
+      const item = bullet ? l.replace(/^\s*[-*] /, "") : l.replace(/^\d+\.\s/, "");
+      return `<li>${formatInline(item)}</li>`;
+    }).join("");
+    out.push(`<${bullet ? "ul" : "ol"} class="chat-bullets">${items}</${bullet ? "ul" : "ol"}>`);
+    group = [];
+  };
+  for (const line of lines) {
+    if (/^\s*[-*] /.test(line) || /^\d+\.\s/.test(line)) {
+      group.push(line);
+    } else if (/^\s*#{1,3}\s/.test(line)) {
+      flush();
+      out.push(`<p class="chat-head"><strong>${formatInline(line.replace(/^\s*#{1,3}\s*/, ""))}</strong></p>`);
+    } else {
+      flush();
+      out.push(`<p>${formatInline(line)}</p>`);
+    }
+  }
+  flush();
+  return out.join("");
+}
+
+function renderBotReply(text) {
+  const raw = String(text || "").replace(/[\u202F\u00A0]/g, " ").replace(/\r\n/g, "\n");
+  const esc = escapeHtml(raw);
+  const blocks = esc.split(/\n{2,}/);
+  return blocks.map(block => {
+    const lines = block.split("\n").filter(l => l.trim() !== "");
+    if (lines.length > 1 && lines.every(l => /^\s*\|/.test(l))) {
+      const rows = lines.map(l => l.replace(/^\s*\|\s?/, "").replace(/\s?\|\s*$/, "").split("|").map(c => c.trim().replace(/\*\*/g, "")));
+      const head = rows[0];
+      const body = rows.slice(1);
+      const thead = `<thead><tr>${head.map(c => `<th>${c}</th>`).join("")}</tr></thead>`;
+      const tbody = `<tbody>${body.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>`;
+      return `<details class="chat-collapse"><summary>Full breakdown</summary><div class="table-container"><table class="chat-table">${thead}${tbody}</table></div></details>`;
+    }
+    return renderBotBlock(lines);
+  }).join("");
+}
