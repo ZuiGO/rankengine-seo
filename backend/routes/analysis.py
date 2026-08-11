@@ -268,13 +268,21 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
             from backend.services.programmatic_seo import audit_programmatic_seo
             return await audit_programmatic_seo(job_id)
 
+        async def _smart_keywords():
+            await _progress("Extracting smart keywords...")
+            from backend.services.keyword_engine import get_smart_keywords
+            kws = await get_smart_keywords(job_id, max_total=40, use_llm=True, rebuild=True)
+            return {"count": len(kws)}
+
         w2 = dict(await asyncio.gather(*[
             _stage("action_analysis", _action_analysis, fallback=None),
             _stage("geo_alignment", _geo_alignment, fallback={}),
             _stage("programmatic_seo", _programmatic_seo, fallback={}),
+            _stage("keywords", _smart_keywords, fallback={"count": 0}),
             _stage("vectors", _vectors, fallback=0),
         ]))
         vector_count = w2["vectors"]
+        keyword_count = w2["keywords"].get("count", 0)
         geo_off_topic = w2["geo_alignment"].get("off_topic_pages", 0)
         programmatic = w2["programmatic_seo"]
 
@@ -309,6 +317,7 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                     "total_external_occurrences": summary.get("total_external_occurrences", summary.get("total_external_links", 0)),
                     "total_content_items": content_count,
                     "total_vectors": vector_count,
+                    "total_smart_keywords": keyword_count,
                     "total_user_flows": flow_count,
                     "total_backlinks": backlink_count,
                     "failed_urls_count": summary.get("failed_urls_count", 0),

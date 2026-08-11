@@ -10,7 +10,50 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: bigger chatbot + Docker demo stack; committed `353b72b`, pushed)
+## Status (last update: keyword relevance round — canonicalization, phrase scoring, intent gates, job_keywords cache; 373/373 tests; committed, pushed)
+- KEYWORD RELEVANCE ROUND (committed; backend change -> server/worker restarted via launchd):
+  - `keyword_engine.py`: `canonicalize()` merges near-duplicates via snowball stems
+    ("Double Ferrule Fittings" == "double-ferrule-fittings" == "double ferrule fitting");
+    `corpus_ngrams` ranked by count x sum-of-token-IDF (sitewide nav phrases like
+    "industrial fittings" lose to product-specific ones); `_passes_intent` gate rejects
+    stopword/modifier/nav boundaries, number+unit tokens (`10mm`, `40bar`; material grades
+    like 316/316l survive), nav-only combos; `apply_modifiers` skips modifier-word cores
+    ("india india" dies, "union manufacturer" survives); GREEDY_SLUGS extended (services/
+    values/vision/mission/history/leadership/press/media/events/testimonials/support);
+    multi-word cores outrank single-word ones (`_core_score` = weight x 1.8 for >=2 words).
+  - `job_keywords` collection (NEW): versioned cache (`KEYWORD_CACHE_VERSION` = 4) written
+    once per analysis; `get_smart_keywords(rebuild=True)` in the pipeline wave2 `keywords`
+    stage (`use_llm=True` once per NEW job). All consumers (`fetch_all_insights` merge,
+    `run_serp_rankings`, suggested-keywords, chat, competitors) slice the SAME ranked list;
+    cache hit is ~0.0007s vs ~2.5s build and removes repeated SE Ranking spend.
+  - `llm_polish`: fact-anchored (candidates must share >=2 tokens with a seed or appear
+    verbatim in corpus text), one retry on unparseable output. ROOT CAUSE FIXED: Groq
+    gpt-oss-120b burned the whole 512-token budget on reasoning (`finish: length`,
+    `reasoning_tokens=510`) with long seed lists -> empty content; now max_tokens=2048 +
+    seeds capped at 40, and base list reserves slots so LLM extras aren't truncated.
+  - `keyword_extractor.py`: weighted fields (title 3x, meta 2x, URL slug 2x, body 1x) +
+    2-3 gram phrase scoring with token-IDF prior; all callers keep `(job_id, top_k)` API.
+  - `seo_insights.py` CACHE_VERSION 15 -> 16; sites hard-delete cascade gains `job_keywords`;
+    analysis summary gains `total_smart_keywords`.
+  - New `backend/tests/test_keyword_relevance.py` (19 tests: canonical merge, intent gates,
+    idf-prior ranking, modifier-core gate, weighted extraction, cache build/hit/version/
+    rebuild with no-SE-spend assertion, LLM fact-anchor accept/reject/corpus-verbatim);
+    `test_suggestions.py::test_common_terms_ranked` updated (phrases now outrank the bare
+    unigram — old test asserted unigram-only behavior). Full suite 354 -> 373.
+  - Live-verified on fluidcontrols `6294eef9`: top-20 now real product phrases (male elbow,
+    pipe clips, ball valves, drain valve, flow series, union cross/elbow, coupling cap,
+    gauge valves) — corporate junk (services, fc values/vision/mission) gone; suggested-
+    keywords returns 45 incl. 25 LLM purchase terms ("globe isolation valve price",
+    "compact non return valve manufacturer india"); insights refresh (v16) = 22 keywords,
+    12 site-derived prepended, source "se-ranking+site"; Playwright SEO Insights tab zero
+    console errors.
+- TINY FIX (committed with this round): crawl screen leaked the previous audit's stats — `showProgress()`
+  never reset `#cs-pages` ("pages crawled" kept the old job's count until the first poll
+  tick). Now resets to "0" and also empties the rail Live-activity feed (old crawl events
+  cleared, then the new "Analysis queued" entry pushes). Verified: node --check clean;
+  Playwright end-to-end (2 real crawls submit+complete, second submit shows reset, jobs
+  hard-deleted, zero console errors) + injected-stale-state check (cs-pages 261 + 2 feed
+  items -> showProgress() -> "0" + empty feed). Frontend-only, no server restart needed.
 - Bigger chatbot + fresh Docker demo (`353b72b`, pushed; no backend logic change
   except crawler.py no-sandbox):
   - Chatbot: floating panel 390 -> 520px wide, chat-box 420 -> 560px tall (also

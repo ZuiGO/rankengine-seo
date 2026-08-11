@@ -175,9 +175,9 @@ class TestKeywordExtractor:
             "colombia coffee beans price per kilo coffee",
         ]
         keywords = extract_keywords_from_docs(docs, top_k=5)
-        assert "coffee" in keywords
-        assert "colombia" in keywords
-        assert "beans" in keywords
+        assert any("coffee" in k for k in keywords)
+        assert any("colombia" in k for k in keywords)
+        assert any("beans" in k for k in keywords)
 
     def test_singletons_excluded(self):
         docs = ["coffee beans", "tea leaves", "juice bottles"]

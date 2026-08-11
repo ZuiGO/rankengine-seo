@@ -2109,6 +2109,11 @@ function showProgress() {
   if (csElapsed) csElapsed.textContent = "0:00";
   const csLast = document.getElementById("cs-last");
   if (csLast) csLast.textContent = "—";
+  const csPages = document.getElementById("cs-pages");
+  if (csPages) csPages.textContent = "0";
+  if (railActivityEl) {
+    railActivityEl.innerHTML = '<p class="rail-empty">Crawl events, alerts and lifecycle messages will appear here.</p>';
+  }
   updateCrawlPhase("queued", "");
   pushActivity("info", "Analysis queued for " + (resultsUrl.textContent || "this site") + ".");
 }
