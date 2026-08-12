@@ -149,6 +149,9 @@ async def check_links(job_id: str) -> dict:
 
         tasks = [limited(u) for u in unique_urls]
         for i, outcome in enumerate(asyncio.as_completed(tasks)):
+            if i % 20 == 0:
+                from backend.services.job_cancel import check_cancelled
+                await check_cancelled(job_id)
             try:
                 res = await outcome
             except Exception as e:

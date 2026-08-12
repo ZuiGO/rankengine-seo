@@ -17,6 +17,7 @@ from backend.services.content_downloader import download_content, probe_content
 from backend.services.seo_analyzer import analyze_content_item
 from backend.services.page_classifier import classify_page_type, page_role
 from backend.services.url_normalizer import normalize_url
+from backend.services.job_cancel import check_cancelled
 
 logger = get_logger("crawler")
 
@@ -132,6 +133,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
     logger.info("Crawl ceiling job=%s ceiling=%s sitemap=%s unlimited=%s", job_id, ceiling, len(sitemap_urls), unlimited)
 
     async def update_progress(crawled: int, msg: str):
+        await check_cancelled(job_id)
         await db.analysis_jobs.update_one(
             {"_id": job_id},
             {"$set": {
@@ -339,6 +341,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
 
         crawled = 0
         while queue and crawled < ceiling:
+            await check_cancelled(job_id)
             batch_size = min(concurrency, ceiling - crawled)
             batch = queue[:batch_size]
             queue[:] = queue[concurrency:]
@@ -389,6 +392,7 @@ async def crawl_site(job_id: str, target_url: str, max_pages: int | None = None,
         if browser is not None:
             await browser.close()
 
+        await check_cancelled(job_id)
         mobile_ok = 0
         if mobile and use_playwright:
             try:

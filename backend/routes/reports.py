@@ -817,9 +817,9 @@ async def email_report_route(job_id: str, req: EmailReportRequest):
         raise HTTPException(400, "Provide a valid recipient email address")
     from backend.services.notifications import email_report
 
-    ok = await email_report(job_id, to)
+    ok, error = await email_report(job_id, to)
     if not ok:
-        raise HTTPException(502, {"error": "Could not send report email (SMTP not configured or render failed)"})
+        raise HTTPException(502, {"error": error or "Could not send report email"})
     return {"status": "sent", "job_id": job_id, "to": to}
 
 

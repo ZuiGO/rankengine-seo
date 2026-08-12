@@ -42,15 +42,22 @@ def _send_sync(cfg: dict, to: str, subject: str, body: str, attachment: tuple[st
     if attachment:
         filename, payload = attachment
         msg.add_attachment(payload, maintype="application", subtype="pdf", filename=filename)
-    if cfg.get("use_tls", True):
+    port = int(cfg.get("port") or 587)
+    if port == 465:
         context = ssl.create_default_context()
-        with smtplib.SMTP(cfg["host"], int(cfg.get("port") or 587), timeout=20) as server:
+        with smtplib.SMTP_SSL(cfg["host"], port, timeout=20, context=context) as server:
+            if cfg.get("user") and cfg.get("password"):
+                server.login(cfg["user"], cfg["password"])
+            server.send_message(msg)
+    elif cfg.get("use_tls", True):
+        context = ssl.create_default_context()
+        with smtplib.SMTP(cfg["host"], port, timeout=20) as server:
             server.starttls(context=context)
             if cfg.get("user") and cfg.get("password"):
                 server.login(cfg["user"], cfg["password"])
             server.send_message(msg)
     else:
-        with smtplib.SMTP(cfg["host"], int(cfg.get("port") or 587), timeout=20) as server:
+        with smtplib.SMTP(cfg["host"], port, timeout=20) as server:
             if cfg.get("user") and cfg.get("password"):
                 server.login(cfg["user"], cfg["password"])
             server.send_message(msg)
@@ -71,23 +78,37 @@ async def send_email(to: str, subject: str, body: str, attachment: tuple[str, by
         return False
 
 
-async def email_report(job_id: str, to: str) -> bool:
-    """Render the branded PDF report for a job and email it."""
+async def try_send_email(to: str, subject: str, body: str, attachment: tuple[str, bytes] | None = None) -> tuple[bool, str | None]:
+    """Like send_email but returns (sent, error_message) with the real failure reason."""
+    cfg = await get_smtp_config()
+    if not cfg.get("host"):
+        return False, "SMTP host not configured. Add it in Settings → Email."
+    try:
+        await asyncio.to_thread(_send_sync, cfg, to, subject, body, attachment)
+        logger.info("Email sent to=%s subject=%s", to, subject)
+        return True, None
+    except Exception as e:
+        logger.warning("Email send failed to=%s: %s", to, e)
+        return False, str(e)
+
+
+async def email_report(job_id: str, to: str) -> tuple[bool, str | None]:
+    """Render the branded PDF report for a job and email it. Returns (sent, error_message)."""
     from backend.routes.reports import _report_html, _render_pdf
     from backend.db.mongo import get_db
 
     db = get_db()
     job = await db.analysis_jobs.find_one({"_id": job_id})
     if not job:
-        return False
+        return False, "Job not found"
     html = await _report_html(job_id)
     if isinstance(html, dict):
-        return False
+        return False, "Report rendering failed"
     pdf = await _render_pdf(html)
     if pdf is None:
-        return False
+        return False, "PDF rendering failed"
     domain = (job.get("url") or "").split("//")[-1].split("/")[0]
-    return await send_email(
+    return await try_send_email(
         to,
         f"[ZuiGO Engine] SEO report for {domain}",
         f"Hi,\n\nYour SEO report for {job.get('url')} is ready.\n\nThe PDF report is attached.\n\n— ZuiGO Engine",

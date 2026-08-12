@@ -10,7 +10,77 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: keyword relevance round — canonicalization, phrase scoring, intent gates, job_keywords cache; 373/373 tests; committed, pushed)
+## Status (last update: clean Analyze/screens + landing "Past analyses" round + email-hardening + stop-analysis round — virtual-card cooldown variant 2026-08-12; 389/389 tests; pending commit)
+- CLEAN-SCREENS ROUND (rails/landing, committed summary below):
+  - `setDashboardVisible(visible)` toggles `#dashboard-grid.hidden` + `body.no-dashboard`;
+    Analyze page, crawl screen and `/app` with no job are clean; results view and jobless
+    Sites view show the dashboard. `body.jobless` hides `#tabs` + `#rail-nav` (jobless
+    "Past Analyses" header = `#results-*` + Sites tab without the tab strip).
+  - Bare-tab hash routing: `restoreFromHash()` handles `#sites` -> `openPastAnalyses()`
+    (loadSites + jobless header "Past Analyses"). Landing nav + CTA "Past analyses"
+    link to `/app#sites` — no real job data on the public landing.
+  - Chat widget now floats **bottom-right** for all non-docked states
+    (`position:fixed; bottom:24px; right:24px`; panel `margin-bottom:10px`,
+    `transform-origin:bottom right`) — old `top:76px` overlapped the Analyze header
+    and the landing CTA. Docked (>=1280 + job open, `body.app-wide`) restores
+    `margin-top:8px` / `transform-origin:top right`.
+  - Verified: clean-screens suite + 375/1024/1280/1440 viewport suite, zero console
+    errors; crawled example.org end-to-end, jobs hard-deleted after.
+- EMAIL-ROUND (backend + frontend):
+  - `notifications.py`: `_send_sync` branches port 465 -> `smtplib.SMTP_SSL` (implicit
+    TLS), else STARTTLS (default) or plain; NEW `try_send_email(to, subject, body,
+    attachment) -> (sent: bool, error: str|None)` returning the REAL failure reason;
+    `email_report()` returns `(bool, error)` with per-step messages (Job not found /
+    Report rendering failed / PDF rendering failed).
+  - `routes/reports.py` `POST /{job_id}/email`: 502 body `{"error": <real reason>}`.
+  - `routes/app_settings.py`: `SmtpTestRequest{to}` + `POST /api/settings/smtp/test`
+    -> `{sent, error}` (unconfigured -> "SMTP host not configured. Add it in
+    Settings → Email."). Frontend Settings → Email: `#smtp-test-to` + `#smtp-test-send`
+    + `#smtp-test-status` + `#smtp-test-error` (renders real reason); report-email
+    handler unwraps `data.detail.error`.
+  - Gmail ready: host smtp.gmail.com port 587, app password (16-char), STARTTLS;
+    stored DB-first in `app_settings` key `smtp` (Settings tab), `.env` fallback.
+- STOP-ANALYSIS ROUND (cooperative cancellation + purge):
+  - `services/job_cancel.py` (NEW): `JobCancelled(job_id)` + `check_cancelled(job_id)`
+    — reads `cancelled:true` flag OR status `cancelled` on the analysis_jobs doc;
+    NEVER raises on DB/network errors (best-effort; tests pass a fake DB).
+  - `services/job_cleanup.py` (NEW): `hard_delete_job(job_id)` — full cascade
+    extracted from sites.py hard-delete (JOB_COLLECTIONS rows by job_id +
+    target_job_id, child competitor analysis_jobs docs `$in` deleted, their rows,
+    crawl_schedules history `$pull`, Chroma `job_{id}`, dummy_site/downloads dirs).
+    sites.py hard-delete now calls it.
+  - Checkpoints: crawler (update_progress tick, batch-loop top, after browser.close
+    before mobile phase), link_checker (every 20 links), analysis pipeline start,
+    `_progress()` / `_stage()` re-raise; `except JobCancelled` in the pipeline:
+    marks `status=cancelled` + "Cancelled by user" + completed_at, purges via
+    `hard_delete_job` (guarded), sends NO alert emails.
+  - `POST /api/analysis/{job_id}/cancel`: 404 missing; 409 unless queued|running;
+    sets flag + cancelled_at + "Cancelling...", `log_audit("analysis_cancelled")`.
+  - Frontend: `#stop-analysis-btn` (btn-danger "Stop") + `#stop-analysis-note` on the
+    progress card; `stopCurrentAnalysis()` (disables, "Stopping..."); `pollJob`
+    handles `status==="cancelled"` AND `resp.status===404` (purge race) ->
+    `showCancelledCard()`; card: "Analysis Cancelled", `.status-cancelled` badge,
+    button flips to btn-secondary "Back to Analyze" (RE-ENABLES disabled state,
+    onclick -> `#new-analysis-btn`). CSS: `.btn-danger`, `.progress-actions`,
+    `.status-cancelled`.
+  - Tests: `backend/tests/test_cancel.py` (16: check_cancelled x4, cancel endpoint
+    x5 incl 404/409, pipeline pre-cancelled purge x1, hard_delete_job cascade incl
+    child jobs x1, smtp x5: 465->SMTP_SSL, 587->starttls, error surfacing,
+    unconfigured, test endpoint). FakeDb `__getitem__` + `_coll`-namespaced store.
+    Full suite 373 -> 389. node --check clean.
+- Live-verified (2026-08-12, Playwright 1440): SMTP test UI shows real error when
+  unconfigured; mid-crawl Stop -> "Analysis Cancelled" card -> job 404 after purge ->
+  no trace in /api/sites -> Back to Analyze clean screen; zero console errors except
+  the EXPECTED one 404 poll tick after purge (frontend handles it; inherent to the
+  delete-on-cancel design). Viewports 375/1280: no overflow, stop button visible.
+- OPS: launchd server/worker restarted with new code. Docker demo re-pinned to
+  8002 (`DEMO_PORT=8002 docker compose up -d --build app` from deploy/demo) — the
+  demo compose default `${DEMO_PORT:-8001}` had squatted the dev server's 8001 after
+  a plain `up`; keep demo on 8002 (8001 stays the launchd dev server). Demo health
+  ok on 8002.
+- Live sites on 8001: `cced02d1-8a39-41b9-a523-9489231d823b` (zuigo.ai),
+  `6294eef9-1f42-4974-babb-170165f7736f` + `1c460760-4214-4597-8fc8-98a868a6be44`
+  (fluidcontrols.com x2).
 - KEYWORD RELEVANCE ROUND (committed; backend change -> server/worker restarted via launchd):
   - `keyword_engine.py`: `canonicalize()` merges near-duplicates via snowball stems
     ("Double Ferrule Fittings" == "double-ferrule-fittings" == "double ferrule fitting");
@@ -1108,6 +1178,9 @@ curl -s localhost:8001/api/health
 ```
 
 ## Next up (candidate work, NOT started)
+- Configure real Gmail SMTP in Settings → Email (app `app_settings` key `smtp`):
+  host smtp.gmail.com, port 587, app password, use_tls true; then verify test-send +
+  report-email end-to-end (both endpoints now surface real failure reasons).
 - UI follow-ups from round 2 (deferred deliberately): keyboard shortcuts (e.g.
   tab-jump keys, Ctrl/Cmd+K to focus search on Pages); Pages/Links status-chip
   click filters (needs the API to accept a status filter or adds a param);

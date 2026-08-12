@@ -121,12 +121,14 @@ form.addEventListener("submit", async e => {
 newBtn.addEventListener("click", () => {
   stopPolling();
   currentJobId = null;
+  document.body.classList.remove("jobless");
   history.replaceState(null, "", location.pathname + location.search);
   resultsSection.classList.add("hidden");
   inputSection.classList.remove("hidden");
   urlInput.value = "";
   analyzeBtn.disabled = false;
   analyzeBtn.textContent = "Analyze";
+  setDashboardVisible(false);
 });
 
 // Tab switching
@@ -290,18 +292,27 @@ function pushActivity(severity, text) {
   }
 }
 
+function setDashboardVisible(visible) {
+  const grid = document.getElementById("dashboard-grid");
+  if (!grid) return;
+  grid.classList.toggle("hidden", !visible);
+  document.body.classList.toggle("no-dashboard", !visible);
+  applyRailMode();
+}
+
 function applyRailMode() {
-  const wide = window.matchMedia("(min-width: 1280px)").matches;
+  const wide = window.matchMedia("(min-width: 1280px)").matches && !document.body.classList.contains("no-dashboard");
   document.body.classList.toggle("app-wide", wide);
   const chat = document.getElementById("chat-widget");
   if (!chat) return;
   const dock = document.getElementById("chat-dock");
+  const panel = document.getElementById("chat-panel");
   if (wide && dock && chat.parentElement !== dock) {
     dock.appendChild(chat);
-    const panel = document.getElementById("chat-panel");
     if (panel && !chatUserClosed) panel.classList.remove("hidden");
-  } else if (!wide && chat.parentElement !== document.body) {
-    document.body.appendChild(chat);
+  } else if (!wide) {
+    if (chat.parentElement !== document.body) document.body.appendChild(chat);
+    if (panel && document.body.classList.contains("no-dashboard")) panel.classList.add("hidden");
   }
 }
 
@@ -425,6 +436,54 @@ document.getElementById("smtp-settings-save")?.addEventListener("click", async (
   }
 });
 
+document.getElementById("smtp-test-send")?.addEventListener("click", async () => {
+  const toInput = document.getElementById("smtp-test-to");
+  const status = document.getElementById("smtp-test-status");
+  const errBox = document.getElementById("smtp-test-error");
+  const btn = document.getElementById("smtp-test-send");
+  const to = toInput ? toInput.value.trim() : "";
+  if (!to || !to.includes("@")) {
+    if (errBox) {
+      errBox.textContent = "Enter a valid recipient email address first.";
+      errBox.style.display = "block";
+    }
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+  }
+  if (errBox) errBox.style.display = "none";
+  if (status) status.textContent = "";
+  try {
+    const resp = await fetch(`${API_BASE}/settings/smtp/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to }),
+    });
+    const data = await resp.json();
+    if (resp.ok && data.sent) {
+      if (status) status.textContent = "Test email sent — check the inbox.";
+      showToast("Test email sent");
+    } else {
+      if (errBox) {
+        errBox.textContent = "Test email failed: " + (data.error || "Unknown error");
+        errBox.style.display = "block";
+      }
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.textContent = "Test email failed: " + err.message;
+      errBox.style.display = "block";
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Send Test Email";
+    }
+  }
+});
+
 document.getElementById("gsc-settings-save")?.addEventListener("click", async () => {
   const clientId = document.getElementById("gsc-client-id");
   const secret = document.getElementById("gsc-client-secret");
@@ -537,6 +596,10 @@ function stopPolling() {
 async function pollJob(jobId) {
   try {
     const resp = await fetch(`${API_BASE}/analysis/${jobId}`);
+    if (resp.status === 404) {
+      showCancelledCard();
+      return;
+    }
     const job = await resp.json();
 
     progressBar.style.width = `${job.progress || 0}%`;
@@ -580,6 +643,8 @@ async function pollJob(jobId) {
       stopPolling();
       pushActivity("ok", "Analysis completed — opening the dashboard.");
       showResults(jobId);
+    } else if (job.status === "cancelled") {
+      showCancelledCard();
     } else if (job.status === "failed") {
       stopPolling();
       progressTitle.textContent = "Analysis Failed";
@@ -591,8 +656,29 @@ async function pollJob(jobId) {
       showToast("Analysis failed: " + (job.error_message || "Unknown error"));
     }
   } catch (err) {
+    if (err && err.message && /404/.test(err.message)) {
+      showCancelledCard();
+    }
     // keep polling
   }
+}
+
+function showCancelledCard() {
+  stopPolling();
+  const stopBtn = document.getElementById("stop-analysis-btn");
+  const stopNote = document.getElementById("stop-analysis-note");
+  if (stopBtn) {
+    stopBtn.disabled = false;
+    stopBtn.textContent = "Back to Analyze";
+    stopBtn.className = "btn-secondary btn-sm";
+    stopBtn.onclick = () => document.getElementById("new-analysis-btn")?.click();
+  }
+  if (stopNote) stopNote.textContent = "The cancelled analysis and its partial data were removed.";
+  progressTitle.textContent = "Analysis Cancelled";
+  progressMessage.textContent = "You stopped the analysis. Its partial data was removed.";
+  statusBadge.textContent = "cancelled";
+  statusBadge.className = "status-badge status-cancelled";
+  pushActivity("warn", "Analysis cancelled by user.");
 }
 
 function updateCrawlPhase(status, stage) {
@@ -613,8 +699,10 @@ function updateCrawlPhase(status, stage) {
 
 async function showResults(jobId, opts = {}) {
   hideProgress();
+  document.body.classList.remove("jobless");
   resultsSection.classList.remove("hidden");
   inputSection.classList.add("hidden");
+  setDashboardVisible(true);
 
   const summaryResp = await fetch(`${API_BASE}/analysis/${jobId}/summary`);
   const summary = await summaryResp.json();
@@ -1732,7 +1820,10 @@ document.getElementById("report-email-btn")?.addEventListener("click", async () 
       body: JSON.stringify({ to }),
     });
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    if (!resp.ok) {
+      const detail = data.detail && typeof data.detail === "object" ? data.detail.error : data.detail;
+      throw new Error(detail || resp.statusText);
+    }
     showToast(data.message || `Report emailed to ${to}`);
   } catch (err) {
     showToast("Email failed: " + err.message);
@@ -2090,8 +2181,10 @@ document.getElementById("chat-form").addEventListener("submit", async e => {
 
 // Helpers
 function showProgress() {
+  document.body.classList.remove("jobless");
   inputSection.classList.add("hidden");
   progressSection.classList.remove("hidden");
+  setDashboardVisible(false);
   progressBar.style.width = "0%";
   progressMessage.textContent = "Starting...";
   progressTitle.textContent = "Crawling...";
@@ -2111,6 +2204,14 @@ function showProgress() {
   if (csLast) csLast.textContent = "—";
   const csPages = document.getElementById("cs-pages");
   if (csPages) csPages.textContent = "0";
+  const stopBtn = document.getElementById("stop-analysis-btn");
+  if (stopBtn) {
+    stopBtn.textContent = "Stop";
+    stopBtn.className = "btn-danger btn-sm";
+    stopBtn.onclick = stopCurrentAnalysis;
+  }
+  const stopNote = document.getElementById("stop-analysis-note");
+  if (stopNote) stopNote.textContent = "Stops the crawl and removes partial data.";
   if (railActivityEl) {
     railActivityEl.innerHTML = '<p class="rail-empty">Crawl events, alerts and lifecycle messages will appear here.</p>';
   }
@@ -2126,6 +2227,35 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.remove("hidden");
   setTimeout(() => toast.classList.add("hidden"), 3000);
+}
+
+async function stopCurrentAnalysis() {
+  if (!currentJobId) return;
+  const stopBtn = document.getElementById("stop-analysis-btn");
+  if (stopBtn) {
+    stopBtn.disabled = true;
+    stopBtn.textContent = "Stopping...";
+  }
+  try {
+    const resp = await fetch(`${API_BASE}/analysis/${currentJobId}/cancel`, { method: "POST" });
+    if (resp.ok) {
+      progressMessage.textContent = "Cancelling...";
+      showToast("Stopping the analysis…");
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      showToast("Could not stop: " + (data.detail || resp.statusText));
+      if (stopBtn) {
+        stopBtn.disabled = false;
+        stopBtn.textContent = "Stop";
+      }
+    }
+  } catch (err) {
+    showToast("Could not stop: " + err.message);
+    if (stopBtn) {
+      stopBtn.disabled = false;
+      stopBtn.textContent = "Stop";
+    }
+  }
 }
 
 // SEO Insights
@@ -3544,6 +3674,30 @@ function switchTab(name) {
   document.querySelector('.tab[data-tab="' + name + '"]').click();
 }
 
+function openPastAnalyses() {
+  stopPolling();
+  currentJobId = null;
+  hideProgress();
+  resultsSection.classList.remove("hidden");
+  inputSection.classList.add("hidden");
+  resultsUrl.textContent = "Past Analyses";
+  resultsStatus.textContent = "All site audits on this installation — open one for its full dashboard.";
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(tc => tc.classList.add("hidden"));
+  const sitesTab = document.getElementById("tab-sites");
+  if (sitesTab) {
+    sitesTab.classList.remove("hidden");
+    sitesTab.style.animation = "none";
+    void sitesTab.offsetWidth;
+    sitesTab.style.animation = "";
+  }
+  currentTab = "sites";
+  updateRailExplain("sites");
+  document.body.classList.add("jobless");
+  setDashboardVisible(true);
+  loadSites();
+}
+
 async function compareSelected() {
   if (selectedSiteIds.size < 2) return;
   const resp = await fetch(`${API_BASE}/sites/compare`, {
@@ -3780,7 +3934,15 @@ function parseHash() {
 
 async function restoreFromHash() {
   const state = parseHash();
-  if (!state) return;
+  if (!state) {
+    const tab = (window.location.hash || "").replace(/^#/, "");
+    if (tab === "sites") {
+      openPastAnalyses();
+    } else {
+      setDashboardVisible(false);
+    }
+    return;
+  }
   try {
     const resp = await fetch(`${API_BASE}/analysis/${state.jobId}`);
     if (!resp.ok) {

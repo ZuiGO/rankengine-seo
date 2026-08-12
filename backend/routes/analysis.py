@@ -59,6 +59,22 @@ async def start_analysis(req: AnalyzeRequest):
     return {"job_id": job_id, "status": "queued", "url": url, "max_pages": req.max_pages}
 
 
+@router.post("/{job_id}/cancel")
+async def cancel_analysis(job_id: str):
+    db = get_db()
+    job = await db.analysis_jobs.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") not in ("queued", "running"):
+        raise HTTPException(status_code=409, detail=f"Analysis is not running (status: {job.get('status')})")
+    await db.analysis_jobs.update_one(
+        {"_id": job_id},
+        {"$set": {"cancelled": True, "cancelled_at": datetime.utcnow(), "progress_message": "Cancelling..."}},
+    )
+    await log_audit("analysis_cancelled", job_id, {"url": job.get("url")})
+    return {"status": "cancelled", "job_id": job_id}
+
+
 async def run_competitor_pipeline(target_job_id: str, competitors: list[str]):
     from backend.services.competitor_audit import audit_competitors
 
@@ -93,6 +109,8 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
     logger.info("Analysis started job=%s url=%s max_pages=%s", job_id, url, max_pages)
 
     try:
+        from backend.services.job_cancel import check_cancelled, JobCancelled
+        await check_cancelled(job_id)
         await db.analysis_jobs.update_one(
             {"_id": job_id},
             {"$set": {"status": "running", "progress_message": "Starting crawl..."}}
@@ -112,6 +130,8 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         domain = url.split("//")[-1].split("/")[0]
 
         async def _progress(message: str):
+            from backend.services.job_cancel import check_cancelled
+            await check_cancelled(job_id)
             await db.analysis_jobs.update_one(
                 {"_id": job_id},
                 {"$set": {"progress_message": message}}
@@ -123,6 +143,8 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
                 value = await stage()
                 logger.info("Stage %s ok job=%s t=%.1fs", name, job_id, time.monotonic() - started)
                 return name, value
+            except JobCancelled:
+                raise
             except Exception as err:
                 logger.error("Stage %s warning job=%s: %s", name, job_id, err)
                 return name, fallback
@@ -428,6 +450,18 @@ async def run_analysis_pipeline(job_id: str, url: str, max_pages: int = 50):
         except Exception as m_err:
             logger.warning("Report email failed job=%s: %s", job_id, m_err)
 
+    except JobCancelled:
+        logger.info("Analysis cancelled job=%s", job_id)
+        await db.analysis_jobs.update_one(
+            {"_id": job_id},
+            {"$set": {"status": "cancelled", "progress_message": "Cancelled by user", "completed_at": datetime.utcnow()}},
+        )
+        try:
+            from backend.services.job_cleanup import hard_delete_job
+            await hard_delete_job(job_id)
+            logger.info("Cancelled job data purged job=%s", job_id)
+        except Exception as c_err:
+            logger.warning("Cancelled job cleanup failed job=%s: %s", job_id, c_err)
     except Exception as e:
         logger.error("Analysis failed job=%s: %s", job_id, e)
         await log_audit("analysis_failed", job_id, {"error": str(e)})

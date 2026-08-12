@@ -12,6 +12,10 @@ class GscSettingsRequest(BaseModel):
     redirect_uri: str = ""
 
 
+class SmtpTestRequest(BaseModel):
+    to: str
+
+
 def _mask(value: str) -> str:
     if not value:
         return ""
@@ -182,3 +186,15 @@ async def write_smtp_settings(req: SmtpSettingsRequest):
         return await read_smtp_settings()
     await db.app_settings.update_one({"key": "smtp"}, {"$set": {**update, "key": "smtp"}}, upsert=True)
     return await read_smtp_settings()
+
+
+@router.post("/smtp/test")
+async def send_smtp_test(req: SmtpTestRequest):
+    from backend.services.notifications import try_send_email
+
+    sent, error = await try_send_email(
+        req.to.strip(),
+        "[ZuiGO Engine] SMTP test email",
+        "This is a test email from ZuiGO Engine. If you can read this, email is configured correctly.",
+    )
+    return {"sent": sent, "error": error}

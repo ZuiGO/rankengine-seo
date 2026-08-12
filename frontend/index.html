@@ -162,6 +162,10 @@
           <div class="crawl-stat"><span id="cs-last">—</span><small>last URL</small></div>
         </div>
         <div id="status-badge" class="status-badge status-queued">Queued</div>
+        <div class="progress-actions">
+          <button id="stop-analysis-btn" class="btn-danger btn-sm" type="button">Stop</button>
+          <span class="progress-actions-note" id="stop-analysis-note">Stops the crawl and removes partial data.</span>
+        </div>
       </div>
 
       <div class="progress-info">
@@ -708,6 +712,15 @@
               <button id="smtp-settings-save" class="btn-primary">Save Email Settings</button>
               <span id="smtp-settings-status" class="count-label"></span>
             </div>
+            <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <label style="font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:8px">
+                Send test email to
+                <input type="email" id="smtp-test-to" class="settings-input" placeholder="you@example.com" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);width:220px">
+              </label>
+              <button id="smtp-test-send" class="btn-secondary">Send Test Email</button>
+              <span id="smtp-test-status" class="count-label"></span>
+            </div>
+            <div class="service-error" id="smtp-test-error" style="margin-top:12px;display:none"></div>
             <div id="smtp-settings-hint" class="service-error" style="margin-top:14px;display:none"></div>
           </div>
         </div>
