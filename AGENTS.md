@@ -10,7 +10,28 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: User Visibility Adjustments, Hidden Crawl Graph Topology & Style Guide round 2026-08-12; 391/391 tests; clean)
+## Status (last update: Phase 5 Sandbox Comparison View 2026-08-13; git_static_connector tests fixed; node --check clean; pushed `22f1753`)
+- PHASE 5 — PAGE-LEVEL COMPARISON VIEW:
+  - `backend/services/snapshots/comparison_view.py` (NEW): `get_comparison_data()` fetches baseline
+    (Phase 2) + latest (Phase 4) snapshots from `sandbox_snapshots`, builds field-by-field change table
+    (`applied` → Changed/Unchanged based on value equality), calculates composite SEO score delta
+    (deducts for missing title/meta/alt/schema), enriches raw history from `sandbox_audit_logs` with
+    field names + Vercel preview URLs.
+  - `backend/routes/sandbox.py`: `GET /api/sandbox/comparison` endpoint added.
+  - `frontend/index.html`: `#tab-sandbox-comparison` with SEO Score Impact card, Field-by-Field Analysis
+    table (baseline vs current, Changed/Unchanged colour badges), Visual Comparison side-by-side panels
+    (Baseline Phase 2 / Current Post-Apply screenshots), Raw History Trail sidebar (✅ Applied / ↩️
+    Rolled Back per event with commit hash + Vercel preview links). Hidden tab button with
+    `style="display:none"` shown programmatically.
+  - `frontend/app.js`: `loadSandboxComparison()`, hash route `#sandbox-comparison` in
+    `restoreFromHash()`, `VALID_TABS` extended.
+  - `backend/tests/test_git_static_connector.py`: Completely rewritten with mocks for `_modify_source_file`,
+    `_commit_changes`, `_trigger_vercel_deploy`, `capture_snapshot` — correct field type names (`title`,
+    `alt_text`), 5-tuple unpack — all 4 pass.
+  - Verified at 1440px: Title → Changed (green), Schema Markup → Unchanged (grey), Footer Copyright →
+    Changed (green), Alt Text → Unchanged (grey); 4 field rows; 3 history entries; 0 console errors.
+  - Accessible at `http://localhost:8001/app#sandbox-comparison`.
+
 - USER VISIBILITY ADJUSTMENTS ROUND:
   - Hidden Crawl Graph Topology: Set `display: none !important` on `.graph-header-bar` and `#crawl-graph-section` in `frontend/index.html`. End users no longer see the 3D topology visualizer header or WebGL canvas.
   - Hidden Style Guide: Removed `Style Guide` tab button from the top tab strip, Quick Links grid, and `RAIL_TAB_LABELS`, `TAB_GUIDES`, and `VALID_TABS` navigation maps in `frontend/app.js`.
