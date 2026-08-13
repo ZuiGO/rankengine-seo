@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     broken_link_alert_threshold: int = 5
     gemini_cost_per_million: float = 0.125
     groq_cost_per_million: float = 0.0
+    staging_user: str = ""
+    staging_password: str = ""
     crawl_max_pages: int = 50
     crawl_concurrency: int = 5
     crawl_timeout_seconds: int = 360

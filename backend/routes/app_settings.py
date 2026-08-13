@@ -198,3 +198,38 @@ async def send_smtp_test(req: SmtpTestRequest):
         "This is a test email from ZuiGO Engine. If you can read this, email is configured correctly.",
     )
     return {"sent": sent, "error": error}
+
+
+class StagingSettingsRequest(BaseModel):
+    user: str = ""
+    password: str = ""
+
+
+async def get_staging_settings() -> dict:
+    db = get_db()
+    doc = await db.app_settings.find_one({"key": "staging"}) or {}
+    return {"user": doc.get("user", ""), "password": doc.get("password", "")}
+
+
+@router.get("/staging")
+async def read_staging_settings():
+    s = await get_staging_settings()
+    return {
+        "user": s["user"],
+        "user_set": bool(s["user"]),
+        "password_set": bool(s["password"]),
+    }
+
+
+@router.put("/staging")
+async def write_staging_settings(req: StagingSettingsRequest):
+    db = get_db()
+    update = {}
+    if req.user:
+        update["user"] = req.user.strip()
+    if req.password:
+        update["password"] = req.password.strip()
+    if not update:
+        return await read_staging_settings()
+    await db.app_settings.update_one({"key": "staging"}, {"$set": {**update, "key": "staging"}}, upsert=True)
+    return await read_staging_settings()

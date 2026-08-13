@@ -72,3 +72,25 @@ class ReportData(BaseModel):
     content_breakdown: dict
     page_details: list
     health_score: Optional[float] = None
+
+class SeoSuggestion(BaseModel):
+    id: str
+    page_url: str
+    field_type: str
+    current_value: str
+    suggested_value: str
+    rationale: str
+    evidence_source: str
+    status: str = "pending"
+
+class SandboxAuditLog(BaseModel):
+    id: str
+    suggestion_id: str
+    field_type: str
+    old_status: str
+    new_status: str
+    edited_value: Optional[str] = None
+    commit_hash: Optional[str] = None
+    diff: Optional[str] = None
+    preview_url: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)

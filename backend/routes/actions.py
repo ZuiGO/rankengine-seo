@@ -419,6 +419,63 @@ async def apply_approved_changes(job_id: str):
     }
 
 
+@router.post("/{job_id}/apply-sandbox")
+async def apply_sandbox_changes(job_id: str, platform: str = "git_static"):
+    """Apply approved actions directly to the sandbox via specified connector."""
+    db = get_db()
+    job, changes, counts = await _collect_changes(db, job_id)
+    approved = [c for c in changes if c["status"] == "approved"]
+
+    if not approved:
+        return {
+            "ok": False,
+            "message": "No approved changes to apply yet. Approve action items first.",
+        }
+
+    from backend.services.connectors import get_connector
+    try:
+        connector = get_connector(platform)
+    except ValueError as e:
+        return {"ok": False, "message": str(e)}
+
+    results = []
+    for c in approved:
+        v = c.get("version") or {}
+        if not v.get("after"):
+            continue
+
+        # Map action content_type to connector field_type
+        # Default mapping logic
+        field_type = c.get("content_type", "")
+        if field_type == "Title tag":
+            field_type = "title_tag"
+        elif field_type == "Meta description":
+            field_type = "meta_description"
+        elif field_type == "H1 heading":
+            field_type = "h1"
+
+        suggestion_payload = {
+            "field_type": field_type,
+            "suggested_value": v.get("after")
+        }
+
+        ok, error = await connector.apply_field(suggestion_payload)
+        results.append({
+            "action_id": c["action_id"],
+            "content_type": field_type,
+            "ok": ok,
+            "error": error
+        })
+
+    await log_audit("actions_applied_sandbox", job_id, {"approved": len(approved), "results": results})
+    
+    return {
+        "ok": True,
+        "message": f"Applied {len(results)} approved changes to the sandbox.",
+        "results": results
+    }
+
+
 @router.post("/{action_id}/approve")
 async def approve_action(action_id: str, req: ApproveRequest):
     db = get_db()

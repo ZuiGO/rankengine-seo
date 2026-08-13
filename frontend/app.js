@@ -3681,16 +3681,6 @@ function openPastAnalyses() {
   resultsSection.classList.remove("hidden");
   inputSection.classList.add("hidden");
   resultsUrl.textContent = "Past Analyses";
-  resultsStatus.textContent = "All site audits on this installation — open one for its full dashboard.";
-  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-  document.querySelectorAll(".tab-content").forEach(tc => tc.classList.add("hidden"));
-  const sitesTab = document.getElementById("tab-sites");
-  if (sitesTab) {
-    sitesTab.classList.remove("hidden");
-    sitesTab.style.animation = "none";
-    void sitesTab.offsetWidth;
-    sitesTab.style.animation = "";
-  }
   currentTab = "sites";
   updateRailExplain("sites");
   document.body.classList.add("jobless");
@@ -3924,7 +3914,7 @@ function linkifyText(text, maxLen) {
   return escapeHtml(label).replace(/(https?:\/\/[^\s<>"']+)/g, m => `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
 }
 
-const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "seo-insights", "competitors", "quality", "schedules", "logs", "settings"]);
+const VALID_TABS = new Set(["sites", "overview", "pages", "content", "links", "actions", "report", "seo-insights", "competitors", "quality", "schedules", "logs", "settings", "sandbox-approvals", "sandbox-comparison", "style-guide"]);
 
 function parseHash() {
   const m = window.location.hash.match(/^#job\/([a-zA-Z0-9-]+)(?:\/([a-z-]+))?/);
@@ -3938,6 +3928,34 @@ async function restoreFromHash() {
     const tab = (window.location.hash || "").replace(/^#/, "");
     if (tab === "sites") {
       openPastAnalyses();
+    } else if (tab === "style-guide") {
+      resultsSection.classList.remove("hidden");
+      inputSection.classList.add("hidden");
+      resultsUrl.textContent = "ZuiGO Style Guide";
+      resultsStatus.textContent = "Internal style guide: design tokens, semantic status colors, tabular typography, and motion fallbacks.";
+      document.body.classList.add("jobless");
+      setDashboardVisible(true);
+      switchTab("style-guide");
+      initStyleGuideControls();
+    } else if (tab === "sandbox-approvals") {
+      resultsSection.classList.remove("hidden");
+      inputSection.classList.add("hidden");
+      resultsUrl.textContent = "Sandbox Approvals";
+      resultsStatus.textContent = "Review and approve suggestions for the auto-apply sandbox.";
+      document.body.classList.add("jobless");
+      setDashboardVisible(true);
+      switchTab("sandbox-approvals");
+      loadSandboxApprovals();
+    } else if (tab === "sandbox-comparison") {
+      resultsSection.classList.remove("hidden");
+      inputSection.classList.add("hidden");
+      resultsUrl.textContent = "Sandbox Comparison";
+      resultsStatus.textContent = "Page-level before/after comparison for sandbox changes.";
+      document.body.classList.add("jobless");
+      setDashboardVisible(true);
+      const cmpTab = document.querySelector('.tab[data-tab="sandbox-comparison"]');
+      if (cmpTab) { cmpTab.style.display = 'block'; cmpTab.click(); }
+      loadSandboxComparison();
     } else {
       setDashboardVisible(false);
     }
@@ -4011,3 +4029,340 @@ function renderBotReply(text) {
     return renderBotBlock(lines);
   }).join("");
 }
+
+// --- Sandbox Approvals ---
+
+async function loadSandboxApprovals() {
+  const container = document.getElementById("sandbox-approvals-queue");
+  container.innerHTML = '<div class="skeleton-shimmer-row" style="height:100px"></div>'.repeat(3);
+  try {
+    const res = await fetch("/api/sandbox/suggestions");
+    if (!res.ok) throw new Error("Failed to fetch suggestions");
+    const data = await res.json();
+    renderSandboxApprovals(data.suggestions);
+  } catch (err) {
+    container.innerHTML = `<div class="service-error">Error loading approvals: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function computeDiffHTML(oldText, newText) {
+  if (oldText === newText) return escapeHtml(newText);
+  return `
+    <div style="margin-bottom:8px;"><span class="diff-del" style="background:#ffcdd2;color:#b71c1c;text-decoration:line-through;padding:2px 4px;border-radius:4px;">${escapeHtml(oldText || "(empty)")}</span></div>
+    <div><span class="diff-add" style="background:#c8e6c9;color:#1b5e20;padding:2px 4px;border-radius:4px;">${escapeHtml(newText || "(empty)")}</span></div>
+  `;
+}
+
+function renderSandboxApprovals(suggestions) {
+  const container = document.getElementById("sandbox-approvals-queue");
+  container.innerHTML = "";
+
+  if (!suggestions || suggestions.length === 0) {
+    container.innerHTML = `<div class="empty-state">No pending suggestions for the sandbox.</div>`;
+    return;
+  }
+
+  const groups = {};
+  suggestions.forEach(s => {
+    if (!groups[s.field_type]) groups[s.field_type] = [];
+    groups[s.field_type].push(s);
+  });
+
+  const lowRiskFields = ["alt_text", "canonical", "footer_copyright"];
+
+  for (const [fieldType, items] of Object.entries(groups)) {
+    const groupDiv = document.createElement("div");
+    groupDiv.className = "approval-group card";
+    groupDiv.style.padding = "20px";
+    groupDiv.style.background = "var(--bg-surface)";
+    groupDiv.style.borderRadius = "8px";
+    groupDiv.style.border = "1px solid var(--border)";
+    groupDiv.style.marginBottom = "16px";
+
+    const isLowRisk = lowRiskFields.includes(fieldType);
+    
+    let html = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+        <h3 style="margin:0; font-size:16px; text-transform:capitalize;">${escapeHtml(fieldType.replace('_', ' '))}</h3>
+        ${isLowRisk ? `<button class="btn-primary" onclick="batchApproveSandboxSuggestions('${escapeHtml(fieldType)}')">Batch Approve</button>` : `<span class="badge" style="background:var(--bg-elevated); color:var(--text-secondary)">Individual Approval Required</span>`}
+      </div>
+      <div class="approval-items">
+    `;
+
+    items.forEach(item => {
+      let statusHtml = `<span class="status-pill status-unchecked">${item.status || 'pending'}</span>`;
+      if (item.status === 'approved, pending apply') statusHtml = `<span class="status-pill status-ok">approved, pending apply</span>`;
+      else if (item.status === 'applied') statusHtml = `<span class="status-pill status-ok">applied</span>`;
+      else if (item.status === 'rejected' || item.status === 'failed') statusHtml = `<span class="status-pill status-broken">${item.status}</span>`;
+
+      let actionsHtml = "";
+      if (!item.status || item.status === 'pending') {
+        actionsHtml = `
+          <button class="btn-primary" onclick="approveSandboxSuggestion('${item.id}')">✓ Approve</button>
+          <button class="btn-secondary" onclick="editSandboxSuggestion('${item.id}')">✎ Edit</button>
+          <button class="btn-danger" style="background:var(--status-broken); color:white; border:none; border-radius:4px; padding:6px 12px; cursor:pointer;" onclick="rejectSandboxSuggestion('${item.id}')">✕ Reject</button>
+        `;
+      } else if (item.status === 'approved, pending apply') {
+        actionsHtml = `
+          <button class="btn-primary" style="background:var(--accent); border-color:var(--accent);" onclick="applySandboxSuggestion('${item.id}', this)">🚀 Apply to Sandbox</button>
+          <button class="btn-danger" style="background:var(--status-broken); color:white; border:none; border-radius:4px; padding:6px 12px; cursor:pointer;" onclick="rejectSandboxSuggestion('${item.id}')">✕ Reject</button>
+        `;
+      } else if (item.status === 'applied') {
+        actionsHtml = `
+          <button class="btn-secondary" onclick="rollbackSandboxSuggestion('${item.id}', this)">↩ Rollback</button>
+        `;
+        if (item.preview_url || item.last_commit_hash) { // Using the preview_url from DB if we returned it, or we might need to fetch from audit logs.
+           actionsHtml += `<a href="${escapeHtml(item.preview_url || '#')}" target="_blank" class="btn-secondary" style="margin-left:8px; text-decoration:none;">View Preview</a>`;
+        }
+      } else if (item.status === 'failed') {
+        actionsHtml = `
+          <button class="btn-primary" style="background:var(--accent); border-color:var(--accent);" onclick="applySandboxSuggestion('${item.id}', this)">↻ Retry Apply</button>
+        `;
+      }
+
+      html += `
+        <div class="approval-item" id="suggestion-${item.id}" style="padding:16px; border:1px solid var(--border); border-radius:6px; margin-bottom:12px; background:var(--bg-base);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+            <div class="diff-view" style="font-family:var(--font-mono); font-size:13px; line-height:1.5;">
+              ${computeDiffHTML(item.current_value, item.suggested_value)}
+            </div>
+            <div class="status-badge">
+              ${statusHtml}
+            </div>
+          </div>
+          
+          <div class="context-box" style="background:var(--bg-elevated); padding:12px; border-radius:6px; font-size:13px; margin-bottom:16px;">
+            <div style="margin-bottom:8px"><strong>Rationale:</strong> ${escapeHtml(item.rationale)}</div>
+            <div><strong>Evidence Source:</strong> <code style="background:var(--bg-base); padding:2px 4px; border-radius:4px;">${escapeHtml(item.evidence_source)}</code></div>
+          </div>
+          
+          <div class="actions" style="display:flex; gap:8px;">
+            ${actionsHtml}
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+    groupDiv.innerHTML = html;
+    container.appendChild(groupDiv);
+  }
+}
+
+async function approveSandboxSuggestion(id) {
+  try {
+    const res = await fetch(`/api/sandbox/suggestions/${id}/approve`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to approve");
+    showToast("Suggestion approved");
+    updateSuggestionStatusUI(id, "approved, pending apply", "status-ok");
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+async function rejectSandboxSuggestion(id) {
+  try {
+    const res = await fetch(`/api/sandbox/suggestions/${id}/reject`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to reject");
+    showToast("Suggestion rejected");
+    updateSuggestionStatusUI(id, "rejected", "status-broken");
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+async function editSandboxSuggestion(id) {
+  const newVal = prompt("Edit the suggested value:");
+  if (newVal === null) return;
+  try {
+    const res = await fetch(`/api/sandbox/suggestions/${id}/edit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suggested_value: newVal })
+    });
+    if (!res.ok) throw new Error("Failed to edit");
+    showToast("Suggestion edited and approved");
+    loadSandboxApprovals();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+async function batchApproveSandboxSuggestions(fieldType) {
+  try {
+    const res = await fetch(`/api/sandbox/suggestions/batch_approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ field_type: fieldType })
+    });
+    if (!res.ok) throw new Error("Failed to batch approve");
+    const data = await res.json();
+    showToast(`Batch approved ${data.count} items`);
+    loadSandboxApprovals();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+function updateSuggestionStatusUI(id, text, colorClass) {
+  const el = document.getElementById(`suggestion-${id}`);
+  if (!el) return;
+  const badge = el.querySelector(".status-pill");
+  if (badge) {
+    badge.className = `status-pill ${colorClass}`;
+    badge.textContent = text;
+  }
+  const actions = el.querySelector(".actions");
+  if (actions) {
+    // Simply reload to get updated action buttons rather than messing with DOM
+    loadSandboxApprovals();
+  }
+}
+
+async function applySandboxSuggestion(id, btnEl) {
+  if (btnEl) btnEl.textContent = "Applying (Deploying)...";
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const res = await fetch(`/api/sandbox/suggestions/${id}/apply`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to apply");
+    showToast("Suggestion applied and deployed to Sandbox!");
+    loadSandboxApprovals();
+  } catch (err) {
+    showToast(err.message, true);
+    loadSandboxApprovals();
+  }
+}
+
+async function rollbackSandboxSuggestion(id, btnEl) {
+  if (btnEl) btnEl.textContent = "Rolling back...";
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const res = await fetch(`/api/sandbox/suggestions/${id}/rollback`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Failed to rollback");
+    showToast("Suggestion rolled back successfully!");
+    loadSandboxApprovals();
+  } catch (err) {
+    showToast(err.message, true);
+    loadSandboxApprovals();
+  }
+}
+
+async function loadSandboxComparison() {
+  const loading = document.getElementById('sandbox-comparison-loading');
+  const error = document.getElementById('sandbox-comparison-error');
+  const content = document.getElementById('sandbox-comparison-content');
+  
+  loading.style.display = 'block';
+  error.classList.add('hidden');
+  content.classList.add('hidden');
+  
+  try {
+    const response = await fetch('/api/sandbox/comparison');
+    if (!response.ok) {
+      throw new Error(`Failed to load comparison: ${response.statusText}`);
+    }
+    const data = await response.json();
+    
+    // Set images
+    document.getElementById('comp-img-baseline').src = `data:image/jpeg;base64,${data.baseline_screenshot}`;
+    document.getElementById('comp-img-current').src = `data:image/jpeg;base64,${data.current_screenshot}`;
+    
+    // Set scores
+    const oldScore = data.seo_score.old;
+    const newScore = data.seo_score.new;
+    const delta = data.seo_score.delta;
+    
+    document.getElementById('comp-score-old').textContent = oldScore;
+    document.getElementById('comp-score-new').textContent = newScore;
+    
+    const deltaEl = document.getElementById('comp-score-delta');
+    if (delta > 0) {
+      deltaEl.textContent = `+${delta} Points`;
+      deltaEl.style.background = '#dcfce7';
+      deltaEl.style.color = '#166534';
+    } else if (delta < 0) {
+      deltaEl.textContent = `${delta} Points`;
+      deltaEl.style.background = '#fee2e2';
+      deltaEl.style.color = '#991b1b';
+    } else {
+      deltaEl.textContent = 'No Change';
+      deltaEl.style.background = '#f3f4f6';
+      deltaEl.style.color = '#374151';
+    }
+    
+    // Set fields table
+    const tbody = document.getElementById('comp-fields-tbody');
+    tbody.innerHTML = '';
+    
+    for (const f of data.field_comparison) {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid var(--border-color)';
+      
+      const badgeColor = f.is_changed ? '#dcfce7' : '#f3f4f6';
+      const badgeTextColor = f.is_changed ? '#166534' : '#374151';
+      const statusText = f.is_changed ? 'Changed' : 'Unchanged';
+      
+      const diffStyle = f.is_changed ? 'background:#dcfce7; padding:2px 4px; border-radius:4px;' : '';
+      
+      tr.innerHTML = `
+        <td style="padding: 12px 16px; font-weight: 500; text-transform: capitalize;">${f.field.replace('_', ' ')}</td>
+        <td style="padding: 12px 16px; color: var(--text-muted); font-size: 13px;">${escapeHtml(f.old_value || 'None')}</td>
+        <td style="padding: 12px 16px; font-size: 13px;"><span style="${diffStyle}">${escapeHtml(f.new_value || 'None')}</span></td>
+        <td style="padding: 12px 16px;">
+          <span style="background:${badgeColor}; color:${badgeTextColor}; padding:4px 8px; border-radius:12px; font-size:12px; font-weight:500;">
+            ${statusText}
+          </span>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+    
+    // Set raw history
+    const historyContainer = document.getElementById('comp-raw-history');
+    historyContainer.innerHTML = '';
+    
+    if (data.raw_history.length === 0) {
+      historyContainer.innerHTML = '<div style="color:var(--text-muted); font-size:13px; text-align:center; padding: 24px;">No apply history found.</div>';
+    } else {
+      for (const h of data.raw_history) {
+        const item = document.createElement('div');
+        item.style.padding = '12px';
+        item.style.background = 'white';
+        item.style.border = '1px solid var(--border-color)';
+        item.style.borderRadius = '6px';
+        
+        const dateStr = h.timestamp ? new Date(h.timestamp).toLocaleString() : 'Unknown';
+        
+        item.innerHTML = `
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">${dateStr}</div>
+          <div style="font-weight: 500; font-size: 14px; margin-bottom: 8px;">
+            ${h.action === 'applied' ? '✅ Applied' : '↩️ Rolled Back'} <span style="text-transform: capitalize;">${h.field.replace('_', ' ')}</span>
+          </div>
+          <div style="font-size: 13px; margin-bottom: 4px; font-family: monospace;">
+            Commit: ${h.commit_hash || 'None'}
+          </div>
+          ${h.preview_url ? `<a href="${h.preview_url}" target="_blank" style="font-size: 13px; color: var(--accent); text-decoration: none;">View Vercel Preview ↗</a>` : ''}
+        `;
+        historyContainer.appendChild(item);
+      }
+    }
+    
+    loading.style.display = 'none';
+    content.classList.remove('hidden');
+    
+  } catch (err) {
+    console.error(err);
+    loading.style.display = 'none';
+    error.textContent = err.message;
+    error.classList.remove('hidden');
+  }
+}
+
+// Remove the bad hook
+
+
+document.querySelector('.tab[data-tab="sandbox-comparison"]').addEventListener('click', () => {
+  loadSandboxComparison();
+});

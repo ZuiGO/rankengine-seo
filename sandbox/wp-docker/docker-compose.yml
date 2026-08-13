@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  db:
+    image: mariadb:10.6
+    container_name: rankengine_wp_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wpuser
+      MYSQL_PASSWORD: wppassword
+    volumes:
+      - db_data:/var/lib/mysql
+
+  wordpress:
+    image: wordpress:latest
+    container_name: rankengine_wp
+    depends_on:
+      - db
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wpuser
+      WORDPRESS_DB_PASSWORD: wppassword
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wp_data:/var/www/html
+      # Mount setup script
+      - ./setup.sh:/setup.sh
+
+  wpcli:
+    image: wordpress:cli
+    container_name: rankengine_wpcli
+    depends_on:
+      - db
+      - wordpress
+    volumes:
+      - wp_data:/var/www/html
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wpuser
+      WORDPRESS_DB_PASSWORD: wppassword
+      WORDPRESS_DB_NAME: wordpress
+    user: xfs
+    entrypoint: [ "sh", "-c" ]
+    # Loop indefinitely to keep container alive for arbitrary execution
+    command: [ "while true; do sleep 3600; done" ]
+
+volumes:
+  db_data:
+  wp_data:

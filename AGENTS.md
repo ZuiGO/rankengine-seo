@@ -10,7 +10,48 @@ approve changes, generate dummy site + reports, chat. Python 3.14 FastAPI +
 MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
-## Status (last update: clean Analyze/screens + landing "Past analyses" round + email-hardening + stop-analysis round — virtual-card cooldown variant 2026-08-12; 389/389 tests; pending commit)
+## Status (last update: User Visibility Adjustments, Hidden Crawl Graph Topology & Style Guide round 2026-08-12; 391/391 tests; clean)
+- USER VISIBILITY ADJUSTMENTS ROUND:
+  - Hidden Crawl Graph Topology: Set `display: none !important` on `.graph-header-bar` and `#crawl-graph-section` in `frontend/index.html`. End users no longer see the 3D topology visualizer header or WebGL canvas.
+  - Hidden Style Guide: Removed `Style Guide` tab button from the top tab strip, Quick Links grid, and `RAIL_TAB_LABELS`, `TAB_GUIDES`, and `VALID_TABS` navigation maps in `frontend/app.js`.
+- PERFORMANCE & REDUCED-MOTION SAFEGUARDS ROUND:
+  - Defer 3D Graph Initialization: Enforced `requestIdleCallback` / `setTimeout` for 3D force graph initialization in `loadLinks(jobId)` so primary stat cards, summary metrics, and data tables paint and become interactive first.
+  - Universal Reduced-Motion JS Count-Ups: Updated `animateCountUp` to check `isReducedMotionSet()` and instantly render target text without frame ticking when reduced motion is preferred.
+  - Comprehensive Reduced-Motion CSS Rules: Added `@media (prefers-reduced-motion: reduce)` block disabling transitions and keyframe animations for radial gauges, stacked health bars, longest link fills, skeleton shimmers, and row checked pulses.
+  - Zero Business Logic Mutation: Preserved all backend data fetching, state management, and business logic intact.
+- LINK HEALTH GAUGES, STACKED BAR & VISUAL COMPARISON ROUND:
+  - Internal Ratio Radial Arc Gauge: Replaced text percentage in 4th stat card with a radial arc SVG gauge showing internal vs external link proportions.
+  - Proportional Horizontal Stacked Bar: Added a stacked distribution bar above summary cards rendering OK (`--status-ok`), Broken (`--status-broken`), Redirect (`--status-redirect`), Blocked (`--status-blocked`), and Unreachable (`--status-unreachable`) segments for at-a-glance health shape.
+  - Staggered Tabular-Mono Count-Ups: Count-ups on reveal staggered by 40ms per card across top stat cards and summary cards using `JetBrains Mono` tabular monospace digits (`tabular-nums`).
+  - Longest Links Visual Bar Comparison: Transformed bullet list into horizontal progress bars scaled proportionally to the longest link's character count (`(length / maxLen) * 100%`).
+  - Sortable Table Columns: Made `Status`, `Code`, and `Length` columns sortable with click handlers and direction indicators (`▲` / `▼`).
+  - Linked From Page Jump: Clicking any `Linked From` source page URL cell switches to the `Pages` tab, filters by that page URL, and highlights it.
+  - Live Relative Timestamp: Displays "Last checked" as a live relative label ("checked 4m ago") updating every 30s with native tooltip on hover for absolute timestamp.
+- LINKS TABLE POLISH & ACCESSIBILITY ROUND:
+  - Status Pills & Icons: Rendered status pills paired with icons for every state (`✓ OK`, `✕ BROKEN`, `↳ REDIRECT`, `🚫 BLOCKED`, `⚡ UNREACHABLE`, `↗ EXTERNAL`, `⋯ UNCHECKED`) using semantic status colors.
+  - Newly Resolved Link Row Pulse: `@keyframes rowCheckedPulse` (`.row-just-checked`) gives a 1.2s soft highlight pulse when a link transitions from `unchecked` to a resolved status.
+  - Interactive Status Filter & Summary Cards: Added `#link-status-filter` and made summary cards in `Link Health` clickable to set the filter dropdown, re-render, and scroll to matching table rows.
+  - Row Density Toggle: Added `#link-density-toggle-btn` to switch between `Compact View` (padding `4px 8px`) and `Expanded View` (padding `10px 14px`).
+  - Accessible Click-to-Copy & Full Tooltip: Rendered URL cells as `.page-url-copyable` with full un-truncated `title` tooltip, `tabindex="0"`, `role="button"`, copy icon, and keyboard event handlers (`Enter`/`Space` key copies full URL to clipboard with toast notification).
+  - Skeleton Shimmer Loading Rows: Added `.skeleton-shimmer-row` placeholders while link health data loads.
+- APP SHELL & Z-INDEX BUG FIX ROUND:
+  - Fixed Links Tab Text Bleeding Bug: Applied `min-width: 0; overflow-x: auto; max-width: 100%;` to `.results-section`, `#tab-links`, and data tables, enforced `word-break: break-all;` on `.page-url-cell`, and set `position: sticky; z-index: 10; isolation: isolate; background: var(--bg-base);` on `.left-rail` & `.right-rail` with solid `--bg-surface` panel background tokens. Zero text bleeds through/behind right-rail panels.
+  - Sidebar Mini-Stats Count-Up: `#rail-pages-count`, `#rail-content-count`, and `#rail-actions-count` animate count-up on load and whenever values re-evaluate on re-crawls.
+  - Sliding Nav Active Indicator Bar: Added `#rail-nav-indicator` which smoothly translates vertically (`transform: translateY(...)`) and resizes height dynamically over 0.25s `--ease-entrance` when switching tabs instead of popping.
+  - Tip of the Day Auto-Rotation: Cycles through 6 real SEO tips every 12s with a 200ms crossfade (`.fade-out` / `.fade-in`), manual `prev`/`next` controls, and pause-on-hover/focus.
+  - Honest Activity Feed Slide-In: Preserved honest empty state when no events exist (zero fake data). Real incoming crawl events slide in from top with `@keyframes activitySlideIn` and a temporary indigo highlight flash.
+  - Quick Links Grid Polish: Added 14px SVG icons to each button and active press scaling (`transform: scale(0.96)`).
+- URL FORM & PER-ICON MICRO-ANIMATIONS ROUND:
+  - Live Inline URL Validation: `#url-input` displays real-time check (`✓` in teal-green `.valid`) or cross (`✕` in red `.invalid`) indicator with accent focus glow (`--accent`). Auto-prefixes `https://` if omitted.
+  - Compact Inline Progress Button State: "Run free site audit" transitions into inline scanning spinner (`Starting crawl...` + radar pulse) while `POST /api/analysis` connects, then hands off cleanly to live crawl screen.
+  - Tappable Try Chips: `.example-chip` buttons for `example.com` and `books.toscrape.com` with active hover states.
+  - 6 Feature Card Micro-Animations: Reordered to match dashboard navigation sequence (Technical SEO → On-page SEO → Content & Performance → Links & Quality → AI & Local Visibility → Actions & Reports) with tailored SVG micro-animations on hover (clock ticks 360°, heading lines expand, trend line draws, chain links snap, AI sparkle scales up, checkmark stroke self-draws).
+- DESIGN TOKENS, STYLE GUIDE & 3D CRAWL GRAPH + LANDING HERO ROUND:
+  - Added design tokens for background tiers (`--bg-base`, `--bg-surface`, `--bg-elevated`), accent tones, 7 semantic status colors (`--status-ok`, `--status-broken`, `--status-redirect`, `--status-blocked`, `--status-unreachable`, `--status-external`, `--status-unchecked`), 4 lit-edge elevation levels, instrument grid texture, motion tokens, and `JetBrains Mono` tabular-figure monospace numeric typography.
+  - Added interactive Style Guide route `/app#style-guide` displaying design tokens, typography comparison, elevation cards, motion speed triggers, and reduced-motion detection.
+  - Implemented 3D Crawl Graph endpoint `GET /api/links/{job_id}/graph` and frontend component with D3 physics force-directed layout, lazy-loaded WebGL, load-in discovery animation, pausable auto-rotation, node hover highlighting, clicked node side panel drawer (`#graph-node-panel`), and reduced-motion/WebGL fallback.
+  - Enhanced Marketing Landing Hero: `#hero-radar-bg` subtle low-contrast radar sweep (WCAG AA compliant), one-time decode-in focus reveal for "the truth", interactive 3D perspective cursor tilt on `#sample-report-card`, dual SVG radial arc gauges (79/100 healthy vs 56/100 warning), scroll-triggered progress bar fill, 3 staggered entrance tags, and ambient background canvas graph.
+  - Tests: `backend/tests/test_crawl_graph.py` added. Full test suite 391/391 passed. `node --check frontend/app.js` clean. launchd server restarted.
 - CLEAN-SCREENS ROUND (rails/landing, committed summary below):
   - `setDashboardVisible(visible)` toggles `#dashboard-grid.hidden` + `body.no-dashboard`;
     Analyze page, crawl screen and `/app` with no job are clean; results view and jobless

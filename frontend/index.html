@@ -5,8 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZuiGO Engine — SEO Analysis</title>
 <meta name="description" content="ZuiGO Engine — crawl, audit, and fix SEO across your whole site.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" type="image/png" href="/static/logo.png">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=3">
 <script>
 (function () {
   try {
@@ -38,53 +41,166 @@
   </header>
 
   <main class="main">
-    <div id="input-section" class="input-section">
-      <h1>Analyze any website</h1>
+    <div id="input-section" class="input-section hero-container">
+      <div id="hero-radar-bg" class="hero-radar-bg" aria-hidden="true"></div>
+
+      <h1 class="hero-headline">An audit that finds <span id="hero-headline-truth" class="headline-truth" style="color:#6366f1;opacity:1;display:inline;visibility:visible;">the truth</span> about your site &mdash; and fixes it</h1>
       <p class="subtitle">Crawl every page, score on-page and technical SEO, surface AI-visibility risks, and turn findings into applied, versioned changes.</p>
+
       <form id="analyze-form" class="url-form">
         <div class="input-group">
-          <input type="url" id="url-input" placeholder="https://yoursite.com" required autofocus>
-          <button type="submit" id="analyze-btn">Run free site audit</button>
+          <div class="url-input-wrapper">
+            <input type="url" id="url-input" placeholder="https://yoursite.com" required autofocus autocomplete="off" spellcheck="false">
+            <span id="url-validation-icon" class="url-validation-icon" aria-label="URL validation indicator"></span>
+          </div>
+          <button type="submit" id="analyze-btn" class="btn-primary-glow">
+            <span id="analyze-btn-spinner" class="analyze-btn-spinner hidden" aria-hidden="true"></span>
+            <span id="analyze-btn-text">Run free site audit</span>
+          </button>
         </div>
         <div class="input-group" style="margin-top:10px">
           <input type="email" id="email-input" placeholder="you@example.com (optional — get the PDF report by email)" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);flex:1">
         </div>
-        <div class="examples">
-          Try: <a href="#" data-url="https://example.com">example.com</a> · <a href="#" data-url="https://books.toscrape.com">books.toscrape.com</a>
+        <div class="examples-row">
+          <span class="examples-label">Try:</span>
+          <button type="button" class="example-chip" data-url="https://example.com">example.com</button>
+          <button type="button" class="example-chip" data-url="https://books.toscrape.com">books.toscrape.com</button>
         </div>
         <p class="privacy-note">Your site's data stays private to you — no shared galleries, no public results.</p>
       </form>
 
+      <!-- Interactive 3D Sample Report Card -->
+      <div id="sample-report-card" class="sample-report-card elevation-3 panel-textured">
+        <canvas id="src-ambient-canvas" class="src-ambient-canvas" aria-hidden="true"></canvas>
+        <div class="src-card-inner">
+          <div class="src-header">
+            <div class="src-domain-lockup">
+              <span class="src-domain">yoursite.com</span>
+              <span class="src-badge-label">SAMPLE REPORT</span>
+            </div>
+            <span class="status-chip badge-status-redirect src-grade-chip">Grade C</span>
+          </div>
+
+          <div class="src-metrics-grid">
+            <!-- Health Score Radial Arc Gauge (79/100 Healthy) -->
+            <div class="src-gauge-card">
+              <div class="src-gauge-wrapper">
+                <svg class="src-gauge-svg" viewBox="0 0 100 100">
+                  <circle class="gauge-circle-bg" cx="50" cy="50" r="40" />
+                  <circle id="src-health-gauge" class="gauge-circle-fill status-ok-gauge" cx="50" cy="50" r="40" stroke-dasharray="251.2" stroke-dashoffset="251.2" />
+                </svg>
+                <div class="src-gauge-center">
+                  <span id="src-health-num" class="src-score-val tabular-nums">0</span>
+                  <small>/100</small>
+                </div>
+              </div>
+              <span class="src-gauge-label">Health Score</span>
+            </div>
+
+            <!-- Core Web Vitals Radial Arc Gauge (56/100 Warning) -->
+            <div class="src-gauge-card">
+              <div class="src-gauge-wrapper">
+                <svg class="src-gauge-svg" viewBox="0 0 100 100">
+                  <circle class="gauge-circle-bg" cx="50" cy="50" r="40" />
+                  <circle id="src-vitals-gauge" class="gauge-circle-fill status-warning-gauge" cx="50" cy="50" r="40" stroke-dasharray="251.2" stroke-dashoffset="251.2" />
+                </svg>
+                <div class="src-gauge-center">
+                  <span id="src-vitals-num" class="src-score-val tabular-nums">0</span>
+                  <small>/100</small>
+                </div>
+              </div>
+              <span class="src-gauge-label">Core Web Vitals</span>
+            </div>
+          </div>
+
+          <div class="src-stats-row">
+            <div class="src-stat-pill">
+              <strong class="tabular-nums" id="src-pages-num">0</strong> pages analyzed
+            </div>
+            <div class="src-stat-pill">
+              <strong class="tabular-nums" id="src-issues-num">0</strong> issues detected
+            </div>
+          </div>
+
+          <!-- Progress Bar Fill -->
+          <div class="src-progress-container">
+            <div class="src-progress-header">
+              <span>Overall Audit Progress</span>
+              <span class="tabular-nums" id="src-progress-pct">0%</span>
+            </div>
+            <div class="src-progress-track">
+              <div id="src-progress-bar" class="src-progress-fill" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <!-- 3 Staggered Entrance Tags -->
+          <div class="src-tags-row">
+            <span class="src-tag stagger-item">🤖 AI crawlers visible</span>
+            <span class="src-tag stagger-item">🔗 0 broken links</span>
+            <span class="src-tag stagger-item">🖼️ Alt text 93%</span>
+          </div>
+        </div>
+      </div>
+
       <section class="analyze-section">
         <h2 class="section-title-landing">What the audit checks</h2>
         <div class="features-grid">
-          <div class="feature-card">
-            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          <!-- 1. Technical SEO (Clock / Crawlability) -->
+          <div class="feature-card feature-card-tech">
+            <svg class="feature-icon icon-tech" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <path class="icon-clock-hand" d="M12 7v5l3 2"/>
+            </svg>
             <h3>Technical SEO</h3>
             <p>Crawlability, indexation, redirects, HTTPS, sitemap coverage and robots.txt.</p>
           </div>
-          <div class="feature-card">
-            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h7"/></svg>
+
+          <!-- 2. On-page SEO (Document & Heading lines) -->
+          <div class="feature-card feature-card-onpage">
+            <svg class="feature-icon icon-onpage" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 6h16"/>
+              <line class="icon-heading-line-1" x1="7" y1="12" x2="17" y2="12"/>
+              <line class="icon-heading-line-2" x1="10" y1="18" x2="17" y2="18"/>
+            </svg>
             <h3>On-page SEO</h3>
             <p>Titles, meta descriptions, H1s, headings, alt text, and structured data per page.</p>
           </div>
-          <div class="feature-card">
-            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 6-8 3 4"/></svg>
+
+          <!-- 3. Content & performance (Speed & Trend line) -->
+          <div class="feature-card feature-card-content">
+            <svg class="feature-icon icon-content" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path class="icon-trend-line" d="M3 17l5-6 4 3 6-8 3 4"/>
+            </svg>
             <h3>Content &amp; performance</h3>
             <p>Thin and duplicate content, Core Web Vitals, mobile friendliness and image optimization.</p>
           </div>
-          <div class="feature-card">
-            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 1 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 1 0 6 6l1-1"/></svg>
+
+          <!-- 4. Links & content quality (Chain links) -->
+          <div class="feature-card feature-card-links">
+            <svg class="feature-icon icon-links" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path class="icon-link-half-1" d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 1 0-6-6l-1 1"/>
+              <path class="icon-link-half-2" d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 1 0 6 6l1-1"/>
+            </svg>
             <h3>Links &amp; content quality</h3>
             <p>Broken, orphaned and redirected links, plus duplicate-content clusters.</p>
           </div>
-          <div class="feature-card">
-            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l4 2 -4 2M12 6h8M4 11l4 2-4 2M12 13h8M4 18l4 2-4 2M12 20h8"/></svg>
+
+          <!-- 5. AI & local visibility (AI Sparkle) -->
+          <div class="feature-card feature-card-ai">
+            <svg class="feature-icon icon-ai" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 4l4 2 -4 2M12 6h8M4 11l4 2-4 2M12 13h8M4 18l4 2-4 2M12 20h8"/>
+              <circle class="icon-ai-sparkle" cx="18" cy="6" r="2.5" fill="currentColor"/>
+            </svg>
             <h3>AI &amp; local visibility</h3>
             <p>Robots-blocked AI agents, llms.txt, generative-search readiness, and local SEO signals.</p>
           </div>
-          <div class="feature-card">
-            <svg class="feature-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8"/></svg>
+
+          <!-- 6. Actions & reports (Versioned Patch Checkmark) -->
+          <div class="feature-card feature-card-actions">
+            <svg class="feature-icon icon-actions" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path class="icon-action-checkmark" d="M9 11l3 3 8-8"/>
+              <path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8"/>
+            </svg>
             <h3>Actions &amp; reports</h3>
             <p>Every issue becomes a versioned action you can approve, export as a patch, or apply via GitHub.</p>
           </div>
@@ -267,6 +383,18 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/></svg>
           <span>SEO Actions</span>
         </button>
+        <button class="tab" data-tab="suggestions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Suggestions</span>
+        </button>
+        <button class="tab" data-tab="sandbox-approvals">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/></svg>
+          <span>Sandbox Approvals</span>
+        </button>
+        <button class="tab" data-tab="sandbox-comparison" style="display: none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+          <span>Sandbox Comparison</span>
+        </button>
         <span class="tab-divider" role="separator"></span>
         <button class="tab" data-tab="report">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M8 12h8M8 16h5"/></svg>
@@ -367,6 +495,58 @@
       </div>
 
       <div class="tab-content hidden" id="tab-links">
+        <div class="graph-header-bar" style="display:none !important">
+          <div class="graph-title-group">
+            <h3>Crawl Graph Topology</h3>
+            <p class="section-desc">Interactive 3D force-directed site topology. Nodes represent pages, edges represent internal/external links.</p>
+          </div>
+          <div class="graph-actions">
+            <button id="graph-limit-toggle-btn" class="btn-secondary" type="button" title="Toggle top density vs full graph">Top 100 Nodes</button>
+            <button id="graph-rotate-toggle-btn" class="btn-secondary" type="button" title="Toggle auto rotation">Pause Rotate</button>
+            <button id="graph-reset-cam-btn" class="btn-secondary" type="button" title="Reset camera angle">Reset View</button>
+          </div>
+        </div>
+
+        <div id="crawl-graph-section" class="crawl-graph-section elevation-2 panel-textured" style="display:none !important">
+          <div id="crawl-graph-container" class="crawl-graph-container">
+            <div id="crawl-graph-canvas" class="crawl-graph-canvas"></div>
+            <div id="crawl-graph-loading" class="crawl-graph-loading">
+              <div class="spinner"></div>
+              <span>Discovering site graph topology & relaxing forces...</span>
+            </div>
+            <div id="crawl-graph-fallback" class="crawl-graph-fallback hidden">
+              <p>WebGL unavailable or reduced-motion active. 3D visualizer disabled — full table view available below.</p>
+            </div>
+            <!-- Interactive Legend Overlay -->
+            <div class="crawl-graph-legend">
+              <span class="legend-item"><span class="legend-dot status-ok"></span> OK</span>
+              <span class="legend-item"><span class="legend-dot status-broken"></span> Broken</span>
+              <span class="legend-item"><span class="legend-dot status-redirect"></span> Redirect</span>
+              <span class="legend-item"><span class="legend-dot status-blocked"></span> Blocked</span>
+              <span class="legend-item"><span class="legend-dot status-unreachable"></span> Unreachable</span>
+              <span class="legend-item"><span class="legend-dot status-external"></span> External</span>
+            </div>
+            <!-- Graph Side Panel Drawer for clicked node -->
+            <div id="graph-node-panel" class="graph-node-panel hidden">
+              <div class="gn-header">
+                <span id="gn-status-badge" class="status-chip"></span>
+                <button id="gn-close-btn" class="gn-close-btn" type="button">&times;</button>
+              </div>
+              <h4 id="gn-title" class="gn-title"></h4>
+              <div id="gn-url" class="gn-url"></div>
+              <div class="gn-stats-grid">
+                <div class="gn-stat"><span id="gn-in-degree">0</span><small>In-Links</small></div>
+                <div class="gn-stat"><span id="gn-out-degree">0</span><small>Out-Links</small></div>
+                <div class="gn-stat"><span id="gn-code">-</span><small>Status Code</small></div>
+                <div class="gn-stat"><span id="gn-word-count">0</span><small>Word Count</small></div>
+              </div>
+              <div id="gn-actions" class="gn-actions" style="margin-top:8px">
+                <a id="gn-open-link" href="#" target="_blank" rel="noopener noreferrer" class="btn-primary" style="font-size:12px;padding:6px 12px;display:inline-block;text-align:center;width:100%">Open Page ↗</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="stats-grid" id="links-stats"></div>
         <details class="audit-card" open>
           <summary class="audit-check-summary">Link Health
@@ -374,6 +554,24 @@
             <button id="check-links-btn" class="btn-secondary" style="font-size:12px;padding:4px 10px">Run Check</button>
           </summary>
         <div id="link-health-summary" class="insights-card"></div>
+        <div class="table-controls-bar" style="margin-top:14px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <select id="link-status-filter" class="filter-select" aria-label="Filter links by status">
+              <option value="all">All Link Statuses</option>
+              <option value="broken">Broken (4xx/5xx)</option>
+              <option value="redirect">Redirect (301/302)</option>
+              <option value="blocked">Blocked (401/403)</option>
+              <option value="unreachable">Unreachable</option>
+              <option value="ok">OK (200)</option>
+              <option value="external">External</option>
+              <option value="unchecked">Unchecked</option>
+            </select>
+            <span id="link-filter-count" class="count-label"></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button id="link-density-toggle-btn" class="btn-secondary" type="button" style="font-size:12px;padding:4px 10px" title="Toggle table row density">Compact View</button>
+          </div>
+        </div>
         <div id="link-health-issues" class="insights-card"></div>
         <details style="margin-top:10px">
           <summary style="cursor:pointer;font-size:13px;color:var(--text-secondary)">What are redirects and why is the count often 0?</summary>
@@ -443,6 +641,7 @@
         <p class="section-desc">Send approved changes to GitHub as a pull request, or get an in-repo guide to apply them in your own repository.</p>
         <div class="table-controls" style="margin-bottom:10px">
           <button id="apply-changes-btn" class="btn-primary" style="padding:6px 14px;font-size:13px">Apply via GitHub PR</button>
+          <button id="apply-sandbox-btn" class="btn-primary" style="padding:6px 14px;font-size:13px">Apply to Sandbox</button>
           <span id="apply-changes-status" class="count-label"></span>
         </div>
         <div id="apply-guide-card" class="insights-card" style="display:none"></div>
@@ -725,6 +924,299 @@
           </div>
         </div>
       </div>
+
+      <div class="tab-content hidden" id="tab-sandbox-approvals">
+        <div class="section-header">
+          <h2>Sandbox Approvals</h2>
+          <p class="section-desc">Review and approve suggestions for the auto-apply sandbox. Approved items will be queued for applying.</p>
+          <button class="nav-btn" onclick="switchTab('sandbox-approvals')">Sandbox Approvals</button>
+          <button class="nav-btn" onclick="switchTab('sandbox-comparison')">Sandbox Comparison</button>
+        </div>
+        <div id="sandbox-approvals-queue" style="display:flex;flex-direction:column;gap:16px;"></div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-sandbox-comparison">
+        <div class="section-header">
+          <h2>Page-level Comparison View</h2>
+          <p class="section-desc">Baseline vs. Current Post-Apply Snapshot of the Sandbox</p>
+        </div>
+        
+        <div id="sandbox-comparison-loading" class="empty-state">Loading comparison...</div>
+        <div id="sandbox-comparison-error" class="error-card hidden" style="background:#fee2e2;color:#991b1b;padding:12px;border-radius:6px;margin-bottom:16px;"></div>
+        
+        <div id="sandbox-comparison-content" class="hidden">
+          <div style="display: flex; gap: 24px; margin-bottom: 24px;">
+            <div style="flex: 2; background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;">
+              <h3 style="margin-top:0;margin-bottom:16px;font-size:16px;">SEO Score Impact</h3>
+              <div style="display:flex; align-items:center; gap: 16px;">
+                <div style="text-align:center;">
+                  <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Baseline Score</div>
+                  <div id="comp-score-old" style="font-size:28px; font-weight:bold; color:var(--text-primary);">--</div>
+                </div>
+                <div style="font-size:24px; color:var(--text-muted);">→</div>
+                <div style="text-align:center;">
+                  <div style="font-size:12px; color:var(--text-muted); text-transform:uppercase;">Current Score</div>
+                  <div id="comp-score-new" style="font-size:28px; font-weight:bold; color:var(--text-primary);">--</div>
+                </div>
+                <div id="comp-score-delta" style="margin-left:auto; font-size:20px; font-weight:bold; padding: 6px 12px; border-radius: 20px;"></div>
+              </div>
+            </div>
+          </div>
+          
+          <h3 style="margin-bottom: 12px; font-size: 16px;">Field-by-Field Analysis</h3>
+          <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; margin-bottom: 24px;">
+            <table style="width: 100%; text-align: left; border-collapse: collapse;">
+              <thead>
+                <tr style="background: var(--bg-surface); border-bottom: 1px solid var(--border-color);">
+                  <th style="padding: 12px 16px; font-weight: 500;">Field</th>
+                  <th style="padding: 12px 16px; font-weight: 500;">Baseline Value</th>
+                  <th style="padding: 12px 16px; font-weight: 500;">Current Value</th>
+                  <th style="padding: 12px 16px; font-weight: 500; width: 100px;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="comp-fields-tbody">
+              </tbody>
+            </table>
+          </div>
+          
+          <div style="display: flex; gap: 24px; margin-bottom: 24px;">
+            <div style="flex: 1;">
+              <h3 style="margin-bottom: 12px; font-size: 16px;">Visual Comparison</h3>
+              <div style="display: flex; gap: 16px; overflow-x: auto; padding-bottom: 16px;">
+                <div style="flex: 1; min-width: 300px;">
+                  <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Baseline (Phase 2)</div>
+                  <div style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; max-height: 400px; overflow-y: auto;">
+                    <img id="comp-img-baseline" src="" alt="Baseline" style="width: 100%; display: block;" />
+                  </div>
+                </div>
+                <div style="flex: 1; min-width: 300px;">
+                  <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Current Post-Apply</div>
+                  <div style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; max-height: 400px; overflow-y: auto;">
+                    <img id="comp-img-current" src="" alt="Current" style="width: 100%; display: block;" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div style="width: 320px; flex-shrink: 0;">
+              <h3 style="margin-bottom: 12px; font-size: 16px;">Raw History Trail</h3>
+              <div id="comp-raw-history" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; max-height: 500px; overflow-y: auto;">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content hidden" id="tab-style-guide">
+        <div class="style-guide-container">
+          <div class="style-guide-header">
+            <h2>Foundation Design Tokens & Instrument Style Guide</h2>
+            <p>Formalized visual token system for RankEngine: background tiers, accent tones, 7 semantic status colors, tabular-figure monospace numeric typography, lit-edge elevation levels, instrument grid textures, motion timings, and reduced-motion accessibility fallbacks.</p>
+          </div>
+
+
+          <!-- Color Tokens Section -->
+          <div class="sg-section">
+            <div class="sg-section-title">🎨 Color Tokens & Background Tiers</div>
+            <div class="sg-section-desc">Tiered backgrounds (Base, Surface, Elevated), accent tones, and text tiers.</div>
+            <div class="swatch-grid">
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--bg-base);border:1px solid var(--border)"></div>
+                <div class="swatch-title">Base Background</div>
+                <div class="swatch-sub">--bg-base</div>
+              </div>
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--bg-surface);border:1px solid var(--border)"></div>
+                <div class="swatch-title">Surface / Card</div>
+                <div class="swatch-sub">--bg-surface</div>
+              </div>
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--bg-elevated);border:1px solid var(--border)"></div>
+                <div class="swatch-title">Elevated Tier</div>
+                <div class="swatch-sub">--bg-elevated</div>
+              </div>
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--accent)"></div>
+                <div class="swatch-title">Accent Tone</div>
+                <div class="swatch-sub">--accent</div>
+              </div>
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--accent-glow);border:1px dashed var(--accent)"></div>
+                <div class="swatch-title">Accent Glow</div>
+                <div class="swatch-sub">--accent-glow</div>
+              </div>
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--text-primary)"></div>
+                <div class="swatch-title">Primary Text</div>
+                <div class="swatch-sub">--text-primary</div>
+              </div>
+              <div class="swatch-card">
+                <div class="swatch-preview" style="background:var(--text-secondary)"></div>
+                <div class="swatch-title">Secondary Text</div>
+                <div class="swatch-sub">--text-secondary</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7 Semantic Status Colors Section -->
+          <div class="sg-section">
+            <div class="sg-section-title">🚦 Seven Semantic Status Colors</div>
+            <div class="sg-section-desc">Strictly enforced status colors across every badge, node, chart segment, and row in the UI.</div>
+            <div class="sg-status-grid">
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-ok</span>
+                  <span class="status-chip badge-status-ok">OK (200)</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-ok)"></div>
+                <div class="swatch-sub">--status-ok (teal-green)</div>
+              </div>
+
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-broken</span>
+                  <span class="status-chip badge-status-broken">Broken (404/500)</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-broken)"></div>
+                <div class="swatch-sub">--status-broken (coral-red)</div>
+              </div>
+
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-redirect</span>
+                  <span class="status-chip badge-status-redirect">Redirect (301/302)</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-redirect)"></div>
+                <div class="swatch-sub">--status-redirect (amber)</div>
+              </div>
+
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-blocked</span>
+                  <span class="status-chip badge-status-blocked">Blocked (robots/403)</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-blocked)"></div>
+                <div class="swatch-sub">--status-blocked (slate-violet)</div>
+              </div>
+
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-unreachable</span>
+                  <span class="status-chip badge-status-unreachable">Unreachable (timeout)</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-unreachable)"></div>
+                <div class="swatch-sub">--status-unreachable (deep red)</div>
+              </div>
+
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-external</span>
+                  <span class="status-chip badge-status-external">External</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-external)"></div>
+                <div class="swatch-sub">--status-external (blue-gray)</div>
+              </div>
+
+              <div class="sg-status-card">
+                <div class="sg-status-header">
+                  <span class="sg-status-name">status-unchecked</span>
+                  <span class="status-chip badge-status-unchecked">Unchecked</span>
+                </div>
+                <div class="swatch-preview" style="background:var(--status-unchecked)"></div>
+                <div class="swatch-sub">--status-unchecked (neutral gray)</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Typography Section -->
+          <div class="sg-section">
+            <div class="sg-section-title">🔢 Tabular-Figure Monospace Typography</div>
+            <div class="sg-section-desc">JetBrains Mono reserved for all numbers (scores, percentages, counts, timestamps) to eliminate horizontal layout jitter.</div>
+            <div class="sg-typography-comparison">
+              <div class="sg-typo-box">
+                <h4>Standard UI Sans (Body / Headings)</h4>
+                <p style="font-size:15px;line-height:1.6">The quick brown fox jumps over 12,345 lazy dogs. Standard variable-width digits can shift layout when updated live.</p>
+              </div>
+              <div class="sg-typo-box">
+                <h4>JetBrains Mono (Tabular Figures)</h4>
+                <div class="sg-num-demo">
+                  <div class="sg-num-row"><span>Health Score</span><strong class="sg-num-value" id="sg-demo-score" style="font-size:18px;color:var(--status-ok-text)">98.4%</strong></div>
+                  <div class="sg-num-row"><span>Pages Analyzed</span><strong class="sg-num-value" id="sg-demo-pages" style="font-size:18px">1,429</strong></div>
+                  <div class="sg-num-row"><span>Crawl Latency</span><strong class="sg-num-value" id="sg-demo-latency" style="font-size:18px">142ms</strong></div>
+                  <div class="sg-num-row"><span>Timestamp</span><strong class="sg-num-value" style="font-size:13px;color:var(--text-secondary)">2026-08-12 10:57:38</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Elevation & Texture Section -->
+          <div class="sg-section">
+            <div class="sg-section-title">✨ Elevation Tiers & Panel Texture</div>
+            <div class="sg-section-desc">4 Elevation shadow levels with 1px top inner lit-edges, plus optional faint instrument grid texture.</div>
+            <div class="sg-elevation-grid">
+              <div class="sg-elevation-card elevation-1">
+                <strong>Elevation 1</strong>
+                <small style="color:var(--text-secondary)">Subtle card shadow + lit edge</small>
+              </div>
+              <div class="sg-elevation-card elevation-2">
+                <strong>Elevation 2</strong>
+                <small style="color:var(--text-secondary)">Standard panel shadow + lit edge</small>
+              </div>
+              <div class="sg-elevation-card elevation-3">
+                <strong>Elevation 3</strong>
+                <small style="color:var(--text-secondary)">Raised rail / modal shadow</small>
+              </div>
+              <div class="sg-elevation-card elevation-4">
+                <strong>Elevation 4</strong>
+                <small style="color:var(--text-secondary)">Floating dialog / dropdown shadow</small>
+              </div>
+            </div>
+            <div class="panel-textured" style="margin-top:20px;padding:24px;border:1px solid var(--border);border-radius:var(--radius)">
+              <strong>Instrument Grid Texture (.panel-textured)</strong>
+              <p style="font-size:13px;color:var(--text-secondary);margin-top:4px">Faint 2.5% opacity grid pattern rendered behind panels to reinforce instrument panel aesthetics.</p>
+            </div>
+          </div>
+
+          <!-- Motion & Accessibility Section -->
+          <div class="sg-section">
+            <div class="sg-section-title">⚡ Motion Tokens & Reduced-Motion Fallbacks</div>
+            <div class="sg-section-desc">Named curves (Entrance, Exit, Ambient), duration scale (150ms, 300ms, 750ms), 50ms stagger increments, and prefers-reduced-motion compliance.</div>
+            <div class="sg-motion-grid">
+              <div class="sg-motion-card">
+                <strong>Micro-interaction (150ms)</strong>
+                <div class="sg-motion-stage">
+                  <div class="sg-motion-box" id="sg-box-micro">150</div>
+                </div>
+                <button type="button" class="btn-secondary" style="font-size:12px;padding:4px 10px" id="sg-trigger-micro">Test Micro</button>
+              </div>
+
+              <div class="sg-motion-card">
+                <strong>Standard Transition (300ms)</strong>
+                <div class="sg-motion-stage">
+                  <div class="sg-motion-box" id="sg-box-standard">300</div>
+                </div>
+                <button type="button" class="btn-secondary" style="font-size:12px;padding:4px 10px" id="sg-trigger-standard">Test Standard</button>
+              </div>
+
+              <div class="sg-motion-card">
+                <strong>Orchestrated Reveal (750ms)</strong>
+                <div class="sg-motion-stage">
+                  <div class="sg-motion-box" id="sg-box-orchestrated">750</div>
+                </div>
+                <button type="button" class="btn-secondary" style="font-size:12px;padding:4px 10px" id="sg-trigger-orchestrated">Test Reveal</button>
+              </div>
+            </div>
+
+            <div style="margin-top:20px;padding:16px;background:var(--bg-base);border:1px solid var(--border);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <strong>Reduced-Motion Status</strong>
+                <p id="sg-reduced-motion-status" style="font-size:13px;color:var(--text-secondary);margin-top:2px">Detecting browser preference...</p>
+              </div>
+              <span class="status-chip badge-status-ok" id="sg-motion-badge">Checking</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
       <aside class="rail right-rail" id="right-rail" aria-label="Live activity, assistant and quick links">
@@ -738,13 +1230,34 @@
         <section class="rail-section">
           <h4 class="rail-title">Quick links</h4>
           <div class="rail-links" id="rail-links">
-            <button type="button" data-go="report">Report</button>
-            <button type="button" data-go="seo-insights">SEO Insights</button>
-            <button type="button" data-go="competitors">Competitors</button>
-            <button type="button" data-go="quality">Quality</button>
-            <button type="button" data-go="schedules">Schedules</button>
-            <button type="button" data-go="settings">Settings</button>
-            <button type="button" data-go="new">New Analysis</button>
+            <button type="button" data-go="report" class="quick-link-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span>Report</span>
+            </button>
+            <button type="button" data-go="seo-insights" class="quick-link-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>SEO Insights</span>
+            </button>
+            <button type="button" data-go="competitors" class="quick-link-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>Competitors</span>
+            </button>
+            <button type="button" data-go="quality" class="quick-link-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>Quality</span>
+            </button>
+            <button type="button" data-go="schedules" class="quick-link-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Schedules</span>
+            </button>
+            <button type="button" data-go="settings" class="quick-link-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span>Settings</span>
+            </button>
+            <button type="button" data-go="new" class="quick-link-btn btn-primary-accent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>New Analysis</span>
+            </button>
           </div>
         </section>
       </aside>
