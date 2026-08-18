@@ -3691,6 +3691,7 @@ function openPastAnalyses() {
   document.body.classList.add("jobless");
   setDashboardVisible(true);
   loadSites();
+  switchTab('sites');
 }
 
 async function compareSelected() {
@@ -4533,3 +4534,179 @@ function populateComparisonTab(data) {
     historyContainer.appendChild(item);
   }
 }
+
+// --- AGENT SIDEBAR LOGIC ---
+let activeAgentRunId = null;
+let agentPollTimer = null;
+
+function initAgentTabs() {
+  const tabs = document.querySelectorAll('.chat-tab-btn');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      
+      document.getElementById('chat-box').classList.add('hidden');
+      document.getElementById('agent-box').classList.add('hidden');
+      
+      const target = tab.getAttribute('data-target');
+      document.getElementById(target).classList.remove('hidden');
+      
+      if (target === 'agent-box') {
+        document.getElementById('agent-alert-dot').classList.add('hidden');
+      }
+    });
+  });
+  
+  const approveBtn = document.getElementById('agent-approve-btn');
+  if (approveBtn) approveBtn.addEventListener('click', async () => {
+    if (!activeAgentRunId) return;
+    try {
+      const resp = await fetch(`${API_BASE}/agent/runs/${activeAgentRunId}/approve`, { method: "POST" });
+      if (!resp.ok) throw new Error("Failed to approve");
+      document.getElementById('agent-action-group').classList.add('hidden');
+      pollAgentRun();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  });
+
+  const stopBtn = document.getElementById('agent-stop-btn');
+  if (stopBtn) stopBtn.addEventListener('click', async () => {
+    if (!activeAgentRunId) return;
+    try {
+      const resp = await fetch(`${API_BASE}/agent/runs/${activeAgentRunId}/stop`, { method: "POST" });
+      if (!resp.ok) throw new Error("Failed to stop");
+      document.getElementById('agent-action-group').classList.add('hidden');
+      pollAgentRun();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  });
+}
+
+function startAgentPoll(runId) {
+  activeAgentRunId = runId;
+  
+  // Show sidebar if hidden, and switch to Agent tab
+  const panel = document.getElementById("chat-panel");
+  if (panel.classList.contains("hidden")) {
+    panel.classList.remove("hidden");
+    chatUserClosed = false;
+  }
+  document.querySelector('.chat-tab-btn[data-target="agent-box"]').click();
+  
+  if (agentPollTimer) clearTimeout(agentPollTimer);
+  pollAgentRun();
+}
+
+async function pollAgentRun() {
+  if (!activeAgentRunId) return;
+  try {
+    const resp = await fetch(`${API_BASE}/agent/runs/${activeAgentRunId}/log`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderAgentState(data.run, data.episode);
+    
+    if (["queued", "running"].includes(data.run.status)) {
+      agentPollTimer = setTimeout(pollAgentRun, 2000);
+    }
+  } catch (e) {
+    console.error("Agent poll error", e);
+  }
+}
+
+function renderAgentState(run, episode) {
+  const badge = document.getElementById('agent-status-badge');
+  badge.textContent = run.status.toUpperCase();
+  
+  const alertDot = document.getElementById('agent-alert-dot');
+  const actionGroup = document.getElementById('agent-action-group');
+  
+  if (run.status === 'waiting_approval') {
+    badge.style.background = 'var(--status-broken)';
+    badge.style.color = 'white';
+    actionGroup.classList.remove('hidden');
+    const agentTab = document.querySelector('.chat-tab-btn[data-target="agent-box"]');
+    if (!agentTab.classList.contains('active')) alertDot.classList.remove('hidden');
+  } else {
+    actionGroup.classList.add('hidden');
+    if (run.status === 'running') {
+      badge.style.background = 'var(--accent)';
+      badge.style.color = 'white';
+    } else {
+      badge.style.background = 'var(--bg-elevated)';
+      badge.style.color = 'var(--text-muted)';
+    }
+  }
+  
+  const msgs = document.getElementById('agent-messages');
+  let html = '';
+  
+  if (episode && episode.steps && episode.steps.length > 0) {
+    episode.steps.forEach(step => {
+      let statusClass = step.ok ? 'done' : 'error';
+      if (!step.result && !step.error) statusClass = 'running';
+      
+      let stepHtml = `<div class="agent-step ${statusClass}">
+        <div class="agent-step-tool">${escapeHtml(step.tool)}</div>
+        <div class="agent-step-reason">${escapeHtml(step.reasoning)}</div>`;
+        
+      if (step.result) {
+        stepHtml += `<div class="agent-step-result">${escapeHtml(JSON.stringify(step.result, null, 2))}</div>`;
+      } else if (step.error) {
+        stepHtml += `<div class="agent-step-result" style="color:var(--status-broken)">${escapeHtml(step.error)}</div>`;
+      }
+      stepHtml += `</div>`;
+      html += stepHtml;
+    });
+  } else {
+    html = `<div class="chat-message bot" style="opacity: 0.7;">No steps executed yet.</div>`;
+  }
+  
+  // Only update HTML if changed to prevent scrolling jump on every poll
+  if (msgs.innerHTML !== html) {
+    msgs.innerHTML = html;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+// Call init on load
+initAgentTabs();
+
+// --- Quick Agent Audit Button ---
+setTimeout(() => {
+  const btn = document.getElementById("quick-run-agent");
+  if (btn) {
+    btn.addEventListener("click", async () => {
+      if (!currentJobId) {
+        showToast("Open a site first to run the agent.", true);
+        return;
+      }
+      const jobUrl = document.getElementById("results-url")?.textContent || "https://example.com";
+      try {
+        btn.disabled = true;
+        btn.innerHTML = `<span>Starting...</span>`;
+        const resp = await fetch(`${API_BASE}/agent/runs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            goal: "Audit the site, find issues, and prepare a plan.",
+            scope: "single_page",
+            urls: [jobUrl],
+            checkpoint_policy: "never"
+          })
+        });
+        if (!resp.ok) throw new Error("Failed to start agent");
+        const data = await resp.json();
+        showToast("Agent started!");
+        startAgentPoll(data.run_id);
+      } catch (e) {
+        showToast(e.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<span>🤖 Run Agent Audit</span>`;
+      }
+    });
+  }
+}, 1000); // delay to ensure element exists

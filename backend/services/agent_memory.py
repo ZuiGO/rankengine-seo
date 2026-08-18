@@ -54,6 +54,23 @@ async def record_fact(domain: str, key: str, value: Any, confidence: float = 1.0
     )
 
 
+async def record_domain_category(domain: str, category: str, data: dict, source_run: str | None = None) -> None:
+    if not domain:
+        return
+    db = get_db()
+    
+    update_fields = {f"value.{category}.{k}": v for k, v in data.items()}
+    update_fields["updated_at"] = datetime.utcnow()
+    if source_run:
+        update_fields["source_run"] = source_run
+        
+    await db.agent_facts.update_one(
+        {"domain": domain, "fact_key": "domain_facts"},
+        {"$set": update_fields},
+        upsert=True
+    )
+
+
 async def get_facts(domain: str) -> dict[str, Any]:
     if not domain:
         return {}

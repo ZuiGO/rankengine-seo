@@ -249,200 +249,92 @@ async def _generate_suggestions_tool(job_id: str, focus_areas: list[str] | None 
     return {"ok": True, "created": created, "count": len(created)}
 
 
-async def _apply_to_sandbox_tool(job_id: str, suggestion_ids: list[str]) -> dict:
-    from backend.services.staging import apply_override, capture_page
+async def _apply_changes_tool(job_id: str, suggestion_ids: list[str]) -> dict:
+    from backend.services.snapshot_service import capture_snapshot
+    from backend.services.notifications import create_github_pr
+    from urllib.parse import urlparse
 
     db = get_db()
     applied = []
     failed = []
-    staging_page_cache: dict[str, str] = {}
 
+    # Group suggestions by page_url
+    suggestions_by_url = {}
     for sid in suggestion_ids or []:
         doc = await db.sandbox_suggestions.find_one({"id": sid})
         if not doc:
             failed.append({"id": sid, "error": "suggestion not found"})
             continue
-        field_type = doc.get("field_type")
-        mapped = FIELD_MAP.get(field_type)
-        if not mapped:
-            failed.append({"id": sid, "error": f"unsupported field_type {field_type}"})
-            continue
-        value = doc.get("suggested_value")
-        if not value:
-            failed.append({"id": sid, "error": "empty suggested_value"})
-            continue
         page_url = doc.get("page_url")
-        if page_url not in staging_page_cache:
-            cap = await capture_page(page_url, job_id)
-            if cap.get("status") != "ok":
-                failed.append({"id": sid, "error": f"capture failed: {cap.get('message')}"})
-                continue
-            staging_page_cache[page_url] = cap["staging_page_id"]
-        staging_page_id = staging_page_cache[page_url]
+        if not page_url:
+            failed.append({"id": sid, "error": "no page_url"})
+            continue
+        suggestions_by_url.setdefault(page_url, []).append(doc)
+
+    preview_urls = []
+    
+    for page_url, docs in suggestions_by_url.items():
+        domain = urlparse(page_url).netloc
+        
+        # 1. Take a live visual snapshot with changes
         try:
-            await apply_override(staging_page_id, mapped, value, sid)
+            await capture_snapshot(page_url, job_id=job_id, tag=f"apply_{job_id}", changes=docs)
         except Exception as e:
-            failed.append({"id": sid, "error": str(e)})
-            continue
-        await db.sandbox_suggestions.update_one(
-            {"id": sid}, {"$set": {"status": "approved, pending apply"}}
-        )
-        applied.append(
-            {
-                "id": sid,
-                "page_url": page_url,
-                "field_type": field_type,
-                "staging_page_id": staging_page_id,
-            }
-        )
-
-    return {"ok": True, "applied": applied, "failed": failed, "staging_page_ids": sorted(set(staging_page_cache.values()))}
-
-
-async def _capture_local_snapshot(html: str, url: str, job_id: str | None, tag: str) -> dict | None:
-    """Render HTML in Playwright and store a snapshot locally (no Vercel)."""
-    from playwright.async_api import async_playwright
-
-    try:
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
-            try:
-                page = await browser.new_page()
-                await page.set_content(html, wait_until="load")
-                dom = await page.evaluate("document.documentElement.outerHTML")
-                meta_tags = await page.evaluate(
-                    """() => {
-                        const tags = document.querySelectorAll('meta');
-                        return Array.from(tags).map(tag => ({
-                            name: tag.getAttribute('name') || tag.getAttribute('property') || '',
-                            content: tag.getAttribute('content') || ''
-                        }));
-                    }"""
+            logger.warning("Visual snapshot capture failed for %s: %s", page_url, e)
+            
+        # 2. Create GitHub PR for these changes
+        pr_result = await create_github_pr(domain, docs)
+        
+        if pr_result and pr_result.get("ok"):
+            preview_url = pr_result.get("html_url")
+            preview_urls.append(preview_url)
+            for doc in docs:
+                sid = doc["id"]
+                await db.sandbox_suggestions.update_one(
+                    {"id": sid}, 
+                    {"$set": {"status": "applied", "last_commit_hash": "github_pr"}}
                 )
-                title = await page.title()
-                h1 = await page.evaluate(
-                    "document.querySelector('h1') ? document.querySelector('h1').innerText : ''"
-                )
-                screenshot_bytes = await page.screenshot(full_page=True, type="jpeg", quality=70)
-                screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-                snapshot = {
-                    "url": url,
-                    "job_id": job_id,
-                    "tag": tag,
-                    "dom": dom,
-                    "meta_tags": meta_tags,
-                    "title": title,
-                    "h1": h1,
-                    "screenshot_b64": screenshot_b64,
-                    "created_at": datetime.utcnow(),
-                }
-                db = get_db()
-                result = await db.sandbox_snapshots.insert_one(snapshot)
-                snapshot["_id"] = str(result.inserted_id)
-                return snapshot
-            finally:
-                await browser.close()
-    except Exception as e:
-        logger.warning("Local snapshot capture failed for %s: %s", url, e)
-        return None
+                applied.append({
+                    "id": sid,
+                    "page_url": page_url,
+                    "field_type": doc.get("field_type"),
+                    "preview_url": preview_url,
+                })
+        else:
+            msg = pr_result.get("error") if pr_result else "No GitHub token configured"
+            for doc in docs:
+                failed.append({"id": doc["id"], "error": msg})
 
-
-async def _verify_changes_tool(job_id: str, staging_page_ids: list[str]) -> dict:
-    from backend.services.staging import get_overrides_for_page, get_staging_page, render_staging_page
-    from backend.services.snapshots.comparison_view import get_comparison_data
-
-    db = get_db()
-    verified = []
-    for pid in staging_page_ids or []:
-        page = await get_staging_page(pid)
-        if not page:
-            verified.append({"staging_page_id": pid, "error": "staging page not found"})
-            continue
-        url = page.get("url", "")
-        overrides = await get_overrides_for_page(pid)
-        html = await render_staging_page(pid, overrides)
-        snapshot = await _capture_local_snapshot(html, url, job_id, f"agent_verify_{job_id}")
-        if not snapshot:
-            verified.append({"staging_page_id": pid, "url": url, "error": "snapshot capture failed"})
-            continue
-        verified.append(
-            {
-                "staging_page_id": pid,
-                "url": url,
-                "title": (snapshot.get("title") or "")[:120],
-                "meta_description_present": any(
-                    (m.get("name") or "").lower() == "description" and bool(m.get("content"))
-                    for m in snapshot.get("meta_tags", [])
-                ),
-                "h1_count": int(bool(snapshot.get("h1"))),
-                "overrides": overrides,
-            }
-        )
-
-    comparison = {}
-    try:
-        comparison = await get_comparison_data()
-    except Exception as e:
-        comparison = {"error": str(e)}
-    comparison.pop("baseline_screenshot", None)
-    comparison.pop("current_screenshot", None)
-    comparison.pop("raw_history", None)
-    if "field_comparison" in comparison:
-        fc = []
-        for f in comparison["field_comparison"]:
-            if not f.get("is_changed") and f.get("status") in ("pending", "failed"):
-                continue
-            fc.append(f)
-            if len(fc) == 12:
-                break
-        for f in fc:
-            f["old_value"] = (f.get("old_value") or "")[:80]
-            f["new_value"] = (f.get("new_value") or "")[:80]
-        comparison["field_comparison"] = fc
-
-    return _compact({"ok": True, "verified": verified, "comparison": comparison})
+    return {"ok": True, "applied": applied, "failed": failed, "preview_urls": preview_urls}
 
 
 async def _read_current_state_tool(job_id: str) -> dict:
     db = get_db()
-    pages = await db.pages.count_documents({"job_id": job_id})
-    content = await db.content_items.count_documents({"job_id": job_id})
-    cursor = db.sandbox_suggestions.find({"job_id": job_id}).sort("_id", -1).limit(10)
-    suggestions = await cursor.to_list(length=10)
+    facts = await db.agent_facts.find_one({"job_id": job_id})
+    if facts and "_id" in facts:
+        del facts["_id"]
+    return {"status": "ok", "facts": facts or {}}
+
+
+async def _query_knowledge_tool(job_id: str, domain: str, question: str) -> dict:
+    from backend.services.agent_memory import get_domain_facts
+    facts = await get_domain_facts(domain)
     return {
-        "ok": True,
-        "job_id": job_id,
-        "pages_crawled": pages,
-        "content_items": content,
-        "page_facts": await _page_facts(job_id, limit=5),
-        "sandbox_suggestions": [
-            {
-                "id": s.get("id"),
-                "page_url": s.get("page_url"),
-                "field_type": s.get("field_type"),
-                "status": s.get("status"),
-                "suggested_value": (s.get("suggested_value") or "")[:80],
-            }
-            for s in suggestions
-        ],
-    }
-
-
-async def _query_knowledge_tool(domain: str, question: str = "", job_id: str | None = None) -> dict:
-    from backend.services.agent_memory import get_facts, recent_episodes
-
-    facts = await get_facts(domain)
-    episodes = await recent_episodes(domain, limit=3)
-    return {
-        "ok": True,
         "domain": domain,
-        "facts": facts,
-        "recent_episodes": [
-            {"run_id": e.get("run_id"), "goal": e.get("goal"), "outcome": e.get("outcome")}
-            for e in episodes
-        ],
-        "question": question,
+        "facts_summary": facts.get("insights", {}),
+        "recent_episodes": facts.get("episodes", [])[-3:]
     }
+
+
+FIELD_MAP = {
+    "title": "title_tag",
+    "meta_description": "meta_description",
+    "h1": "h1",
+    "h2": "h2",
+    "canonical": "canonical",
+    "robots": "meta_robots",
+    "schema": "schema_jsonld",
+}
 
 
 TOOL_REGISTRY: dict[str, dict] = {
@@ -490,9 +382,9 @@ TOOL_REGISTRY: dict[str, dict] = {
         "requires_checkpoint": False,
         "credit_cost": 0.0,
     },
-    "apply_to_sandbox": {
-        "name": "apply_to_sandbox",
-        "description": "Apply approved sandbox suggestions to the local staging replica (NEVER the live site or Vercel). Requires human approval.",
+    "apply_changes": {
+        "name": "apply_changes",
+        "description": "Apply approved suggestions by creating a GitHub Pull Request and capturing a visual live preview. Requires human approval.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -500,22 +392,8 @@ TOOL_REGISTRY: dict[str, dict] = {
             },
             "required": ["suggestion_ids"],
         },
-        "handler": _apply_to_sandbox_tool,
+        "handler": _apply_changes_tool,
         "requires_checkpoint": True,
-        "credit_cost": 0.0,
-    },
-    "verify_changes": {
-        "name": "verify_changes",
-        "description": "Render staging pages with applied overrides, capture snapshots, and compare against baseline (SEO score delta).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "staging_page_ids": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["staging_page_ids"],
-        },
-        "handler": _verify_changes_tool,
-        "requires_checkpoint": False,
         "credit_cost": 0.0,
     },
     "read_current_state": {
@@ -542,3 +420,15 @@ TOOL_REGISTRY: dict[str, dict] = {
         "credit_cost": 0.0,
     },
 }
+
+from backend.services.agent_tools.tool_registry import ToolSpec, registry
+
+for name, tool_dict in TOOL_REGISTRY.items():
+    registry.register(ToolSpec(
+        name=tool_dict["name"],
+        description=tool_dict["description"],
+        parameters=tool_dict["parameters"],
+        handler=tool_dict["handler"],
+        requires_checkpoint=tool_dict.get("requires_checkpoint", False),
+        credit_cost=tool_dict.get("credit_cost", 0.0)
+    ))

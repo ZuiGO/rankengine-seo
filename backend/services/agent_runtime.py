@@ -8,7 +8,7 @@ from datetime import datetime
 from backend.db.mongo import get_db
 from backend.logging_setup import get_logger
 from backend.models.agent_schemas import AgentDecision, AgentStep
-from backend.services.agent_memory import record_fact, save_episode
+from backend.services.agent_memory import record_fact, save_episode, record_domain_category
 from backend.services.agent_planner import decide
 from backend.services.agent_tools import TOOL_REGISTRY
 
@@ -92,7 +92,7 @@ class AgentRuntime:
                 run["error"] = f"unknown tool: {decision.tool}"
                 break
 
-            if spec.get("requires_checkpoint") and run.get("checkpoint_policy") != "never":
+            if spec.requires_checkpoint and run.get("checkpoint_policy") != "never":
                 run["status"] = "waiting_approval"
                 run["pending_payload"] = {"tool": decision.tool, "args": decision.args}
                 run["updated_at"] = datetime.utcnow()
@@ -182,10 +182,10 @@ class AgentRuntime:
         )
         start = time.perf_counter()
         if spec:
-            spec_credit_cost = float(spec.get("credit_cost", 0))
+            spec_credit_cost = float(spec.credit_cost)
             run["credits_spent"] = float(run.get("credits_spent", 0)) + spec_credit_cost
             try:
-                handler = spec["handler"]
+                handler = spec.handler
                 result = await handler(**{**decision.args, "job_id": run.get("job_id")})
                 step.result = _compact_result(result)
                 step.ok = bool(result.get("ok", True)) if isinstance(result, dict) else True
@@ -221,7 +221,7 @@ class AgentRuntime:
             facts["suggestions_pending"] = len(created)
             ids = [c["id"] for c in created]
             facts["suggestion_ids_pending"] = ids
-        elif step.tool == "apply_to_sandbox":
+        elif step.tool == "apply_changes":
             facts["apply_attempted"] = True
             applied = result.get("applied") or []
             pending_ids = list(facts.get("suggestion_ids_pending") or [])
@@ -264,6 +264,40 @@ class AgentRuntime:
                 (result.get("comparison") or {}).get("seo_score", {}).get("delta"),
                 source_run=run.get("id"),
             )
+        elif step.tool == "crawl_full_site" and result.get("ok"):
+            summary = result.get("summary", {})
+            crawl_data = {
+                "pages_crawled": summary.get("pages_crawled", 0),
+                "sitemap_coverage": summary.get("sitemap_coverage", 0.0)
+            }
+            await record_domain_category(domain, "crawl", crawl_data, source_run=run.get("id"))
+        elif step.tool == "run_full_analysis" and result.get("ok"):
+            job_id = run.get("job_id")
+            if job_id:
+                from backend.db.mongo import get_db
+                db = get_db()
+                job = await db.analysis_jobs.find_one({"_id": job_id}) or {}
+                summary = job.get("summary", {})
+                analysis_data = {
+                    "thin_pages": summary.get("thin_pages", 0),
+                    "missing_meta": summary.get("missing_meta", 0)
+                }
+                await record_domain_category(domain, "analysis", analysis_data, source_run=run.get("id"))
+                
+                # We can also extract technical health here
+                tech = job.get("technical", {})
+                tech_data = {
+                    "health_score": tech.get("health_score", 0),
+                    "critical_issues": len(tech.get("critical_issues", []))
+                }
+                await record_domain_category(domain, "technical", tech_data, source_run=run.get("id"))
+        elif step.tool == "fetch_seo_insights" and result.get("ok"):
+            insights = result.get("insights", {})
+            insights_data = {
+                "top_keywords": insights.get("top_keywords", [])[:5],
+                "serp_positions": insights.get("serp_positions", {})
+            }
+            await record_domain_category(domain, "insights", insights_data, source_run=run.get("id"))
 
     async def _persist_episode(self, run: dict) -> None:
         try:

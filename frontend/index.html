@@ -1262,6 +1262,9 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               <span>New Analysis</span>
             </button>
+            <button type="button" id="quick-run-agent" class="quick-link-btn" style="border: 1px solid var(--accent); color: var(--accent);">
+              <span>🤖 Run Agent Audit</span>
+            </button>
           </div>
         </section>
       </aside>
@@ -1270,10 +1273,13 @@
 </div>
 
 <div id="chat-widget" class="chat-widget">
-  <button id="chat-toggle" class="chat-toggle">💬 Chat</button>
+  <button id="chat-toggle" class="chat-toggle">💬 Chat & Agent</button>
   <div id="chat-panel" class="chat-panel hidden">
     <div class="chat-panel-header">
-      <span class="chat-panel-title">💬 AI Assistant</span>
+      <div class="chat-tabs" id="chat-tabs">
+        <button class="chat-tab-btn active" data-target="chat-box">💬 Chat</button>
+        <button class="chat-tab-btn" data-target="agent-box">🤖 Agent<span id="agent-alert-dot" class="alert-dot hidden"></span></button>
+      </div>
       <span id="chat-context-hint" class="chat-context-hint"></span>
       <button id="chat-close" class="chat-close" title="Close">✕</button>
     </div>
@@ -1285,6 +1291,19 @@
         <input type="text" id="chat-input" placeholder="Ask me anything about SEO..." disabled>
         <button type="submit" id="chat-send" disabled>Send</button>
       </form>
+    </div>
+    <div class="chat-box hidden" id="agent-box" style="display: flex; flex-direction: column;">
+      <div class="agent-status-bar" style="padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface);">
+        <span style="font-size: 13px; font-weight: 600; color: var(--text-muted);">Current Task</span>
+        <span id="agent-status-badge" class="badge" style="background: var(--bg-elevated); color: var(--text-muted);">Idle</span>
+      </div>
+      <div class="chat-messages" id="agent-messages" style="flex: 1; overflow-y: auto;">
+        <div class="chat-message bot" style="opacity: 0.7;">No agent run active for this site.</div>
+      </div>
+      <div id="agent-action-group" class="chat-input-group hidden" style="padding: 12px; background: var(--bg-surface); border-top: 1px solid var(--border); gap: 8px; flex-shrink: 0;">
+        <button type="button" id="agent-approve-btn" class="btn-primary" style="flex: 1;">Approve</button>
+        <button type="button" id="agent-stop-btn" class="btn-danger" style="flex: 1;">Stop</button>
+      </div>
     </div>
   </div>
 </div>

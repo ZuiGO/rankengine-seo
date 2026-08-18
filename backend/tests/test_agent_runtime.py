@@ -203,18 +203,14 @@ async def _install_stub_tools(monkeypatch):
             for i in kw.get("suggestion_ids", [])
         ], "failed": [], "staging_page_ids": ["sp1"]}
 
-    async def fake_verify(**kw):
-        return {"ok": True, "verified": [{"staging_page_id": "sp1", "url": "https://fluidcontrols.com/products/railways/", "title": "New Title", "meta_description_present": True, "h1_count": 1}], "comparison": {"seo_score": {"old": 65, "new": 92, "delta": 27}}}
-
     stubs = {
         "crawl_urls": fake_crawl,
         "run_analyzers": fake_analyze,
         "generate_suggestions": fake_suggest,
-        "apply_to_sandbox": fake_apply,
-        "verify_changes": fake_verify,
+        "apply_changes": fake_apply,
     }
     for name, handler in stubs.items():
-        monkeypatch.setitem(TOOL_REGISTRY[name], "handler", handler)
+        monkeypatch.setattr(TOOL_REGISTRY[name], "handler", handler)
 
 
 # ---------- planner ----------
@@ -232,26 +228,22 @@ def test_fallback_sequence():
     assert d.tool == "generate_suggestions"
 
     d = _fallback_decision({"facts": {"pages_crawled": 1, "analyze_done": True, "suggestions_attempted": True, "suggestions_pending": 2, "suggestion_ids_pending": ["s1", "s2"]}})
-    assert d.tool == "apply_to_sandbox"
+    assert d.tool == "apply_changes"
     assert d.args["suggestion_ids"] == ["s1", "s2"]
 
-    d = _fallback_decision({"facts": {"pages_crawled": 1, "analyze_done": True, "suggestions_attempted": True, "apply_attempted": True, "staging_page_ids": ["sp1"]}})
-    assert d.tool == "verify_changes"
-    assert d.args["staging_page_ids"] == ["sp1"]
-
-    d = _fallback_decision({"facts": {"pages_crawled": 1, "analyze_done": True, "suggestions_attempted": True, "apply_attempted": True, "verification_done": True}})
+    d = _fallback_decision({"facts": {"pages_crawled": 1, "analyze_done": True, "suggestions_attempted": True, "apply_attempted": True}})
     assert d.tool == "complete"
 
 
 def test_validate_decision_rejects_bad_inputs():
     assert _validate_decision({"tool": "nope", "args": {}}, {}) is None
     assert _validate_decision({"tool": "crawl_urls", "args": "not-a-dict"}, {}) is None
-    assert _validate_decision({"tool": "apply_to_sandbox", "args": {"suggestion_ids": ["z"]}}, {"facts": {}}) is None
+    assert _validate_decision({"tool": "apply_changes", "args": {"suggestion_ids": ["z"]}}, {"facts": {}}) is None
     ok = _validate_decision(
-        {"tool": "apply_to_sandbox", "args": {"suggestion_ids": ["s1"]}},
+        {"tool": "apply_changes", "args": {"suggestion_ids": ["s1"]}},
         {"facts": {"suggestion_ids_pending": ["s1"]}},
     )
-    assert ok is not None and ok.tool == "apply_to_sandbox"
+    assert ok is not None and ok.tool == "apply_changes"
     complete = _validate_decision({"tool": "complete", "args": {}}, {})
     assert complete is not None and complete.tool == "complete"
 
@@ -268,7 +260,7 @@ async def test_flow_checkpoint_then_approve(monkeypatch):
     assert doc["status"] == "waiting_approval"
     tools = [s["tool"] for s in doc["steps"]]
     assert tools == ["crawl_urls", "run_analyzers", "generate_suggestions"]
-    assert doc["pending_payload"]["tool"] == "apply_to_sandbox"
+    assert doc["pending_payload"]["tool"] == "apply_changes"
     assert doc["facts"]["suggestions_pending"] == 2
 
     ok = await AgentRuntime().approve(run_id)
@@ -276,8 +268,7 @@ async def test_flow_checkpoint_then_approve(monkeypatch):
     doc = await db.agent_runs.find_one({"id": run_id})
     assert doc["status"] == "complete"
     tools = [s["tool"] for s in doc["steps"]]
-    assert tools == ["crawl_urls", "run_analyzers", "generate_suggestions", "apply_to_sandbox", "verify_changes"]
-    assert doc["facts"]["seo_score_delta"] == 27
+    assert tools == ["crawl_urls", "run_analyzers", "generate_suggestions", "apply_changes"]
     assert doc["completed_at"] is not None
 
     episode = await get_episode(run_id)
@@ -294,7 +285,7 @@ async def test_policy_never_skips_checkpoint(monkeypatch):
     doc = await db.agent_runs.find_one({"id": run_id})
     assert doc["status"] == "complete"
     tools = [s["tool"] for s in doc["steps"]]
-    assert tools == ["crawl_urls", "run_analyzers", "generate_suggestions", "apply_to_sandbox", "verify_changes"]
+    assert tools == ["crawl_urls", "run_analyzers", "generate_suggestions", "apply_changes"]
 
 
 @pytest.mark.asyncio
@@ -324,8 +315,8 @@ async def test_max_steps_termination(monkeypatch):
         return AgentDecision(reasoning="b", tool="run_analyzers", args={"analyzers": ["page_facts"]})
 
     monkeypatch.setattr(runtime_mod, "decide", fake_decide)
-    monkeypatch.setitem(TOOL_REGISTRY["crawl_urls"], "handler", _ok_handler({"summary": {"total_pages": 1}, "page_facts": []}))
-    monkeypatch.setitem(TOOL_REGISTRY["run_analyzers"], "handler", _ok_handler({"completed": []}))
+    monkeypatch.setattr(TOOL_REGISTRY["crawl_urls"], "handler", _ok_handler({"summary": {"total_pages": 1}, "page_facts": []}))
+    monkeypatch.setattr(TOOL_REGISTRY["run_analyzers"], "handler", _ok_handler({"completed": []}))
     db, run_id = await _seed_and_run(monkeypatch, runtime_mod.AgentRuntime(), max_steps=2)
     doc = await db.agent_runs.find_one({"id": run_id})
     assert doc["status"] == "failed"
@@ -336,8 +327,8 @@ async def test_max_steps_termination(monkeypatch):
 async def test_budget_exhaustion(monkeypatch):
     from backend.services import agent_runtime as runtime_mod
 
-    monkeypatch.setitem(TOOL_REGISTRY["crawl_urls"], "credit_cost", 1.0)
-    monkeypatch.setitem(TOOL_REGISTRY["crawl_urls"], "handler", _ok_handler({"summary": {"total_pages": 1}, "page_facts": []}))
+    monkeypatch.setattr(TOOL_REGISTRY["crawl_urls"], "credit_cost", 1.0)
+    monkeypatch.setattr(TOOL_REGISTRY["crawl_urls"], "handler", _ok_handler({"summary": {"total_pages": 1}, "page_facts": []}))
     db, run_id = await _seed_and_run(monkeypatch, runtime_mod.AgentRuntime(), budget_credits=1.0)
     doc = await db.agent_runs.find_one({"id": run_id})
     assert doc["status"] == "failed"

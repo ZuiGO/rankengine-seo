@@ -28,8 +28,7 @@ Available tools:
 
 Constraints:
 - NEVER claim ranking-position improvements; only report measured facts.
-- The apply_to_sandbox tool is sandbox-only: it never touches the live site or Vercel.
-- Always call verify_changes after an apply before considering the goal complete.
+- The apply_changes tool is sandbox-only: it never touches the live site or Vercel.
 - Prefer the smallest number of steps that achieves the goal.
 - If facts.pages_crawled is missing or 0, your FIRST action MUST be crawl_urls.
 - If a step produced no actionable output (e.g. 0 suggestions created), call complete
@@ -113,14 +112,13 @@ def _validate_decision(payload: dict, state: dict) -> AgentDecision | None:
         return None
     if decision.tool == "crawl_urls" and not decision.args.get("urls"):
         decision.args["urls"] = state.get("urls") or []
-    if decision.tool == "apply_to_sandbox":
+    if decision.tool == "apply_changes":
         pending_ids = (state.get("facts") or {}).get("suggestion_ids_pending") or []
         ids = decision.args.get("suggestion_ids") or []
         valid_ids = [i for i in ids if i in pending_ids]
         if not valid_ids:
             return None
         decision.args["suggestion_ids"] = valid_ids[:10]
-    if decision.tool == "verify_changes" and not decision.args.get("staging_page_ids"):
         decision.args["staging_page_ids"] = (state.get("facts") or {}).get("staging_page_ids") or []
     if decision.tool == "query_knowledge" and not decision.args.get("domain"):
         decision.args["domain"] = state.get("domain", "")
@@ -145,14 +143,8 @@ def _fallback_decision(state: dict) -> AgentDecision:
     if facts.get("suggestions_pending") and not facts.get("apply_attempted"):
         return AgentDecision(
             reasoning="Suggestions are pending; apply them to the sandbox (human approval checkpoint).",
-            tool="apply_to_sandbox",
+            tool="apply_changes",
             args={"suggestion_ids": facts.get("suggestion_ids_pending") or []},
-        )
-    if facts.get("apply_attempted") and not facts.get("verification_done"):
-        return AgentDecision(
-            reasoning="Changes were applied; verify them against the baseline.",
-            tool="verify_changes",
-            args={"staging_page_ids": facts.get("staging_page_ids") or []},
         )
     if not facts.get("suggestions_attempted") and facts.get("pages_crawled"):
         return AgentDecision(

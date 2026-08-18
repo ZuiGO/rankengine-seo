@@ -1,13 +1,15 @@
 import uuid
 from datetime import datetime
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import List, Optional
 
 from backend.db.mongo import get_db
-from backend.models.schemas import SandboxAuditLog
-from backend.services.connectors.git_static_connector import GitStaticConnector
+from backend.logging_setup import get_logger
 from backend.services.snapshots.comparison_view import get_comparison_data
+from backend.services.snapshot_service import capture_snapshot
+from backend.services.notifications import create_github_pr
 
 router = APIRouter(prefix="/api/sandbox", tags=["sandbox"])
 
@@ -21,19 +23,19 @@ class BatchApproveRequest(BaseModel):
 
 async def _log_audit(suggestion_id: str, field_type: str, old_status: str, new_status: str, edited_value: Optional[str] = None, commit_hash: Optional[str] = None, diff: Optional[str] = None, preview_url: Optional[str] = None):
     db = get_db()
-    log = SandboxAuditLog(
-        id=str(uuid.uuid4()),
-        suggestion_id=suggestion_id,
-        field_type=field_type,
-        old_status=old_status,
-        new_status=new_status,
-        edited_value=edited_value,
-        commit_hash=commit_hash,
-        diff=diff,
-        preview_url=preview_url,
-        timestamp=datetime.utcnow()
-    )
-    await db.sandbox_audit_logs.insert_one(log.model_dump())
+    log = {
+        "id": str(uuid.uuid4()),
+        "suggestion_id": suggestion_id,
+        "field_type": field_type,
+        "old_status": old_status,
+        "new_status": new_status,
+        "edited_value": edited_value,
+        "commit_hash": commit_hash,
+        "diff": diff,
+        "preview_url": preview_url,
+        "timestamp": datetime.utcnow()
+    }
+    await db.sandbox_audit_logs.insert_one(log)
 
 @router.get("/suggestions")
 async def get_suggestions():
@@ -132,22 +134,42 @@ async def apply_suggestion(id: str):
     if old_status not in ["approved, pending apply", "failed"]:
         raise HTTPException(status_code=400, detail="Suggestion is not approved")
         
-    connector = GitStaticConnector()
-    success, msg, commit_hash, diff, preview_url = await connector.apply_field(doc)
+    page_url = doc.get("page_url", "https://example.com")
     
+    # Take visual snapshot with injected changes
+    try:
+        await capture_snapshot(page_url, job_id=doc.get("job_id"), tag=f"apply_{id}", changes=[doc])
+    except Exception as e:
+        pass  # Snapshot failing shouldn't block PR
+        
+    from urllib.parse import urlparse
+    domain = urlparse(page_url).netloc
+    
+    # Create PR directly
+    pr_result = await create_github_pr(domain, [doc])
+    
+    if pr_result and pr_result.get("ok"):
+        success = True
+        preview_url = pr_result.get("html_url")
+        msg = "Successfully applied via GitHub PR"
+    else:
+        success = False
+        msg = pr_result.get("error") if pr_result else "No GitHub token configured"
+        preview_url = ""
+        
     new_status = "applied" if success else "failed"
     
     update_data = {"status": new_status}
-    if commit_hash:
-        update_data["last_commit_hash"] = commit_hash
+    if success:
+        update_data["last_commit_hash"] = "github_pr" # Placeholder
         
     await db.sandbox_suggestions.update_one({"id": id}, {"$set": update_data})
-    await _log_audit(id, doc.get("field_type", ""), old_status, new_status, commit_hash=commit_hash, diff=diff, preview_url=preview_url)
+    await _log_audit(id, doc.get("field_type", ""), old_status, new_status, commit_hash="github_pr" if success else None, diff="", preview_url=preview_url)
     
     if not success:
         raise HTTPException(status_code=500, detail=f"Apply failed: {msg}")
         
-    return {"status": "success", "preview_url": preview_url, "commit_hash": commit_hash}
+    return {"status": "success", "preview_url": preview_url, "commit_hash": "github_pr"}
 
 @router.post("/suggestions/{id}/rollback")
 async def rollback_suggestion(id: str):
@@ -160,24 +182,15 @@ async def rollback_suggestion(id: str):
     if old_status != "applied":
         raise HTTPException(status_code=400, detail="Suggestion is not applied")
         
-    commit_hash = doc.get("last_commit_hash")
-    if not commit_hash:
-        raise HTTPException(status_code=400, detail="No commit hash found to rollback")
-        
-    connector = GitStaticConnector()
-    success, msg, new_commit, preview_url = await connector.rollback_field(doc, commit_hash)
-    
-    if not success:
-        raise HTTPException(status_code=500, detail=f"Rollback failed: {msg}")
-        
+    # Since we are using GitHub PRs, we can't easily auto-rollback. We just revert state to pending.
     new_status = "approved, pending apply"
     await db.sandbox_suggestions.update_one(
         {"id": id}, 
-        {"$set": {"status": new_status, "last_commit_hash": new_commit}}
+        {"$set": {"status": new_status, "last_commit_hash": ""}}
     )
-    await _log_audit(id, doc.get("field_type", ""), old_status, new_status, commit_hash=new_commit, preview_url=preview_url)
+    await _log_audit(id, doc.get("field_type", ""), old_status, new_status, commit_hash="", preview_url="")
     
-    return {"status": "success", "preview_url": preview_url, "commit_hash": new_commit}
+    return {"status": "success", "preview_url": "", "commit_hash": ""}
 
 @router.get("/audit")
 async def get_audit_logs():

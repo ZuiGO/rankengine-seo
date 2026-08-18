@@ -15,10 +15,10 @@ logger = get_logger("single_page_service")
 
 import groq
 
-async def generate_suggestions(title: str, h1: str, desc: str, h2: str, p_text: str) -> dict:
+async def generate_suggestions(title: str, h1: str, desc: str, h2: str, p_text: str, img_alt: str) -> dict:
     """
     Calls Groq to generate optimized versions of the given fields.
-    Returns a dictionary with keys: "title", "h1", "meta_description", "h2", "p_text".
+    Returns a dictionary with keys: "title", "h1", "meta_description", "h2", "p_text", "img_alt".
     """
     try:
         from backend.config import settings
@@ -26,21 +26,32 @@ async def generate_suggestions(title: str, h1: str, desc: str, h2: str, p_text: 
         
         client = AsyncGroq(api_key=settings.groq_api_key)
         prompt = f"""
-        You are an expert SEO optimizer. Here is the current content of a web page:
+        You are an elite, world-class SEO strategist and conversion copywriter. 
+        Your task is to completely transform the following mediocre website content into a high-octane, authoritative, and irresistible marketing asset that dominates search rankings and maximizes conversions.
+        
+        CURRENT CONTENT:
         Title: {title}
         H1 Heading: {h1}
         H2 Heading: {h2}
         Main Paragraph: {p_text}
+        Image Alt Text: {img_alt}
         Meta Description: {desc}
         
-        Please provide heavily optimized versions of these fields to improve search engine ranking and user click-through rate.
-        Make them catchy, concise, and highly relevant. For the paragraph, make it engaging.
-        Return ONLY a JSON object with keys: "title", "h1", "meta_description", "h2", "p_text".
+        INSTRUCTIONS FOR TRANSFORMATION:
+        1. Title: Make it an explosive, click-driving hook (under 60 chars) with a clear value proposition.
+        2. H1 Heading: Needs to be a commanding, definitive statement of superiority that instantly grabs attention.
+        3. H2 Heading: A powerful secondary hook focusing on unignorable benefits.
+        4. Main Paragraph: Rewrite completely to be fiercely persuasive. Focus on solving the user's deepest pain point with absolute authority. Do not sound generic!
+        5. Image Alt Text: Write a dense, highly descriptive alt text naturally packed with primary semantic keywords for Google Images ranking.
+        6. Meta Description: Craft a magnetic description (under 160 chars) that creates extreme urgency and forces the searcher to click.
+
+        IMPORTANT: Do NOT use generic placeholders or simply append words like "Premium". Actually write compelling copy!
+        Return ONLY a raw JSON object with keys: "title", "h1", "meta_description", "h2", "p_text", "img_alt".
         """
         response = await client.chat.completions.create(
             model=settings.groq_model,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
+            temperature=0.8,
             max_tokens=512,
             response_format={"type": "json_object"}
         )
@@ -49,11 +60,12 @@ async def generate_suggestions(title: str, h1: str, desc: str, h2: str, p_text: 
         logger.error("Failed to generate suggestions via Groq: %s", e)
         # Fallback to simple modifications
         return {
-            "title": f"Optimized: {title}" if title else "Optimized Title",
-            "h1": f"{h1} - Best in Class" if h1 else "Optimized Heading",
-            "h2": f"{h2} - Top Quality" if h2 else "Top Quality Section",
-            "p_text": f"Discover our industry-leading solutions. {p_text}"[:300],
-            "meta_description": f"Discover top insights for {h1}. {desc}"[:160]
+            "title": f"The Ultimate Solution: {title}" if title else "The Ultimate Solution: Industry-Leading Excellence",
+            "h1": f"Experience Unmatched Quality: {h1}" if h1 else "Experience Unmatched Quality & Performance",
+            "h2": f"Why Choose Us? {h2}" if h2 else "Why We Dominate The Market",
+            "p_text": f"Stop settling for average. Our elite, high-performance solutions are engineered to completely transform your workflow and deliver explosive growth. {p_text}"[:300],
+            "img_alt": f"High-resolution showcase of {img_alt} featuring premium design" if img_alt else "High-resolution showcase of our premium flagship product in action",
+            "meta_description": f"Don't fall behind. Discover how our cutting-edge approach to {h1} guarantees results. Click to unlock the ultimate guide. {desc}"[:160]
         }
 
 async def run_single_page_analysis(url: str, job_id: str):
@@ -86,66 +98,7 @@ async def run_single_page_analysis(url: str, job_id: str):
             )
             page = await context.new_page()
             
-            # --- DEMO INTERCEPT ---
-            # If the user enters the demo URLs, redirect to the beautiful Vercel replica instead of the ugly live legacy site!
-            actual_url = url
-            is_demo = False
-            if url.rstrip('/') in ["https://fluidcontrols.com/products/railways", "https://fluidcontrols.com"]:
-                is_demo = True
-                actual_url = "https://static-replica-7hrt4gyfa-jayesh15.vercel.app/products/railways"
-                logger.info("Demo intercept: Fetching Vercel replica %s", actual_url)
-            
-            # 1. Navigate & Capture Baseline
-            if is_demo:
-                import re, base64
-                from urllib.parse import urlparse
-                # Bypass Vercel Authentication using vercel curl
-                sandbox_path = "/Users/macbook/RankEngine-AI-Simple/sandbox/static-replica"
-                proc = await asyncio.create_subprocess_shell(
-                    f"npx vercel curl {actual_url}",
-                    cwd=sandbox_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, stderr = await proc.communicate()
-                demo_html = stdout.decode('utf-8')
-                
-                parsed_url = urlparse(actual_url)
-                origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                
-                css_links = re.findall(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+\.css)"', demo_html)
-                for css_path in css_links:
-                    try:
-                        css_proc = await asyncio.create_subprocess_shell(
-                            f"npx vercel curl {origin}{css_path}",
-                            cwd=sandbox_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                        )
-                        c_stdout, _ = await css_proc.communicate()
-                        css_content = c_stdout.decode('utf-8')
-                        link_pattern = rf'<link[^>]*href="{re.escape(css_path)}"[^>]*>'
-                        demo_html = re.sub(link_pattern, f"<style>{css_content}</style>", demo_html)
-                    except Exception as e:
-                        logger.error("Failed to inline CSS: %s", e)
-
-                img_srcs = re.findall(r'<img[^>]*src="(/[^"]+\.(?:jpg|jpeg|png|webp|svg))"', demo_html)
-                for img_path in img_srcs:
-                    try:
-                        img_proc = await asyncio.create_subprocess_shell(
-                            f"npx vercel curl {origin}{img_path}",
-                            cwd=sandbox_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                        )
-                        i_stdout, _ = await img_proc.communicate()
-                        ext = img_path.split('.')[-1].lower()
-                        mime = "image/svg+xml" if ext == "svg" else f"image/{ext}"
-                        b64 = base64.b64encode(i_stdout).decode('utf-8')
-                        data_uri = f"data:{mime};base64,{b64}"
-                        demo_html = demo_html.replace(f'src="{img_path}"', f'src="{data_uri}"')
-                    except Exception as e:
-                        logger.error("Failed to inline Image: %s", e)
-                        
-                await page.set_content(demo_html, wait_until="networkidle")
-            else:
-                await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="networkidle", timeout=30000)
             
             # Wait a bit for animations
             await asyncio.sleep(2)
@@ -169,57 +122,60 @@ async def run_single_page_analysis(url: str, job_id: str):
             p_tag = soup.find("p")
             current_p = p_tag.get_text(strip=True) if p_tag else ""
             
+            img_tag = soup.find("img")
+            current_img_alt = img_tag.get("alt", "") if img_tag else ""
+            
             desc_tag = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
             current_desc = desc_tag["content"] if desc_tag and desc_tag.has_attr("content") else ""
             
             # 2. Generate Suggestions
-            suggestions = await generate_suggestions(current_title, current_h1, current_desc, current_h2, current_p)
+            suggestions = await generate_suggestions(current_title, current_h1, current_desc, current_h2, current_p, current_img_alt)
             
             new_title = suggestions.get("title", current_title)
             new_h1 = suggestions.get("h1", current_h1)
             new_h2 = suggestions.get("h2", current_h2)
             new_p = suggestions.get("p_text", current_p)
+            new_img_alt = suggestions.get("img_alt", current_img_alt)
             new_desc = suggestions.get("meta_description", current_desc)
             
-            # 3. Apply changes locally via beautifulsoup
-            if soup.title:
-                soup.title.string = new_title
-            else:
-                new_title_tag = soup.new_tag("title")
-                new_title_tag.string = new_title
-                if soup.head:
-                    soup.head.append(new_title_tag)
+            # 3. Apply changes locally via Playwright evaluate (in-place modification preserves all CSS and layout!)
+            await page.evaluate("""
+                (data) => {
+                    if (document.title && data.title) {
+                        document.title = data.title;
+                    }
+                    const h1 = document.querySelector('h1');
+                    if (h1 && data.h1) {
+                        h1.innerText = data.h1;
+                    }
+                    const h2 = document.querySelector('h2');
+                    if (h2 && data.h2) {
+                        h2.innerText = data.h2;
+                    }
+                    const p = document.querySelector('p');
+                    if (p && data.p_text) {
+                        p.innerText = data.p_text;
+                    }
+                    const img = document.querySelector('img');
+                    if (img && data.img_alt) {
+                        img.alt = data.img_alt;
+                    }
+                    let meta = document.querySelector('meta[name="description"]');
+                    if (meta && data.meta_description) {
+                        meta.content = data.meta_description;
+                    }
+                }
+            """, {
+                "title": new_title,
+                "h1": new_h1,
+                "h2": new_h2,
+                "p_text": new_p,
+                "img_alt": new_img_alt,
+                "meta_description": new_desc
+            })
             
-            if h1_tag:
-                # Replace inner text but preserve attributes
-                h1_tag.string = new_h1
-                
-            if h2_tag:
-                h2_tag.string = new_h2
-                h2_tag["style"] = "background-color: #dcfce7; color: #166534; padding: 4px; border-radius: 4px;"
-                
-            if p_tag:
-                p_tag.string = new_p
-                p_tag["style"] = "background-color: #fef08a; padding: 4px; border-radius: 4px;"
-                
-            if desc_tag:
-                desc_tag["content"] = new_desc
-            else:
-                new_desc_tag = soup.new_tag("meta", attrs={"name": "description", "content": new_desc})
-                if soup.head:
-                    soup.head.append(new_desc_tag)
-                    
-            # Inject a <base> tag so styles load correctly when we use set_content
-            base_tag = soup.new_tag("base", href=url)
-            if soup.head:
-                soup.head.insert(0, base_tag)
-                
-            modified_html = str(soup)
-            
-            # 4. Render modified HTML and capture Post-Apply
-            # We use route interception to ensure relative assets load correctly (though <base> usually handles it)
-            await page.set_content(modified_html, wait_until="networkidle")
-            await asyncio.sleep(2)
+            # Wait briefly for rendering to settle
+            await asyncio.sleep(1)
             
             post_bytes = await page.screenshot(full_page=True, type="jpeg", quality=70)
             post_b64 = base64.b64encode(post_bytes).decode("utf-8")
@@ -257,6 +213,12 @@ async def run_single_page_analysis(url: str, job_id: str):
                         "baseline": current_p,
                         "current": new_p,
                         "status": "changed" if current_p != new_p else "unchanged"
+                    },
+                    {
+                        "field": "Image Alt Text",
+                        "baseline": current_img_alt,
+                        "current": new_img_alt,
+                        "status": "changed" if current_img_alt != new_img_alt else "unchanged"
                     },
                     {
                         "field": "Meta Description",

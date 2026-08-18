@@ -33,6 +33,7 @@ class AgentRun(BaseModel):
     id: str
     goal: str
     domain: str = ""
+    agent_type: str = "coordinator"
     job_id: str | None = None
     scope: str = "single_page"
     urls: list[str] = []
