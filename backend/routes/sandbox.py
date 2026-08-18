@@ -206,3 +206,25 @@ async def get_sandbox_comparison():
     except Exception as e:
         logger.error(f"Failed to fetch comparison data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class SinglePageRequest(BaseModel):
+    url: str
+
+@router.post("/single-page")
+async def start_single_page(payload: SinglePageRequest, background_tasks: BackgroundTasks):
+    job_id = str(uuid.uuid4())
+    from backend.services.single_page_service import run_single_page_analysis
+    background_tasks.add_task(run_single_page_analysis, payload.url, job_id)
+    return {"status": "accepted", "job_id": job_id}
+
+@router.get("/single-page/{job_id}")
+async def get_single_page_status(job_id: str):
+    db = get_db()
+    doc = await db.single_page_analyses.find_one({"job_id": job_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if "_id" in doc:
+        del doc["_id"]
+
+    return doc

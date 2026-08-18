@@ -11,6 +11,34 @@ MongoDB + Redis + Chroma + Arq worker + Playwright. Repo:
 `/Users/macbook/RankEngine-AI-Simple` (git, remote `https://github.com/ZuiGO/rankengine-seo.git`).
 
 ## Status (last update: Phase 5 Sandbox Comparison View 2026-08-13; git_static_connector tests fixed; node --check clean; pushed `22f1753`)
+- AGENT RUNTIME ROUND (pushed as one commit, see git log; services restarted via launchd):
+  - Autonomous SEO agent: `POST /api/agent/runs` (backend/routes/agent.py, models/agent_schemas.py) with
+    goal/scope/urls/budget_credits/max_steps/checkpoint_policy; arq task `agent_run` (worker.py) runs
+    `AgentRuntime.start(run_id)` (services/agent_runtime.py) — loop: build state -> planner decision
+    (services/agent_planner.py, Groq) -> tool execution (services/agent_tools.py: crawl_urls, run_analyzers,
+    generate_suggestions, apply_to_sandbox, verify_changes, read_current_state) -> fact extraction
+    (agent_memory.py: agent_runs/agent_episodes/agent_facts collections, indexes in db/mongo.py).
+    Approval gate: apply/verify steps pause as `waiting_approval` with `pending_payload`;
+    `POST /api/agent/runs/{id}/approve` resumes (checkpoint_policy=every_apply). Loop guard
+    (`_decide_with_guard`) blocks repeated identical calls unless the facts fingerprint changed.
+  - `single_page_service.py` + `POST /api/sandbox/single-page` + GET status: one-page crawl ->
+    Groq suggestions -> git_static_connector apply to the static-replica sandbox -> snapshot comparison;
+    frontend "Single Page Analysis (Demo)" button on Analyze (placeholder/chips stay privacy-safe
+    yoursite.com/example.com) -> sandbox-comparison tab auto-populated (base64 screenshots, score delta,
+    field table, history).
+  - `snapshot_service.py`: capture_snapshot runs `vercel curl` with cwd=sandbox/static-replica, injects
+    `<base href>` + inlines CSS/images (base64) so snapshots render without Vercel SSO.
+  - `git_static_connector.py`: h1 + alt_text field support (hero regexes), preview_url now appends
+    `/products/railways`; test updated.
+  - `config.py`: agent_max_steps=15, agent_default_budget=100.0, agent_checkpoint_threshold=50.0.
+  - Sandbox hardening: `sandbox/wp-docker/` docker-compose now internal-only (8090 not published) behind
+    nginx-basicauth on 8091, one-shot wpcli provision.sh (Yoast SEO), robots.txt mount, README +
+    verify_rest_api.sh; `sandbox/static-replica` gitlink bumped (769a44e, still no .gitmodules mapping).
+  - Stability fixes (same round): verify_changes result truncation fixed (strip screenshots/raw_history,
+    filter field_comparison to changed/meaningful, cap 12 x 80 chars; MAX_RESULT_CHARS 4000 -> 6000 in
+    agent_tools.py + agent_runtime.py) — live-verified seo_score {old:50,new:65,delta:15} + facts
+    seo_score_delta; full loop crawl -> analyzers -> suggest -> apply (approval) -> verify -> complete.
+  - Full test suite 409/409 passing; node --check clean.
 - PHASE 5 — PAGE-LEVEL COMPARISON VIEW:
   - `backend/services/snapshots/comparison_view.py` (NEW): `get_comparison_data()` fetches baseline
     (Phase 2) + latest (Phase 4) snapshots from `sandbox_snapshots`, builds field-by-field change table

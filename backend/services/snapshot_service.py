@@ -25,8 +25,12 @@ async def capture_snapshot(url: str, job_id: str | None = None, tag: str = "base
     html_content = ""
     try:
         # call vercel curl
+        import os
+        import pathlib
+        sandbox_path = str(pathlib.Path(__file__).resolve().parent.parent.parent / "sandbox" / "static-replica")
         result = subprocess.run(
             ["npx", "vercel", "curl", url],
+            cwd=sandbox_path,
             capture_output=True,
             text=True,
             check=True
@@ -35,6 +39,53 @@ async def capture_snapshot(url: str, job_id: str | None = None, tag: str = "base
     except subprocess.CalledProcessError as e:
         logger.error("Failed to fetch HTML via vercel curl: %s", e.stderr)
         raise
+
+    # Inject a <base> tag so relative paths resolve to the actual domain when loaded from file://
+    if "<head>" in html_content:
+        html_content = html_content.replace("<head>", f"<head>\n    <base href=\"{url}\">", 1)
+    else:
+        # Fallback if no <head> is found
+        html_content = f"<head><base href=\"{url}\"></head>\n" + html_content
+
+    # Inline CSS and images to bypass Vercel SSO for static assets when loaded locally
+    import re
+    import base64
+    from urllib.parse import urlparse
+
+    parsed_url = urlparse(url)
+    origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+    # 1. Inline CSS
+    css_links = re.findall(r'<link[^>]*rel="stylesheet"[^>]*href="([^"]+\.css)"', html_content)
+    for css_path in css_links:
+        try:
+            css_result = subprocess.run(
+                ["npx", "vercel", "curl", f"{origin}{css_path}"],
+                cwd=sandbox_path, capture_output=True, text=True, check=True
+            )
+            css_content = css_result.stdout
+            link_pattern = rf'<link[^>]*href="{re.escape(css_path)}"[^>]*>'
+            html_content = re.sub(link_pattern, f"<style>{css_content}</style>", html_content)
+        except Exception as e:
+            logger.error("Failed to inline CSS %s: %s", css_path, e)
+
+    # 2. Inline images (basic ones like the hero image)
+    img_srcs = re.findall(r'<img[^>]*src="(/[^"]+\.(?:jpg|jpeg|png|webp|svg))"', html_content)
+    for img_path in img_srcs:
+        try:
+            img_result = subprocess.run(
+                ["npx", "vercel", "curl", f"{origin}{img_path}"],
+                cwd=sandbox_path, capture_output=True, check=True
+            )
+            # determine mime type
+            ext = img_path.split('.')[-1].lower()
+            mime = "image/svg+xml" if ext == "svg" else f"image/{ext}"
+            b64 = base64.b64encode(img_result.stdout).decode("utf-8")
+            data_uri = f"data:{mime};base64,{b64}"
+            # replace src
+            html_content = html_content.replace(f'src="{img_path}"', f'src="{data_uri}"')
+        except Exception as e:
+            logger.error("Failed to inline Image %s: %s", img_path, e)
 
     # Write HTML to a temporary file
     temp_html_path = ""

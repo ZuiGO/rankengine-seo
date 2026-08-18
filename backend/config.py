@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     psi_page_sample: int = 20
     mobile_sample_pages: int = 20
     metadata_only: bool = True
+    agent_max_steps: int = 15
+    agent_default_budget: float = 100.0
+    agent_checkpoint_threshold: float = 50.0
     log_level: str = "INFO"
     log_dir: str = "logs"
 

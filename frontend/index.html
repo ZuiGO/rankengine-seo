@@ -57,6 +57,10 @@
             <span id="analyze-btn-spinner" class="analyze-btn-spinner hidden" aria-hidden="true"></span>
             <span id="analyze-btn-text">Run free site audit</span>
           </button>
+          <button type="button" id="single-page-btn" class="btn-secondary" style="margin-left:8px;" onclick="startSinglePageAnalysis(event)">
+            <span id="single-page-spinner" class="analyze-btn-spinner hidden" aria-hidden="true"></span>
+            <span id="single-page-text">Single Page Analysis (Demo)</span>
+          </button>
         </div>
         <div class="input-group" style="margin-top:10px">
           <input type="email" id="email-input" placeholder="you@example.com (optional — get the PDF report by email)" style="padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);flex:1">
@@ -982,17 +986,17 @@
           <div style="display: flex; gap: 24px; margin-bottom: 24px;">
             <div style="flex: 1;">
               <h3 style="margin-bottom: 12px; font-size: 16px;">Visual Comparison</h3>
-              <div style="display: flex; gap: 16px; overflow-x: auto; padding-bottom: 16px;">
-                <div style="flex: 1; min-width: 300px;">
-                  <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Baseline (Phase 2)</div>
-                  <div style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; max-height: 400px; overflow-y: auto;">
-                    <img id="comp-img-baseline" src="" alt="Baseline" style="width: 100%; display: block;" />
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                <div>
+                  <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Original Web Page</div>
+                  <div style="border: 1px solid var(--border-light); border-radius: 8px; overflow: hidden; background: #fff;">
+                    <img id="comp-img-baseline" src="" alt="Original Web Page" style="width: 100%; display: block;" />
                   </div>
                 </div>
-                <div style="flex: 1; min-width: 300px;">
-                  <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Current Post-Apply</div>
-                  <div style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; max-height: 400px; overflow-y: auto;">
-                    <img id="comp-img-current" src="" alt="Current" style="width: 100%; display: block;" />
+                <div>
+                  <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Applied Changes Web Page</div>
+                  <div style="border: 1px solid var(--border-light); border-radius: 8px; overflow: hidden; background: #fff;">
+                    <img id="comp-img-current" src="" alt="Applied Changes Web Page" style="width: 100%; display: block;" />
                   </div>
                 </div>
               </div>
@@ -1296,7 +1300,6 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
-
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>

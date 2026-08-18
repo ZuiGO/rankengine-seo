@@ -43,6 +43,8 @@ class GitStaticConnector(BaseConnector):
             deploy_success, preview_url = self._trigger_vercel_deploy()
             if not deploy_success:
                 return False, f"Vercel deploy failed: {preview_url}", commit_hash, diff, ""
+
+            preview_url = f"{preview_url}/products/railways"
                 
             # Snapshot
             job_id = suggestion.get("job_id")
@@ -87,6 +89,8 @@ class GitStaticConnector(BaseConnector):
             if not deploy_success:
                 return False, f"Vercel deploy failed: {preview_url}", new_commit, ""
                 
+            preview_url = f"{preview_url}/products/railways"
+
             # Snapshot
             job_id = suggestion.get("job_id")
             await capture_snapshot(preview_url, job_id, tag=f"revert_{suggestion_id}")
@@ -112,11 +116,17 @@ class GitStaticConnector(BaseConnector):
                 r"(description:\s*')[^']+(')", 
                 f"\\g<1>{new_value}\\g<2>"
             )
+        elif field_type == "h1":
+            return self._regex_replace(
+                hero_file,
+                r'<h1 className="text-4xl font-bold text-gray-900 mb-6">[^<]*</h1>',
+                f'<h1 className="text-4xl font-bold text-gray-900 mb-6">{new_value}</h1>'
+            )
         elif field_type == "alt_text":
             return self._regex_replace(
                 hero_file,
-                r'(<img[^>]+className="w-full h-64 object-cover hero-image rounded-lg"[^>]*)>',
-                f'\\1 alt="{new_value}" />'
+                r'<img\s+src="/railways-banner\.jpg"\s+className="w-full\s+h-64\s+object-cover\s+hero-image\s+rounded-lg"\s+alt="[^"]*"\s*/>',
+                f'<img src="/railways-banner.jpg" className="w-full h-64 object-cover hero-image rounded-lg" alt="{new_value}" />'
             )
         elif field_type == "footer_copyright":
             # Search for anything matching &copy; ... Fluid Controls Limited

@@ -1687,6 +1687,11 @@ function renderApplyGuide(guide) {
   card.innerHTML = `<pre style="white-space:pre-wrap;font-family:monospace;font-size:12px;line-height:1.6;margin:0;max-height:420px;overflow:auto">${safe}</pre>`;
 }
 
+document.getElementById("apply-sandbox-btn")?.addEventListener("click", () => {
+  const tab = document.querySelector('.tab[data-tab="sandbox-approvals"]');
+  if (tab) tab.click();
+});
+
 document.getElementById("apply-changes-btn")?.addEventListener("click", async () => {
   if (!currentJobId) return;
   if (!confirm("Apply approved SEO changes? Approved content is sent to GitHub as a pull request (or you get an in-repo guide to apply manually).")) return;
@@ -4343,7 +4348,6 @@ async function loadSandboxComparison() {
           <div style="font-size: 13px; margin-bottom: 4px; font-family: monospace;">
             Commit: ${h.commit_hash || 'None'}
           </div>
-          ${h.preview_url ? `<a href="${h.preview_url}" target="_blank" style="font-size: 13px; color: var(--accent); text-decoration: none;">View Vercel Preview ↗</a>` : ''}
         `;
         historyContainer.appendChild(item);
       }
@@ -4363,6 +4367,169 @@ async function loadSandboxComparison() {
 // Remove the bad hook
 
 
+let isSinglePageAnalysisActive = false;
+
 document.querySelector('.tab[data-tab="sandbox-comparison"]').addEventListener('click', () => {
-  loadSandboxComparison();
+  if (!isSinglePageAnalysisActive) {
+    loadSandboxComparison();
+  }
 });
+
+async function startSinglePageAnalysis(event) {
+  event.preventDefault();
+  const urlInput = document.getElementById('url-input').value.trim();
+  if (!urlInput) {
+    showToast("Please enter a URL first", true);
+    return;
+  }
+
+  const btn = document.getElementById('single-page-btn');
+  const spinner = document.getElementById('single-page-spinner');
+  const text = document.getElementById('single-page-text');
+
+  btn.disabled = true;
+  spinner.classList.remove('hidden');
+  text.textContent = "Analyzing & Applying AI...";
+
+  try {
+    const res = await fetch('/api/sandbox/single-page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: urlInput })
+    });
+
+    if (!res.ok) throw new Error("Failed to start analysis");
+
+    const { job_id } = await res.json();
+
+    // Poll for completion
+    const interval = setInterval(async () => {
+      try {
+        const pollRes = await fetch(`/api/sandbox/single-page/${job_id}`);
+        if (pollRes.ok) {
+          const pollData = await pollRes.json();
+          if (pollData.status === 'completed') {
+            clearInterval(interval);
+            btn.disabled = false;
+            spinner.classList.add('hidden');
+            text.textContent = "Single Page Analysis (Demo)";
+
+            isSinglePageAnalysisActive = true;
+
+            // Populate comparison tab
+            populateComparisonTab(pollData.comparison);
+
+            // Show results section
+            document.getElementById('results-section').classList.remove('hidden');
+            document.getElementById('input-section').classList.add('hidden');
+            document.getElementById('results-url').textContent = "Single Page Analysis";
+            document.getElementById('results-status').textContent = urlInput;
+            setDashboardVisible(true);
+            document.body.classList.add("jobless"); // Hide right rail for cleaner look
+
+            // Switch to tab
+            switchTab('sandbox-comparison');
+
+            // Reset flag after switching so that subsequent manual clicks fetch normally
+            setTimeout(() => {
+              isSinglePageAnalysisActive = false;
+            }, 500);
+          } else if (pollData.status === 'failed') {
+            clearInterval(interval);
+            throw new Error(pollData.error || "Analysis failed");
+          }
+        }
+      } catch (err) {
+        clearInterval(interval);
+        throw err;
+      }
+    }, 2000);
+
+  } catch (err) {
+    showToast(err.message, true);
+    btn.disabled = false;
+    spinner.classList.add('hidden');
+    text.textContent = "Single Page Analysis (Demo)";
+  }
+}
+
+function populateComparisonTab(data) {
+  const loading = document.getElementById('sandbox-comparison-loading');
+  const error = document.getElementById('sandbox-comparison-error');
+  const content = document.getElementById('sandbox-comparison-content');
+
+  loading.style.display = 'none';
+  error.classList.add('hidden');
+  content.classList.remove('hidden');
+
+  document.getElementById('comp-img-baseline').src = `data:image/jpeg;base64,${data.visuals.baseline_b64}`;
+  document.getElementById('comp-img-current').src = `data:image/jpeg;base64,${data.visuals.current_b64}`;
+
+  document.getElementById('comp-score-old').textContent = data.seo_score.baseline;
+  document.getElementById('comp-score-new').textContent = data.seo_score.current;
+
+  const delta = data.seo_score.current - data.seo_score.baseline;
+  const deltaEl = document.getElementById('comp-score-delta');
+  if (delta > 0) {
+    deltaEl.textContent = `+${delta} Points`;
+    deltaEl.style.background = '#dcfce7';
+    deltaEl.style.color = '#166534';
+  } else if (delta < 0) {
+    deltaEl.textContent = `${delta} Points`;
+    deltaEl.style.background = '#fee2e2';
+    deltaEl.style.color = '#991b1b';
+  } else {
+    deltaEl.textContent = 'No Change';
+    deltaEl.style.background = '#f3f4f6';
+    deltaEl.style.color = '#374151';
+  }
+
+  const tbody = document.getElementById('comp-fields-tbody');
+  tbody.innerHTML = '';
+
+  for (const f of data.fields) {
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--border-color)';
+
+    const isChanged = f.status === 'changed';
+    const badgeColor = isChanged ? '#dcfce7' : '#f3f4f6';
+    const badgeTextColor = isChanged ? '#166534' : '#374151';
+    const statusText = isChanged ? 'Changed' : 'Unchanged';
+    const diffStyle = isChanged ? 'background:#dcfce7; padding:2px 4px; border-radius:4px;' : '';
+
+    tr.innerHTML = `
+      <td style="padding: 12px 16px; font-weight: 500; text-transform: capitalize;">${f.field.replace('_', ' ')}</td>
+      <td style="padding: 12px 16px; color: var(--text-muted); font-size: 13px;">${escapeHtml(f.baseline || 'None')}</td>
+      <td style="padding: 12px 16px; font-size: 13px;"><span style="${diffStyle}">${escapeHtml(f.current || 'None')}</span></td>
+      <td style="padding: 12px 16px;">
+        <span style="background:${badgeColor}; color:${badgeTextColor}; padding:4px 8px; border-radius:12px; font-size:12px; font-weight:500;">
+          ${statusText}
+        </span>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  const historyContainer = document.getElementById('comp-raw-history');
+  historyContainer.innerHTML = '';
+  for (const h of data.history) {
+    const item = document.createElement('div');
+    item.style.padding = '12px';
+    item.style.background = 'white';
+    item.style.border = '1px solid var(--border-color)';
+    item.style.borderRadius = '6px';
+
+    const dateStr = h.date ? new Date(h.date).toLocaleString() : 'Unknown';
+
+    item.innerHTML = `
+      <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">${dateStr}</div>
+      <div style="font-weight: 500; font-size: 14px; margin-bottom: 8px;">
+        ✅ ${h.action}
+      </div>
+      <div style="font-size: 13px; margin-bottom: 4px; font-family: monospace;">
+        Commit: ${h.commit_hash || 'None'}
+      </div>
+    `;
+    historyContainer.appendChild(item);
+  }
+}

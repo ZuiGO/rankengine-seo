@@ -37,8 +37,13 @@ async def competitor_audit(ctx, target_job_id: str, competitors: list[str]):
     await run_competitor_pipeline(target_job_id, competitors)
 
 
+async def agent_run(ctx, run_id: str):
+    from backend.services.agent_runtime import AgentRuntime
+    await AgentRuntime().start(run_id)
+
+
 class WorkerSettings:
-    functions = [analyze_job, approve_all_batch, keyword_check, competitor_audit]
+    functions = [analyze_job, approve_all_batch, keyword_check, competitor_audit, agent_run]
     redis_settings = redis_settings()
     on_startup = startup
     on_shutdown = shutdown

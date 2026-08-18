@@ -25,6 +25,11 @@ async def ensure_indexes():
         await coll.create_index(
             [("job_id", 1), ("content_type", 1), ("source_url", 1)], unique=True, name="content_item_uniq"
         )
+    await db.agent_runs.create_index("created_at")
+    await db.agent_runs.create_index("status")
+    await db.agent_episodes.create_index("run_id", unique=True)
+    await db.agent_episodes.create_index([("domain", 1), ("started_at", -1)])
+    await db.agent_facts.create_index([("domain", 1), ("fact_key", 1)], unique=True)
 
 
 async def close_db():

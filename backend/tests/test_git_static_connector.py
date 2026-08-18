@@ -47,7 +47,7 @@ async def test_apply_title_change():
 
     assert success, f"Expected success but got error: {error}"
     assert commit == "abc123"
-    assert preview == "https://vercel.preview"
+    assert preview == "https://vercel.preview/products/railways"
 
 
 # ------------------------------------------------------------------
